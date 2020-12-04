@@ -62,14 +62,17 @@ pub trait Session: Any + sealed::Session {
 /// protocols is `Session`.
 pub trait AllSession: sealed::AllSession {
     type AllDual;
+    type Arity: Unary;
 }
 
 impl AllSession for () {
     type AllDual = ();
+    type Arity = Z;
 }
 
 impl<P: Session, Ps: AllSession> AllSession for (P, Ps) {
     type AllDual = (P::Dual, Ps::AllDual);
+    type Arity = S<Ps::Arity>;
 }
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
@@ -77,12 +80,10 @@ impl<P: Session, Ps: AllSession> AllSession for (P, Ps) {
 /// protocols.
 pub trait Select<N>: sealed::Select<N> {
     type Selected;
-    const DISCRIMINANT: usize;
 }
 
 impl<T, S> Select<Z> for (T, S) {
     type Selected = T;
-    const DISCRIMINANT: usize = 0;
 }
 
 impl<T, P, N> Select<S<N>> for (T, (P, ()))
@@ -90,7 +91,6 @@ where
     (P, ()): Select<N>,
 {
     type Selected = <(P, ()) as Select<N>>::Selected;
-    const DISCRIMINANT: usize = <(P, ()) as Select<N>>::DISCRIMINANT + 1;
 }
 
 /// A bidirectional communications channel sending outgoing messages via the `Tx` connection and
@@ -191,12 +191,12 @@ impl<'a, Tx: Transmit<usize>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E>
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending the choice.
     #[must_use]
-    pub async fn choose<N>(mut self) -> Result<Chan<Tx, Rx, Ps::Selected, E>, Tx::Error>
+    pub async fn choose<N: Unary>(mut self) -> Result<Chan<Tx, Rx, Ps::Selected, E>, Tx::Error>
     where
         Ps: Select<N>,
         Ps::Selected: Session,
     {
-        match self.tx().send(&Ps::DISCRIMINANT).await {
+        match self.tx().send(&N::VALUE).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -259,16 +259,26 @@ impl<'a, Tx, Rx: Receive<usize>, P: Session, Ps: AllSession, E> Chan<Tx, Rx, Off
     /// an error while receiving.
     #[must_use]
     pub async fn offer(self) -> Result<Branches<Tx, Rx, (P, Ps), E>, Rx::Error> {
-        println!("offer");
         let (tx, mut rx) = self.unwrap();
         match rx.recv().await {
-            Ok(variant) => Ok(Branches {
-                variant,
-                tx,
-                rx,
-                protocols: PhantomData,
-                environment: PhantomData,
-            }),
+            Ok(variant) if variant < <<(P, Ps) as AllSession>::Arity as Unary>::VALUE => {
+                Ok(Branches {
+                    variant,
+                    tx,
+                    rx,
+                    protocols: PhantomData,
+                    environment: PhantomData,
+                })
+            }
+            Ok(variant) => {
+                panic!(
+                    "Out-of-range discriminant {} in `Chan::offer` (expected at most {}): \
+                        this is always because the other party did not follow the dual of this \
+                        session",
+                    variant,
+                    <<(P, Ps) as AllSession>::Arity as Unary>::VALUE - 1
+                )
+            }
             Err(err) => Err(err),
         }
     }
