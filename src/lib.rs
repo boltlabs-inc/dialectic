@@ -241,10 +241,16 @@ impl<'a, Tx, Rx, P: Session, Ps: AllSession, E> Branches<Tx, Rx, (P, Ps), E> {
 }
 
 impl<'a, Tx, Rx, E> Branches<Tx, Rx, (), E> {
-    /// It is impossible to construct a `Branches` with no options; this function eliminates that
-    /// case.
+    /// Attempt to eliminate an empty [`Branches`].
+    ///
+    /// # Panics
+    ///
+    /// If these `Branches` originated from the other party using [`Chan::choose`] on a *different*
+    /// session type than the dual to the one offered via [`Chan::offer`], that party could select
+    /// an option whose index is not handled by this set of `Branches`. In this case,
+    /// [`Branches::case`] on an empty `Branches` will panic.
     pub fn empty_case<T>(self) -> T {
-        unreachable!("Impossible case on non-constructible empty `Branches`")
+        panic!("Received discriminant out of expected range in `Chan::offer`: this is always because the other party did not follow the dual of this channel's session type")
     }
 }
 
@@ -261,24 +267,13 @@ impl<'a, Tx, Rx: Receive<usize>, P: Session, Ps: AllSession, E> Chan<Tx, Rx, Off
     pub async fn offer(self) -> Result<Branches<Tx, Rx, (P, Ps), E>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         match rx.recv().await {
-            Ok(variant) if variant < <<(P, Ps) as AllSession>::Arity as Unary>::VALUE => {
-                Ok(Branches {
-                    variant,
-                    tx,
-                    rx,
-                    protocols: PhantomData,
-                    environment: PhantomData,
-                })
-            }
-            Ok(variant) => {
-                panic!(
-                    "Out-of-range discriminant {} in `Chan::offer` (expected at most {}): \
-                        this is always because the other party did not follow the dual of this \
-                        session",
-                    variant,
-                    <<(P, Ps) as AllSession>::Arity as Unary>::VALUE - 1
-                )
-            }
+            Ok(variant) => Ok(Branches {
+                variant,
+                tx,
+                rx,
+                protocols: PhantomData,
+                environment: PhantomData,
+            }),
             Err(err) => Err(err),
         }
     }
@@ -292,17 +287,26 @@ macro_rules! branches {
     ) => (
         match $crate::Branches::case($branch) {
             std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::branches!{ $branch, $chan, $($t)+ }
+            std::result::Result::Err($branch) => $crate::branches!{ $branch, $chan, $($t)+ },
         }
     );
     (
-        $branch:ident, $chan:ident, $code:expr $(,)?
+        $branch:ident, $chan:ident, ? => $empty:expr $(,)?
     ) => (
-        match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch)
+        {
+            let _: $crate::Branches<_, _, (), _> = $branch;
+            $empty
         }
-    )
+    );
+    // (
+    //     $branch:ident, $chan:ident, $code:expr $(,)?
+    // ) =>
+    // (
+    //     match $crate::Branches::case($branch) {
+    //         std::result::Result::Ok($chan) => $code,
+    //         std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
+    //     }
+    // )
 }
 
 #[macro_export]
