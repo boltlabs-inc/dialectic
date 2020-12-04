@@ -280,7 +280,7 @@ macro_rules! branches {
     (
         $branch:ident, $chan:ident, $code:expr, $($t:tt)+
     ) => (
-        match $crate::wire::session::Branches::case($branch) {
+        match $crate::Branches::case($branch) {
             std::result::Result::Ok($chan) => $code,
             std::result::Result::Err($branch) => $crate::branches!{ $branch, $chan, $($t)+ }
         }
@@ -288,9 +288,9 @@ macro_rules! branches {
     (
         $branch:ident, $chan:ident, $code:expr $(,)?
     ) => (
-        match $crate::wire::session::Branches::case($branch) {
+        match $crate::Branches::case($branch) {
             std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::wire::session::Branches::empty_case($branch)
+            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch)
         }
     )
 }
@@ -301,7 +301,7 @@ macro_rules! offer {
         $chan:ident => $($t:tt)*
     ) => (
         {
-            let b = $crate::wire::session::Chan::offer($chan).await?;
+            let b = $crate::Chan::offer($chan).await?;
             $crate::branches!{ b, $chan, $($t)* }
         }
     )
