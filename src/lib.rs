@@ -215,24 +215,39 @@ impl<'a, Tx: Transmit<usize>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E>
 #[must_use]
 pub struct Branches<Tx, Rx, Ps: AllSession, E = ()> {
     variant: usize,
-    tx: Tx,
-    rx: Rx,
+    tx: Option<Tx>, // never `None` unless in the body of `case` or `drop`
+    rx: Option<Rx>, // never `None` unless in the body of `case` or `drop`
     protocols: PhantomData<Ps>,
     environment: PhantomData<E>,
+}
+
+impl<Tx, Rx, Ps: AllSession, E> Drop for Branches<Tx, Rx, Ps, E> {
+    fn drop(&mut self) {
+        let mut this = std::mem::ManuallyDrop::new(self);
+        drop(this.rx.take());
+        drop(this.tx.take());
+        if TypeId::of::<Ps>() != TypeId::of::<()>() {
+            panic!("Branches of offered protocols dropped before finishing the session (use `Branches::case` and `Branches::empty_case` or the `offer!` macro to eliminate branches)")
+        }
+    }
 }
 
 impl<'a, Tx, Rx, P: Session, Ps: AllSession, E> Branches<Tx, Rx, (P, Ps), E> {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
     #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(self) -> Result<Chan<Tx, Rx, P, E>, Branches<Tx, Rx, Ps, E>> {
-        if self.variant == 0 {
-            Ok(unsafe { Chan::with_env(self.tx, self.rx) })
+    pub fn case(mut self) -> Result<Chan<Tx, Rx, P, E>, Branches<Tx, Rx, Ps, E>> {
+        let variant = self.variant;
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
+        let _ = std::mem::ManuallyDrop::new(self);
+        if variant == 0 {
+            Ok(unsafe { Chan::with_env(tx, rx) })
         } else {
             Err(Branches {
-                variant: self.variant - 1,
-                tx: self.tx,
-                rx: self.rx,
+                variant: variant - 1,
+                tx: Some(tx),
+                rx: Some(rx),
                 protocols: PhantomData,
                 environment: PhantomData,
             })
@@ -269,44 +284,14 @@ impl<'a, Tx, Rx: Receive<usize>, P: Session, Ps: AllSession, E> Chan<Tx, Rx, Off
         match rx.recv().await {
             Ok(variant) => Ok(Branches {
                 variant,
-                tx,
-                rx,
+                tx: Some(tx),
+                rx: Some(rx),
                 protocols: PhantomData,
                 environment: PhantomData,
             }),
             Err(err) => Err(err),
         }
     }
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! branches {
-    (
-        $branch:ident, $chan:ident, $code:expr, $($t:tt)+
-    ) => (
-        match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::branches!{ $branch, $chan, $($t)+ },
-        }
-    );
-    (
-        $branch:ident, $chan:ident, ? => $empty:expr $(,)?
-    ) => (
-        {
-            let _: $crate::Branches<_, _, (), _> = $branch;
-            $empty
-        }
-    );
-    // (
-    //     $branch:ident, $chan:ident, $code:expr $(,)?
-    // ) =>
-    // (
-    //     match $crate::Branches::case($branch) {
-    //         std::result::Result::Ok($chan) => $code,
-    //         std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
-    //     }
-    // )
 }
 
 #[macro_export]
@@ -316,9 +301,33 @@ macro_rules! offer {
     ) => (
         {
             let b = $crate::Chan::offer($chan).await?;
-            $crate::branches!{ b, $chan, $($t)* }
+            $crate::offer!{@branches b, $chan, $($t)* }
         }
-    )
+    );
+    (
+        @branches $branch:ident, $chan:ident, $code:expr, $($t:tt)+
+    ) => (
+        match $crate::Branches::case($branch) {
+            std::result::Result::Ok($chan) => $code,
+            std::result::Result::Err($branch) => $crate::offer!{@branches $branch, $chan, $($t)+ },
+        }
+    );
+    (
+        @branches $branch:ident, $chan:ident, ? => $empty:expr $(,)?
+    ) => (
+        {
+            let _: $crate::Branches<_, _, (), _> = $branch;
+            $empty
+        }
+    );
+    // This is commented out to force the user to handle the bad-discriminant case.
+    // It could be re-enabled (perhaps in a differently-named macro?) if this becomes cumbersome.
+    // (
+    //     @branches $branch:ident, $chan:ident, ? $(,)?
+    // ) =>
+    // (
+    //     $crate::Branches::empty_case($branch)
+    // )
 }
 
 /// A placeholder for a missing transmit or receive end of a connection.
