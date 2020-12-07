@@ -126,7 +126,7 @@ impl<Tx, Rx, P: Session> Chan<Tx, Rx, P> {
     }
 }
 
-impl<Tx, Rx> Chan<Tx, Rx, End> {
+impl<Tx, Rx, E> Chan<Tx, Rx, End, E> {
     /// Close a finished session, returning the wrapped connections used during the session.
     ///
     /// This function does not do cleanup on the actual underlying connections; they are passed back
@@ -414,6 +414,37 @@ where
         unsafe { self.cast() }
     }
 }
+
+#[macro_export]
+macro_rules! loop_ {
+    ($chan:ident => $($t:tt)*) => {
+        {
+            let mut $chan = $crate::Chan::enter($chan);
+            loop {
+                let c = { $($t)* };
+                $chan = Chan::recur(c);
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! for_ {
+    ($x:pat in $e:expr, $chan:ident => $($t:tt)*) => {
+        let mut $chan = $crate::Chan::enter($chan);
+        for $x in $e {
+            let c = { $($t)* };
+            $chan = Chan::recur(c);
+        }
+        let $chan = $chan;
+    }
+}
+
+// TODO: while, while let, optional labels
+
+// ----------------------------------------------------------------
+// Internal-only functions on channels, not part of public API
+// ----------------------------------------------------------------
 
 impl<Tx, Rx, P: Session, E> Chan<Tx, Rx, P, E> {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
