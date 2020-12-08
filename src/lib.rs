@@ -1,139 +1,14 @@
-use async_trait::async_trait;
 use std::{
     any::{Any, TypeId},
-    future::Future,
     marker::{self, PhantomData},
     sync::Arc,
 };
 
+pub use backend::*;
 pub use types::*;
 
+pub mod backend;
 pub mod types;
-
-pub trait CallingConvention: sealed::CallingConvention {}
-impl CallingConvention for Val {}
-impl CallingConvention for Ref {}
-impl CallingConvention for Mut {}
-
-pub trait CallBy<'a, Convention: CallingConvention> {
-    type Type;
-}
-
-pub struct Val;
-
-impl<'a, T> CallBy<'a, Val> for T {
-    type Type = T;
-}
-
-pub struct Ref;
-
-impl<'a, T: 'a> CallBy<'a, Ref> for T {
-    type Type = &'a T;
-}
-
-pub struct Mut;
-
-impl<'a, T: 'a> CallBy<'a, Mut> for T {
-    type Type = &'a mut T;
-}
-
-/// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
-/// type `T` by [`Value`], [`Ref`], or [`Mut`], depending on the calling convention specified.
-pub trait Transmit<'a, T, Convention: CallingConvention>
-where
-    T: CallBy<'a, Convention>,
-    <T as CallBy<'a, Convention>>::Type: marker::Send,
-{
-    /// The type of possible errors when sending.
-    type Error;
-
-    /// The type of future returned by [`Transmit::Send`].
-    type Future: Future<Output = Result<(), Self::Error>>;
-
-    /// Send a message.
-    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future;
-}
-
-impl<'a, T, C, Convention> Transmit<'a, T, Convention> for &'_ mut C
-where
-    C: Transmit<'a, T, Convention>,
-    Convention: CallingConvention,
-    T: CallBy<'a, Convention>,
-    <T as CallBy<'a, Convention>>::Type: marker::Send,
-    T: marker::Send + 'a,
-{
-    type Error = C::Error;
-    type Future = C::Future;
-
-    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future {
-        (**self).send(message)
-    }
-}
-
-/// If something is `Receive<T>`, we can use it to [`Receive::recv`] a message of type `T`.
-#[async_trait]
-pub trait Receive<T> {
-    /// The type of possible errors when receiving.
-    type Error;
-
-    /// Receive a message. This may require type annotations for disambiguation.
-    async fn recv(&mut self) -> Result<T, Self::Error>;
-}
-
-#[async_trait]
-impl<T: 'static, C: Receive<T> + marker::Send> Receive<T> for &'_ mut C {
-    type Error = C::Error;
-
-    async fn recv(&mut self) -> Result<T, Self::Error> {
-        (**self).recv().await
-    }
-}
-
-/// A session type describes the sequence of operations performed by one end of a bidirectional
-/// [`Chan`]. Each session type has a [`Session::Dual`], the type of the corresponding client on the
-/// other side of the channel. The sealed trait `Session` enumerates these types, and provides the
-/// dual of each.
-pub trait Session: Any + sealed::Session {
-    /// The dual to this session type, i.e. the session type required of the other end of the
-    /// channel.
-    type Dual;
-}
-
-/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
-/// protocols. The sealed `AllSession` trait ensures that every protocol in a type level list of
-/// protocols is `Session`.
-pub trait AllSession: sealed::AllSession {
-    type AllDual;
-    type Arity: Unary;
-}
-
-impl AllSession for () {
-    type AllDual = ();
-    type Arity = Z;
-}
-
-impl<P: Session, Ps: AllSession> AllSession for (P, Ps) {
-    type AllDual = (P::Dual, Ps::AllDual);
-    type Arity = S<Ps::Arity>;
-}
-
-/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
-/// protocols. The sealed `Select` trait describes what it means to index into a type level list of
-/// protocols.
-pub trait Select<N>: sealed::Select<N> {
-    type Selected;
-}
-
-impl<T, S> Select<Z> for (T, S) {
-    type Selected = T;
-}
-
-impl<T, P, N> Select<S<N>> for (T, (P, ()))
-where
-    (P, ()): Select<N>,
-{
-    type Selected = <(P, ()) as Select<N>>::Selected;
-}
 
 /// A bidirectional communications channel sending outgoing messages via the `Tx` connection and
 /// receiving incoming messages via the `Rx` connection, whose future session behavior is determined
@@ -159,9 +34,9 @@ impl<Tx, Rx, P: Session> Chan<Tx, Rx, P> {
     /// Given a transmitting and receiving end of an un-session-typed connection, create a new
     /// channel for the protocol `P.`
     ///
-    /// Because `&mut Tx` and `&mut Rx` are `Transmit` and `Receive` if `Tx` and `Rx` are `Transmit`
-    /// and `Receive` respectively, a `Chan` does not need to own its connections; a mutable
-    /// reference or an owned type work equally well as inputs to [`Chan::new`].
+    /// Because `&mut Tx` and `&mut Rx` are [`Transmit`] and [`Receive`] if `Tx` and `Rx` are
+    /// [`Transmit`] and `Receive` respectively, a [`Chan`] does not need to own its connections; a
+    /// mutable reference or an owned type work equally well as inputs to [`Chan::new`].
     #[must_use]
     pub fn new(tx: Tx, rx: Rx) -> Chan<Tx, Rx, P> {
         unsafe { Chan::with_env(tx, rx) }
@@ -179,6 +54,7 @@ impl<Tx, Rx, E> Chan<Tx, Rx, End, E> {
     }
 }
 
+// This `Drop` implementation panics if the session isn't over.
 impl<Tx, Rx, P: Session, E> Drop for Chan<Tx, Rx, P, E> {
     fn drop(&mut self) {
         let mut this = std::mem::ManuallyDrop::new(self);
@@ -193,6 +69,8 @@ impl<Tx, Rx, P: Session, E> Drop for Chan<Tx, Rx, P, E> {
 impl<'a, Tx, Rx: Receive<T>, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Recv<T, P>, E> {
     /// Receive something of type `T` on the channel, returning the pair of the received object and
     /// the channel.
+    ///
+    /// # Errors
     ///
     /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
     /// an error while receiving.
@@ -210,6 +88,13 @@ impl<'a, Tx, Rx: Receive<T>, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, 
 
 impl<'a, Tx, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Send<T, P>, E> {
     /// Send something of type `T` on the channel, returning the channel.
+    ///
+    /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
+    /// [`CallingConvention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
+    /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val>(1)` or
+    /// `chan.send::<Ref>(&true)`.
+    ///
+    /// # Errors
     ///
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending.
@@ -237,6 +122,8 @@ impl<'a, Tx: Transmit<'static, usize, Val>, Rx, E, Ps: AllSession> Chan<Tx, Rx, 
     /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
     /// channel.
+    ///
+    /// # Errors
     ///
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending the choice.
@@ -323,8 +210,11 @@ impl<'a, Tx, Rx: Receive<usize>, P: Session, Ps: AllSession, E> Chan<Tx, Rx, Off
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// by sending a number which protocol to proceed with.
     ///
-    /// It's recommended to use the `offer!` macro to simultaneously offer options and handle them,
-    /// which has the benefit of ensuring at compile time that no case is left unhandled.
+    /// It's recommended to use the [`offer!`](crate::offer) macro to simultaneously offer options
+    /// and handle them, which has the benefit of ensuring at compile time that no case is left
+    /// unhandled.
+    ///
+    /// # Errors
     ///
     /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
     /// an error while receiving.
@@ -561,9 +451,4 @@ mod sealed {
     pub trait Select<N> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, N> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
-
-    pub trait CallingConvention {}
-    impl CallingConvention for Val {}
-    impl CallingConvention for Ref {}
-    impl CallingConvention for Mut {}
 }
