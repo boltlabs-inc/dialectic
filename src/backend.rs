@@ -34,7 +34,6 @@ where
     Convention: CallingConvention,
     T: CallBy<'a, Convention>,
     <T as CallBy<'a, Convention>>::Type: Send,
-    T: Send + 'a,
 {
     type Error = C::Error;
     type Future = C::Future;
