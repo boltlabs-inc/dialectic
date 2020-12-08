@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use std::{
     any::{Any, TypeId},
+    future::Future,
     marker::{self, PhantomData},
     sync::Arc,
 };
@@ -9,22 +10,67 @@ pub use types::*;
 
 pub mod types;
 
-/// If something is `Transmit<T>`, we can use it to [`Transmit::send`] a message of type `T`.
-#[async_trait]
-pub trait Transmit<T> {
+pub trait Calling: sealed::Calling {}
+impl Calling for Val {}
+impl Calling for Ref {}
+impl Calling for Mut {}
+
+pub trait By<'a, Convention: Calling> {
+    type Type;
+}
+
+pub struct Val;
+
+impl<'a, T> By<'a, Val> for T {
+    type Type = T;
+}
+
+pub struct Ref;
+
+impl<'a, T: 'a> By<'a, Ref> for T {
+    type Type = &'a T;
+}
+
+pub struct Mut;
+
+impl<'a, T: 'a> By<'a, Mut> for T {
+    type Type = &'a mut T;
+}
+
+// TODO: don't use async_trait here!
+
+/// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
+/// type `T` by [`Value`], [`Ref`], or [`Mut`], depending on the calling convention specified.
+pub trait Transmit<'a, T, Convention: Calling = Val>
+where
+    T: By<'a, Convention>,
+    <T as By<'a, Convention>>::Type: marker::Send,
+{
     /// The type of possible errors when sending.
     type Error;
 
+    /// The type of future returned by [`Transmit::Send`].
+    type Future: Future<Output = Result<(), Self::Error>>;
+
     /// Send a message.
-    async fn send(&mut self, message: &T) -> Result<(), Self::Error>;
+    fn send(&mut self, message: <T as By<'a, Convention>>::Type) -> Self::Future;
 }
 
-#[async_trait]
-impl<T: Sync, C: Transmit<T> + marker::Send> Transmit<T> for &'_ mut C {
+impl<
+        'a,
+        T: marker::Send + 'a,
+        Convention: Calling,
+        C: Transmit<'a, T, Convention> + marker::Send,
+    > Transmit<'a, T, Convention> for &'_ mut C
+where
+    T: By<'a, Convention>,
+    <T as By<'a, Convention>>::Type: marker::Send,
+{
     type Error = C::Error;
+    type Future = C::Future;
 
-    async fn send(&mut self, message: &T) -> Result<(), Self::Error> {
-        (**self).send(message).await
+    fn send(&mut self, message: <T as By<'a, Convention>>::Type) -> Self::Future {
+        (**self).send(message)
     }
 }
 
@@ -166,13 +212,21 @@ impl<'a, Tx, Rx: Receive<T>, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, 
     }
 }
 
-impl<'a, Tx: Transmit<T>, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Send<T, P>, E> {
+impl<'a, Tx, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Send<T, P>, E> {
     /// Send something of type `T` on the channel, returning the channel.
     ///
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending.
     #[must_use]
-    pub async fn send(mut self, message: &T) -> Result<Chan<Tx, Rx, P, E>, Tx::Error> {
+    pub async fn send<Convention: Calling>(
+        mut self,
+        message: <T as By<'a, Convention>>::Type,
+    ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<'a, T, Convention>>::Error>
+    where
+        Tx: Transmit<'a, T, Convention>,
+        T: By<'a, Convention>,
+        <T as By<'a, Convention>>::Type: marker::Send,
+    {
         match self.tx().send(message).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
@@ -183,7 +237,7 @@ impl<'a, Tx: Transmit<T>, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx,
     }
 }
 
-impl<'a, Tx: Transmit<usize>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E> {
+impl<'a, Tx: Transmit<'static, usize, Val>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E> {
     /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
     /// channel.
@@ -196,7 +250,7 @@ impl<'a, Tx: Transmit<usize>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E>
         Ps: Select<N>,
         Ps::Selected: Session,
     {
-        match self.tx().send(&N::VALUE).await {
+        match self.tx().send(N::VALUE).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -460,7 +514,7 @@ impl<Tx, Rx, P: Session, E> Chan<Tx, Rx, P, E> {
 }
 
 mod sealed {
-    use super::{Choose, End, Loop, Offer, Recur, Recv, Send, Split, S, Z};
+    use super::*;
     use std::{any::Any, marker};
 
     pub trait Session: marker::Send + Any {}
@@ -480,4 +534,9 @@ mod sealed {
     pub trait Select<N> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, N> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
+
+    pub trait Calling {}
+    impl Calling for Val {}
+    impl Calling for Ref {}
+    impl Calling for Mut {}
 }
