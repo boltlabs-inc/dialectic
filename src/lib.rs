@@ -16,14 +16,14 @@ pub trait Transmit<T> {
     type Error;
 
     /// Send a message.
-    async fn send(&mut self, message: &T) -> Result<(), Self::Error>;
+    async fn send(&mut self, message: T) -> Result<(), Self::Error>;
 }
 
 #[async_trait]
-impl<T: Sync, C: Transmit<T> + marker::Send> Transmit<T> for &'_ mut C {
+impl<T: marker::Send + 'static, C: Transmit<T> + marker::Send> Transmit<T> for &'_ mut C {
     type Error = C::Error;
 
-    async fn send(&mut self, message: &T) -> Result<(), Self::Error> {
+    async fn send(&mut self, message: T) -> Result<(), Self::Error> {
         (**self).send(message).await
     }
 }
@@ -172,7 +172,7 @@ impl<'a, Tx: Transmit<T>, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx,
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending.
     #[must_use]
-    pub async fn send(mut self, message: &T) -> Result<Chan<Tx, Rx, P, E>, Tx::Error> {
+    pub async fn send(mut self, message: T) -> Result<Chan<Tx, Rx, P, E>, Tx::Error> {
         match self.tx().send(message).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
@@ -196,7 +196,7 @@ impl<'a, Tx: Transmit<usize>, Rx, E, Ps: AllSession> Chan<Tx, Rx, Choose<Ps>, E>
         Ps: Select<N>,
         Ps::Selected: Session,
     {
-        match self.tx().send(&N::VALUE).await {
+        match self.tx().send(N::VALUE).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
