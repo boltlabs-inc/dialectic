@@ -8,10 +8,10 @@
 //!
 //! # Examples
 //!
-//! For instance, say we wanted to define an abstraction for channels that can send values. However,
-//! some channels might need to take ownership of the values they send, while others might serialize
-//! values, given only a reference to that value. In order to unify these two notions into one
-//! trait, we can parameterize over the calling convention for the input value:
+//! For instance, say we wanted to define an abstraction for channels that can send values. Imagine,
+//! however, that some channels might need to take ownership of the values they send, while others
+//! might serialize values given only a reference to that value. In order to unify these two notions
+//! into one trait, we can parameterize over the calling convention for the input value:
 //!
 //! ```
 //! use dialectic::{CallBy, CallingConvention};
