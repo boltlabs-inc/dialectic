@@ -11,8 +11,6 @@ use async_trait::async_trait;
 pub use call_by::*;
 use std::future::Future;
 
-pub mod call_by;
-
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
 /// type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 pub trait Transmit<'a, T, Convention: CallingConvention>

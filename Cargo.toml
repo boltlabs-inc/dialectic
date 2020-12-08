@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1"
+call-by = { version = "0.1", path = "../call-by" }
