@@ -10,12 +10,12 @@ pub use types::*;
 
 pub mod types;
 
-pub trait Calling: sealed::Calling {}
-impl Calling for Val {}
-impl Calling for Ref {}
-impl Calling for Mut {}
+pub trait CallingConvention: sealed::CallingConvention {}
+impl CallingConvention for Val {}
+impl CallingConvention for Ref {}
+impl CallingConvention for Mut {}
 
-pub trait By<'a, Convention: Calling> {
+pub trait By<'a, Convention: CallingConvention> {
     type Type;
 }
 
@@ -39,7 +39,7 @@ impl<'a, T: 'a> By<'a, Mut> for T {
 
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
 /// type `T` by [`Value`], [`Ref`], or [`Mut`], depending on the calling convention specified.
-pub trait Transmit<'a, T, Convention: Calling = Val>
+pub trait Transmit<'a, T, Convention: CallingConvention>
 where
     T: By<'a, Convention>,
     <T as By<'a, Convention>>::Type: marker::Send,
@@ -54,15 +54,13 @@ where
     fn send(&mut self, message: <T as By<'a, Convention>>::Type) -> Self::Future;
 }
 
-impl<
-        'a,
-        T: marker::Send + 'a,
-        Convention: Calling,
-        C: Transmit<'a, T, Convention> + marker::Send,
-    > Transmit<'a, T, Convention> for &'_ mut C
+impl<'a, T, C, Convention> Transmit<'a, T, Convention> for &'_ mut C
 where
+    C: Transmit<'a, T, Convention>,
+    Convention: CallingConvention,
     T: By<'a, Convention>,
     <T as By<'a, Convention>>::Type: marker::Send,
+    T: marker::Send + 'a,
 {
     type Error = C::Error;
     type Future = C::Future;
@@ -161,9 +159,9 @@ impl<Tx, Rx, P: Session> Chan<Tx, Rx, P> {
     /// Given a transmitting and receiving end of an un-session-typed connection, create a new
     /// channel for the protocol `P.`
     ///
-    /// Because `&mut Tx` and `&mut Rx` are `Transmit<T>` and `Receive<T>` if `Tx` and `Rx` are
-    /// `Transmit<T>` and `Receive<T>` respectively, a `Chan` does not need to own its connections;
-    /// a mutable reference or an owned type work equally well as inputs to [`Chan::new`].
+    /// Because `&mut Tx` and `&mut Rx` are `Transmit` and `Receive` if `Tx` and `Rx` are `Transmit`
+    /// and `Receive` respectively, a `Chan` does not need to own its connections; a mutable
+    /// reference or an owned type work equally well as inputs to [`Chan::new`].
     #[must_use]
     pub fn new(tx: Tx, rx: Rx) -> Chan<Tx, Rx, P> {
         unsafe { Chan::with_env(tx, rx) }
@@ -216,7 +214,7 @@ impl<'a, Tx, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Send<T, P>, 
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
     /// was an error while sending.
     #[must_use]
-    pub async fn send<Convention: Calling>(
+    pub async fn send<Convention: CallingConvention>(
         mut self,
         message: <T as By<'a, Convention>>::Type,
     ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<'a, T, Convention>>::Error>
@@ -564,8 +562,8 @@ mod sealed {
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, N> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
 
-    pub trait Calling {}
-    impl Calling for Val {}
-    impl Calling for Ref {}
-    impl Calling for Mut {}
+    pub trait CallingConvention {}
+    impl CallingConvention for Val {}
+    impl CallingConvention for Ref {}
+    impl CallingConvention for Mut {}
 }
