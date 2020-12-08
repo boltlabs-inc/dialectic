@@ -15,25 +15,25 @@ impl CallingConvention for Val {}
 impl CallingConvention for Ref {}
 impl CallingConvention for Mut {}
 
-pub trait By<'a, Convention: CallingConvention> {
+pub trait CallBy<'a, Convention: CallingConvention> {
     type Type;
 }
 
 pub struct Val;
 
-impl<'a, T> By<'a, Val> for T {
+impl<'a, T> CallBy<'a, Val> for T {
     type Type = T;
 }
 
 pub struct Ref;
 
-impl<'a, T: 'a> By<'a, Ref> for T {
+impl<'a, T: 'a> CallBy<'a, Ref> for T {
     type Type = &'a T;
 }
 
 pub struct Mut;
 
-impl<'a, T: 'a> By<'a, Mut> for T {
+impl<'a, T: 'a> CallBy<'a, Mut> for T {
     type Type = &'a mut T;
 }
 
@@ -41,8 +41,8 @@ impl<'a, T: 'a> By<'a, Mut> for T {
 /// type `T` by [`Value`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 pub trait Transmit<'a, T, Convention: CallingConvention>
 where
-    T: By<'a, Convention>,
-    <T as By<'a, Convention>>::Type: marker::Send,
+    T: CallBy<'a, Convention>,
+    <T as CallBy<'a, Convention>>::Type: marker::Send,
 {
     /// The type of possible errors when sending.
     type Error;
@@ -51,21 +51,21 @@ where
     type Future: Future<Output = Result<(), Self::Error>>;
 
     /// Send a message.
-    fn send(&mut self, message: <T as By<'a, Convention>>::Type) -> Self::Future;
+    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future;
 }
 
 impl<'a, T, C, Convention> Transmit<'a, T, Convention> for &'_ mut C
 where
     C: Transmit<'a, T, Convention>,
     Convention: CallingConvention,
-    T: By<'a, Convention>,
-    <T as By<'a, Convention>>::Type: marker::Send,
+    T: CallBy<'a, Convention>,
+    <T as CallBy<'a, Convention>>::Type: marker::Send,
     T: marker::Send + 'a,
 {
     type Error = C::Error;
     type Future = C::Future;
 
-    fn send(&mut self, message: <T as By<'a, Convention>>::Type) -> Self::Future {
+    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future {
         (**self).send(message)
     }
 }
@@ -216,12 +216,12 @@ impl<'a, Tx, Rx, E, T: marker::Send + Any, P: Session> Chan<Tx, Rx, Send<T, P>, 
     #[must_use]
     pub async fn send<Convention: CallingConvention>(
         mut self,
-        message: <T as By<'a, Convention>>::Type,
+        message: <T as CallBy<'a, Convention>>::Type,
     ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<'a, T, Convention>>::Error>
     where
         Tx: Transmit<'a, T, Convention>,
-        T: By<'a, Convention>,
-        <T as By<'a, Convention>>::Type: marker::Send,
+        T: CallBy<'a, Convention>,
+        <T as CallBy<'a, Convention>>::Type: marker::Send,
     {
         match self.tx().send(message).await {
             Ok(()) => Ok(unsafe { self.cast() }),
