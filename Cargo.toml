@@ -8,4 +8,9 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1"
+thiserror = "1"
+tokio = { version = "0.3", features = ["sync"] }
 call-by = { version = "0.1", path = "../call-by" }
+
+[dev-dependencies]
+tokio = { version = "0.3", features = ["full"] }
