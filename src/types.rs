@@ -7,7 +7,10 @@ pub use unary::*;
 /// [`Chan`]. Each session type has a [`Session::Dual`], the type of the corresponding client on the
 /// other side of the channel. The sealed trait `Session` enumerates these types, and provides the
 /// dual of each.
-pub trait Session: Any + sealed::Session {
+pub trait Session: Any + Sized + sealed::Session
+where
+    Self::Dual: Session<Dual = Self>,
+{
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
     type Dual;
@@ -16,7 +19,10 @@ pub trait Session: Any + sealed::Session {
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed `AllSession` trait ensures that every protocol in a type level list of
 /// protocols is `Session`.
-pub trait AllSession: sealed::AllSession {
+pub trait AllSession: Sized + sealed::AllSession
+where
+    Self::AllDual: AllSession<AllDual = Self>,
+{
     type AllDual;
     type Arity: Unary;
 }
