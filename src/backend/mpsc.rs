@@ -33,6 +33,48 @@ pub fn unbounded_channel() -> (
     mpsc::unbounded_channel()
 }
 
+/// An error thrown while receiving from or sending to a dynamically typed [`tokio::sync::mpsc`]
+/// channel.
+#[derive(Debug)]
+pub enum Error {
+    /// Error during receive.
+    Recv(RecvError),
+    /// Error during send.
+    Send(Box<dyn Any + marker::Send>),
+    /// Error during offer.
+    Offer(OutOfRangeChoice),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Recv(e) => e.fmt(fmt),
+            Error::Send(_) => write!(fmt, "channel closed"),
+            Error::Offer(e) => e.fmt(fmt),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<RecvError> for Error {
+    fn from(err: RecvError) -> Self {
+        Error::Recv(err)
+    }
+}
+
+impl<T: Any + marker::Send> From<SendError<T>> for Error {
+    fn from(SendError(err): SendError<T>) -> Self {
+        Error::Send(Box::new(err))
+    }
+}
+
+impl From<OutOfRangeChoice> for Error {
+    fn from(err: OutOfRangeChoice) -> Self {
+        Error::Offer(err)
+    }
+}
+
 /// An error thrown while receiving from a dynamically typed [`tokio::sync::mpsc`] channel.
 #[derive(Debug, Error)]
 pub enum RecvError {
