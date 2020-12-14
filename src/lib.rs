@@ -85,7 +85,8 @@ pub mod types;
 #[must_use = "Dropping a channel before finishing its session type will result in a panic"]
 pub struct Chan<Tx, Rx, P: Actionable<E>, E: Environment = ()>
 where
-    E::EachDual: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
 {
     tx: Option<Tx>, // never `None` unless currently in the body of `unwrap`
     rx: Option<Rx>, // never `None` unless currently in the body of `unwrap`
@@ -115,10 +116,11 @@ where
     <Self::Dual as Actionable<()>>::Action: Actionable<<Self::Dual as Actionable<()>>::Env>,
     Self::Env: Environment,
     <Self::Dual as Actionable<()>>::Env: Environment,
-    <Self::Env as EachSession>::EachDual: Environment,
+    <Self::Env as EachSession>::Dual: Environment,
     <Self::Action as Actionable<Self::Env>>::Env: Environment,
-    <<Self::Dual as Actionable<()>>::Env as EachSession>::EachDual: Environment,
-    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::EachDual: Environment,
+    <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
+    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::Dual: Environment,
+    <<<Self::Dual as Actionable<()>>::Action as Actionable<<Self::Dual as Actionable<()>>::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
@@ -212,16 +214,16 @@ where
     <Self::Dual as Actionable<()>>::Action: Actionable<<Self::Dual as Actionable<()>>::Env>,
     Self::Env: Environment,
     <Self::Dual as Actionable<()>>::Env: Environment,
-    <Self::Env as EachSession>::EachDual: Environment,
+    <Self::Env as EachSession>::Dual: Environment,
     <Self::Action as Actionable<Self::Env>>::Env: Environment,
-    <<Self::Dual as Actionable<()>>::Env as EachSession>::EachDual: Environment,
-    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::EachDual: Environment,
+    <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
+    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::Dual: Environment,
     <<Self::Dual as Actionable<()>>::Action as Actionable<
         <Self::Dual as Actionable<()>>::Env,
     >>::Env: Environment,
     <<<Self::Dual as Actionable<()>>::Action as Actionable<
         <Self::Dual as Actionable<()>>::Env,
-    >>::Env as EachSession>::EachDual: Environment,
+    >>::Env as EachSession>::Dual: Environment,
 {
     #[must_use]
     fn channel<Tx, Rx>(
@@ -254,11 +256,12 @@ where
     }
 }
 
-// TODO: generalize this to actionable input
-impl<Tx, Rx, E> Chan<Tx, Rx, End, E>
+impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
 where
+    P: Actionable<E, Action = End>,
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
 {
     /// Close a finished session, returning the wrapped connections used during the session.
     ///
@@ -311,7 +314,8 @@ impl<Tx, Rx, P, E> Drop for Chan<Tx, Rx, P, E>
 where
     P: Actionable<E>,
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
 {
     fn drop(&mut self) {
         let mut this = std::mem::ManuallyDrop::new(self);
@@ -326,14 +330,16 @@ where
 impl<Tx, Rx, E, P, T, Q> Chan<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = Recv<T, Q>> + 'static,
+    <P::Env as EachSession>::Dual: Environment,
     Q: Actionable<P::Env>,
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
     T: marker::Send + 'static,
     Rx: Receive<T>,
-    <Q as Actionable<P::Env>>::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
-    <Q as Actionable<P::Env>>::Env: Environment,
-    <<Q as Actionable<P::Env>>::Env as EachSession>::EachDual: Environment,
+    Q::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
+    Q::Env: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+    <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Receive something of type `T` on the channel, returning the pair of the received object and
     /// the channel.
@@ -373,13 +379,15 @@ where
 impl<'a, Tx, Rx, E, P: 'static, T: 'static, Q> Chan<Tx, Rx, P, E>
 where
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
     P: Actionable<E, Action = Send<T, Q>>,
+    <P::Env as EachSession>::Dual: Environment,
     Q: Actionable<P::Env>,
     E: EachSession,
-    <Q as Actionable<P::Env>>::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
-    <Q as Actionable<P::Env>>::Env: Environment,
-    <<Q as Actionable<P::Env>>::Env as EachSession>::EachDual: Environment,
+    Q::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
+    Q::Env: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+    <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Send something of type `T` on the channel, returning the channel.
     ///
@@ -431,10 +439,12 @@ where
 impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = Choose<Choices>>,
+    <P::Env as EachSession>::Dual: Environment,
     Tx: Transmit<'static, usize, Val>,
     E: Environment,
-    E::EachDual: Environment,
-    Choices: EachActionable<P::Env> + 'static,
+    E::Dual: Environment,
+    Choices: EachActionable<P::Env>,
+    P::Env: Environment,
 {
     /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
@@ -489,9 +499,12 @@ where
         Choices: Select<N>,
         Choices::Selected: Actionable<E>,
         <Choices::Selected as Actionable<E>>::Env: Environment,
-        <<Choices::Selected as Actionable<E>>::Env as EachSession>::EachDual: Environment,
+        <<Choices::Selected as Actionable<E>>::Env as EachSession>::Dual: Environment,
         <Choices::Selected as Actionable<E>>::Action:
             Actionable<<Choices::Selected as Actionable<E>>::Env>,
+        <<<Choices::Selected as Actionable<E>>::Action as Actionable<
+            <Choices::Selected as Actionable<E>>::Env,
+        >>::Env as EachSession>::Dual: Environment,
     {
         match self.tx().send(N::VALUE).await {
             Ok(()) => Ok(unsafe { self.cast() }),
@@ -510,7 +523,10 @@ where
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
 #[derive(Debug)]
 #[must_use]
-pub struct Branches<Tx, Rx, Ps: EachActionable<E>, E = ()> {
+pub struct Branches<Tx, Rx, Ps: EachActionable<E>, E: Environment = ()>
+where
+    E::Dual: Environment,
+{
     variant: usize,
     tx: Option<Tx>, // never `None` unless in the body of `case` or `drop`
     rx: Option<Rx>, // never `None` unless in the body of `case` or `drop`
@@ -518,7 +534,10 @@ pub struct Branches<Tx, Rx, Ps: EachActionable<E>, E = ()> {
     environment: PhantomData<E>,
 }
 
-impl<Tx, Rx, Ps: EachActionable<E>, E> Drop for Branches<Tx, Rx, Ps, E> {
+impl<Tx, Rx, Ps: EachActionable<E>, E: Environment> Drop for Branches<Tx, Rx, Ps, E>
+where
+    E::Dual: Environment,
+{
     fn drop(&mut self) {
         let mut this = std::mem::ManuallyDrop::new(self);
         drop(this.rx.take());
@@ -533,12 +552,14 @@ impl<'a, Tx, Rx, P, Ps, E> Branches<Tx, Rx, (P, Ps), E>
 where
     Ps: EachActionable<E>,
     P: Actionable<E>,
-    P::Dual: Actionable<E::EachDual>,
+    P::Dual: Actionable<E::Dual>,
+    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
     P::Env: Environment,
-    <P::Env as EachSession>::EachDual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
     P::Action: Actionable<P::Env>,
+    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
 {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
@@ -580,7 +601,10 @@ where
 #[error("received discriminant out of range in `Chan::offer`")]
 pub struct OutOfRangeChoice;
 
-impl<'a, Tx, Rx, E> Branches<Tx, Rx, (), E> {
+impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
+where
+    E::Dual: Environment,
+{
     /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
     /// discriminant for this set of protocol choices was out of range.
     ///
@@ -593,14 +617,21 @@ impl<'a, Tx, Rx, E> Branches<Tx, Rx, (), E> {
     }
 }
 
-// TODO: generalize this to actionable input
-impl<'a, Tx, Rx, P, Ps, E> Chan<Tx, Rx, Offer<(P, Ps)>, E>
+impl<'a, Tx, Rx, P, Q, Qs, E> Chan<Tx, Rx, P, E>
 where
-    P::Dual: Actionable<E::EachDual>,
-    E::EachDual: Environment,
+    P: Actionable<E, Action = Offer<(Q, Qs)>>,
+    P::Env: EachSession,
+    Q::Dual: Actionable<E::Dual>,
+    <<Q::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
+    Q: Actionable<P::Env>,
+    <<Q as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
+    Q::Dual: Actionable<<P::Env as EachSession>::Dual>,
+    <<Q::Dual as Actionable<<P::Env as EachSession>::Dual>>::Env as EachSession>::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    Qs: EachActionable<P::Env>,
+    P::Env: Environment,
+    E::Dual: Environment,
     Rx: Receive<usize>,
-    P: Actionable<E>,
-    Ps: EachActionable<E>,
     E: Environment,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
@@ -679,7 +710,7 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub async fn offer(self) -> Result<Branches<Tx, Rx, (P, Ps), E>, Rx::Error> {
+    pub async fn offer(self) -> Result<Branches<Tx, Rx, (Q, Qs), P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         match rx.recv().await {
             Ok(variant) => Ok(Branches {
@@ -869,23 +900,34 @@ where
     }
 }
 
-// TODO: generalize this to actionable input
-impl<Tx, Rx, P: Any, Q: Any, E> Chan<Tx, Rx, Split<P, Q>, E>
+impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
 where
-    E: Environment,
-    E::EachDual: Environment,
     P: Actionable<E>,
-    Q: Actionable<E>,
+    E: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
 {
     /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
     /// reunited (provided they reach a matching session type) using [`Chan::unsplit`].
     #[must_use]
-    pub fn split(
+    pub fn split<Q, R>(
         self,
     ) -> (
-        Chan<Tx, Unavailable<Rx>, P, E>,
-        Chan<Unavailable<Tx>, Rx, Q, E>,
-    ) {
+        Chan<Tx, Unavailable<Rx>, Q::Action, Q::Env>,
+        Chan<Unavailable<Tx>, Rx, R::Action, R::Env>,
+    )
+    where
+        P: Actionable<E, Action = Split<Q, R>>,
+        Q: Actionable<P::Env>,
+        R: Actionable<P::Env>,
+        Q::Action: Actionable<Q::Env>,
+        R::Action: Actionable<R::Env>,
+        <P::Env as EachSession>::Dual: Environment,
+        <Q::Env as EachSession>::Dual: Environment,
+        <R::Env as EachSession>::Dual: Environment,
+        <<<Q as Actionable<P::Env>>::Action as Actionable<<Q as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
+        <<<R as Actionable<P::Env>>::Action as Actionable<<R as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
+    {
         let (tx, rx) = self.unwrap();
         let unavailable = Unavailable::new();
         let tx_only = unsafe { Chan::with_env(tx, unavailable.clone()) };
@@ -894,12 +936,12 @@ where
     }
 }
 
-// TODO: generalize this to actionable input
 impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
 where
-    E: Environment,
-    E::EachDual: Environment,
     P: Actionable<E>,
+    <P::Env as EachSession>::Dual: Environment,
+    E: Environment,
+    E::Dual: Environment,
 {
     /// Reunite the transmit-only and receive-only channels resulting from a call to [`Chan::split`]
     /// into a single channel.
@@ -908,10 +950,14 @@ where
     ///
     /// If the two channels given as input did not result from the same call to [`Chan::split`].
     #[must_use]
-    pub fn unsplit(
-        mut tx: Chan<Tx, Unavailable<Rx>, P, E>,
-        mut rx: Chan<Unavailable<Tx>, Rx, P, E>,
-    ) -> Self {
+    pub fn unsplit<Q, R>(
+        mut tx: Chan<Tx, Unavailable<Rx>, Q, E>,
+        mut rx: Chan<Unavailable<Tx>, Rx, R, E>,
+    ) -> Self
+    where
+        Q: Actionable<E, Action = P, Env = E>,
+        R: Actionable<E, Action = P, Env = E>,
+    {
         if Arc::ptr_eq(&tx.rx().0, &rx.tx().0) {
             unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) }
         } else {
@@ -1000,16 +1046,18 @@ macro_rules! while_ {
 impl<Tx, Rx, P: Any, E> Chan<Tx, Rx, P, E>
 where
     E: Environment,
-    E::EachDual: Environment,
+    E::Dual: Environment,
     P: Actionable<E>,
+    <P::Env as EachSession>::Dual: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
     #[must_use]
     unsafe fn cast<F, Q>(self) -> Chan<Tx, Rx, Q, F>
     where
         F: Environment,
-        F::EachDual: Environment,
+        F::Dual: Environment,
         Q: Actionable<F>,
+        <Q::Env as EachSession>::Dual: Environment,
     {
         let (tx, rx) = self.unwrap();
         Chan {
