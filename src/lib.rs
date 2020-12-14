@@ -1,9 +1,5 @@
-use async_trait::async_trait;
 use std::{
-    any::{Any, TypeId},
-    future::Future,
     marker::{self, PhantomData},
-    pin::Pin,
     sync::Arc,
 };
 use thiserror::Error;
@@ -18,11 +14,6 @@ pub mod types;
 /// receiving incoming messages via the `Rx` connection, whose future session behavior is determined
 /// by the session type `P`. The `E` parameter is a type-level list describing the *session
 /// environment* of the channel: the stack of [`Loop`]s the channel has entered.
-///
-/// # Panics
-///
-/// For *unfinished* channels (that is, those with a session type that is not `End`), dropping them
-/// before the end of their session will result in a panic.
 ///
 /// # Examples
 ///
@@ -88,8 +79,8 @@ where
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
 {
-    tx: Option<Tx>, // never `None` unless currently in the body of `unwrap`
-    rx: Option<Rx>, // never `None` unless currently in the body of `unwrap`
+    tx: Tx,
+    rx: Rx,
     environment: PhantomData<E>,
     protocol: PhantomData<P>,
 }
@@ -112,15 +103,8 @@ pub trait NewSession
 where
     Self: Actionable<()>,
     Self::Dual: Actionable<()>,
-    Self::Action: Actionable<Self::Env>,
-    <Self::Dual as Actionable<()>>::Action: Actionable<<Self::Dual as Actionable<()>>::Env>,
-    Self::Env: Environment,
-    <Self::Dual as Actionable<()>>::Env: Environment,
     <Self::Env as EachSession>::Dual: Environment,
-    <Self::Action as Actionable<Self::Env>>::Env: Environment,
     <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
-    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::Dual: Environment,
-    <<<Self::Dual as Actionable<()>>::Action as Actionable<<Self::Dual as Actionable<()>>::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
@@ -210,20 +194,8 @@ impl<P> NewSession for P
 where
     Self: Actionable<()>,
     Self::Dual: Actionable<()>,
-    Self::Action: Actionable<Self::Env>,
-    <Self::Dual as Actionable<()>>::Action: Actionable<<Self::Dual as Actionable<()>>::Env>,
-    Self::Env: Environment,
-    <Self::Dual as Actionable<()>>::Env: Environment,
     <Self::Env as EachSession>::Dual: Environment,
-    <Self::Action as Actionable<Self::Env>>::Env: Environment,
     <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
-    <<Self::Action as Actionable<Self::Env>>::Env as EachSession>::Dual: Environment,
-    <<Self::Dual as Actionable<()>>::Action as Actionable<
-        <Self::Dual as Actionable<()>>::Env,
-    >>::Env: Environment,
-    <<<Self::Dual as Actionable<()>>::Action as Actionable<
-        <Self::Dual as Actionable<()>>::Env,
-    >>::Env as EachSession>::Dual: Environment,
 {
     #[must_use]
     fn channel<Tx, Rx>(
@@ -300,44 +272,23 @@ where
     /// # }
     /// ```
     ///
-    /// Note too: dropping such a non-`End` channel will result in a panic. If you *really* want to
-    /// destruct a channel before the end of its session, use [`Chan::unwrap`], but beware that this
-    /// may cause the party on the other end of the channel to throw errors due to your violation of
-    /// the channel's protocol!
+    /// If you *really* want to destruct a channel before the end of its session, use
+    /// [`Chan::unwrap`], but beware that this may cause the party on the other end of the channel
+    /// to throw errors due to your violation of the channel's protocol!
     pub fn close(self) -> (Tx, Rx) {
         self.unwrap()
     }
 }
 
-// This `Drop` implementation panics if the session isn't over.
-impl<Tx, Rx, P, E> Drop for Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    fn drop(&mut self) {
-        let mut this = std::mem::ManuallyDrop::new(self);
-        drop(this.rx.take());
-        drop(this.tx.take());
-        if TypeId::of::<P>() != TypeId::of::<End>() {
-            panic!("Channel dropped before finishing its session")
-        }
-    }
-}
-
 impl<Tx, Rx, E, P, T, Q> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E, Action = Recv<T, Q>> + 'static,
-    <P::Env as EachSession>::Dual: Environment,
+    Rx: Receive<T>,
+    T: marker::Send + 'static,
+    P: Actionable<E, Action = Recv<T, Q>>,
     Q: Actionable<P::Env>,
     E: Environment,
     E::Dual: Environment,
-    T: marker::Send + 'static,
-    Rx: Receive<T>,
-    Q::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
-    Q::Env: Environment,
+    <P::Env as EachSession>::Dual: Environment,
     <Q::Env as EachSession>::Dual: Environment,
     <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
 {
@@ -366,7 +317,7 @@ where
     /// ```
     #[must_use]
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, Q::Action, Q::Env>), Rx::Error> {
-        match self.rx().recv().await {
+        match self.rx.recv().await {
             Ok(result) => Ok((result, unsafe { self.cast() })),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -376,16 +327,13 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E, P: 'static, T: 'static, Q> Chan<Tx, Rx, P, E>
+impl<'a, Tx, Rx, E, P, T, Q> Chan<Tx, Rx, P, E>
 where
+    P: Actionable<E, Action = Send<T, Q>>,
+    Q: Actionable<P::Env>,
     E: Environment,
     E::Dual: Environment,
-    P: Actionable<E, Action = Send<T, Q>>,
     <P::Env as EachSession>::Dual: Environment,
-    Q: Actionable<P::Env>,
-    E: EachSession,
-    Q::Action: Actionable<<Q as Actionable<P::Env>>::Env>,
-    Q::Env: Environment,
     <Q::Env as EachSession>::Dual: Environment,
     <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
 {
@@ -426,7 +374,7 @@ where
         T: CallBy<'a, Convention>,
         <T as CallBy<'a, Convention>>::Type: marker::Send,
     {
-        match self.tx().send(message).await {
+        match self.tx.send(message).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -436,15 +384,14 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
+impl<Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E, Action = Choose<Choices>>,
-    <P::Env as EachSession>::Dual: Environment,
     Tx: Transmit<'static, usize, Val>,
+    P: Actionable<E, Action = Choose<Choices>>,
     E: Environment,
     E::Dual: Environment,
-    Choices: EachActionable<P::Env>,
-    P::Env: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    Choices: EachScoped<<P::Env as Environment>::Depth>,
 {
     /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
@@ -498,15 +445,9 @@ where
     where
         Choices: Select<N>,
         Choices::Selected: Actionable<E>,
-        <Choices::Selected as Actionable<E>>::Env: Environment,
         <<Choices::Selected as Actionable<E>>::Env as EachSession>::Dual: Environment,
-        <Choices::Selected as Actionable<E>>::Action:
-            Actionable<<Choices::Selected as Actionable<E>>::Env>,
-        <<<Choices::Selected as Actionable<E>>::Action as Actionable<
-            <Choices::Selected as Actionable<E>>::Env,
-        >>::Env as EachSession>::Dual: Environment,
     {
-        match self.tx().send(N::VALUE).await {
+        match self.tx.send(N::VALUE).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -528,59 +469,42 @@ where
     E::Dual: Environment,
 {
     variant: usize,
-    tx: Option<Tx>, // never `None` unless in the body of `case` or `drop`
-    rx: Option<Rx>, // never `None` unless in the body of `case` or `drop`
+    tx: Tx,
+    rx: Rx,
     protocols: PhantomData<Ps>,
     environment: PhantomData<E>,
 }
 
-impl<Tx, Rx, Ps: EachActionable<E>, E: Environment> Drop for Branches<Tx, Rx, Ps, E>
-where
-    E::Dual: Environment,
-{
-    fn drop(&mut self) {
-        let mut this = std::mem::ManuallyDrop::new(self);
-        drop(this.rx.take());
-        drop(this.tx.take());
-        if TypeId::of::<Ps>() != TypeId::of::<()>() {
-            panic!("`Branches` of offered protocols dropped without matching all cases (use `Branches::case` and `Branches::empty_case` or the `offer!` macro to eliminate branches)")
-        }
-    }
-}
-
 impl<'a, Tx, Rx, P, Ps, E> Branches<Tx, Rx, (P, Ps), E>
 where
-    Ps: EachActionable<E>,
     P: Actionable<E>,
-    P::Dual: Actionable<E::Dual>,
-    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
-    P::Env: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    P::Action: Actionable<P::Env>,
-    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
+    Ps: EachActionable<E>,
     E: Environment,
     E::Dual: Environment,
+    P::Dual: Actionable<E::Dual>,
+    <P::Env as EachSession>::Dual: Environment,
+    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
+    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
 {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
     #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
     pub fn case(
-        mut self,
+        self,
     ) -> Result<
         Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
         Branches<Tx, Rx, Ps, E>,
     > {
         let variant = self.variant;
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        let _ = std::mem::ManuallyDrop::new(self);
+        let tx = self.tx;
+        let rx = self.rx;
         if variant == 0 {
             Ok(unsafe { Chan::with_env(tx, rx) })
         } else {
             Err(Branches {
                 variant: variant - 1,
-                tx: Some(tx),
-                rx: Some(rx),
+                tx,
+                rx,
                 protocols: PhantomData,
                 environment: PhantomData,
             })
@@ -617,22 +541,15 @@ where
     }
 }
 
-impl<'a, Tx, Rx, P, Q, Qs, E> Chan<Tx, Rx, P, E>
+impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E, Action = Offer<(Q, Qs)>>,
-    P::Env: EachSession,
-    Q::Dual: Actionable<E::Dual>,
-    <<Q::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
-    Q: Actionable<P::Env>,
-    <<Q as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
-    Q::Dual: Actionable<<P::Env as EachSession>::Dual>,
-    <<Q::Dual as Actionable<<P::Env as EachSession>::Dual>>::Env as EachSession>::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    Qs: EachActionable<P::Env>,
-    P::Env: Environment,
-    E::Dual: Environment,
     Rx: Receive<usize>,
+    P: Actionable<E, Action = Offer<Choices>>,
     E: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    Choices: EachActionable<P::Env>,
+    Choices: EachScoped<<P::Env as Environment>::Depth>,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// by sending a number which protocol to proceed with.
@@ -710,13 +627,13 @@ where
     /// # }
     /// ```
     #[must_use]
-    pub async fn offer(self) -> Result<Branches<Tx, Rx, (Q, Qs), P::Env>, Rx::Error> {
+    pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         match rx.recv().await {
             Ok(variant) => Ok(Branches {
                 variant,
-                tx: Some(tx),
-                rx: Some(rx),
+                tx: tx,
+                rx: rx,
                 protocols: PhantomData,
                 environment: PhantomData,
             }),
@@ -869,64 +786,26 @@ impl<T> Unavailable<T> {
     }
 }
 
-// Empty catch-all impl that prevents anyone from actually instantiating `Transmit` for
-// `Unavailable`. Since there are no impls of `Unsatisfiable`, this can never be invoked.
-impl<'a, C, T, Convention> Transmit<'a, T, Convention> for Unavailable<C>
+impl<Tx, Rx, E, P, Q, R> Chan<Tx, Rx, P, E>
 where
-    Self: sealed::Unsatisfiable,
-    T: CallBy<'a, Convention>,
-    Convention: CallingConvention,
-    <T as CallBy<'a, Convention>>::Type: marker::Send,
-{
-    type Error = ();
-    type Future = Pin<Box<dyn Future<Output = Result<(), ()>> + marker::Send>>;
-
-    fn send(&mut self, _: <T as CallBy<'a, Convention>>::Type) -> Self::Future {
-        unreachable!("Impossible to send on `Unavailable` sender")
-    }
-}
-
-// Empty catch-all impl that prevents anyone from actually instantiating `Receive` for
-// `Unavailable`. Since there are no impls of `Unsatisfiable`, this can never be invoked.
-#[async_trait]
-impl<C: marker::Send, T: 'static> Receive<T> for Unavailable<C>
-where
-    Self: sealed::Unsatisfiable,
-{
-    type Error = ();
-
-    async fn recv(&mut self) -> Result<T, Self::Error> {
-        unreachable!("Impossible to receive on `Unavailable` receiver")
-    }
-}
-
-impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E>,
+    P: Actionable<E, Action = Split<Q, R>>,
+    Q: Actionable<P::Env>,
+    R: Actionable<P::Env>,
     E: Environment,
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
+    <<<Q as Actionable<P::Env>>::Action as Actionable<<Q as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
+    <<<R as Actionable<P::Env>>::Action as Actionable<<R as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
     /// reunited (provided they reach a matching session type) using [`Chan::unsplit`].
     #[must_use]
-    pub fn split<Q, R>(
+    pub fn split(
         self,
     ) -> (
         Chan<Tx, Unavailable<Rx>, Q::Action, Q::Env>,
         Chan<Unavailable<Tx>, Rx, R::Action, R::Env>,
     )
-    where
-        P: Actionable<E, Action = Split<Q, R>>,
-        Q: Actionable<P::Env>,
-        R: Actionable<P::Env>,
-        Q::Action: Actionable<Q::Env>,
-        R::Action: Actionable<R::Env>,
-        <P::Env as EachSession>::Dual: Environment,
-        <Q::Env as EachSession>::Dual: Environment,
-        <R::Env as EachSession>::Dual: Environment,
-        <<<Q as Actionable<P::Env>>::Action as Actionable<<Q as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
-        <<<R as Actionable<P::Env>>::Action as Actionable<<R as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
     {
         let (tx, rx) = self.unwrap();
         let unavailable = Unavailable::new();
@@ -936,12 +815,12 @@ where
     }
 }
 
-impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
+impl<Tx, Rx, E, P> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E>,
-    <P::Env as EachSession>::Dual: Environment,
+    P: Actionable<E, Action = P, Env = E>,
     E: Environment,
     E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
 {
     /// Reunite the transmit-only and receive-only channels resulting from a call to [`Chan::split`]
     /// into a single channel.
@@ -951,14 +830,14 @@ where
     /// If the two channels given as input did not result from the same call to [`Chan::split`].
     #[must_use]
     pub fn unsplit<Q, R>(
-        mut tx: Chan<Tx, Unavailable<Rx>, Q, E>,
-        mut rx: Chan<Unavailable<Tx>, Rx, R, E>,
+        tx: Chan<Tx, Unavailable<Rx>, Q, E>,
+        rx: Chan<Unavailable<Tx>, Rx, R, E>,
     ) -> Self
     where
         Q: Actionable<E, Action = P, Env = E>,
         R: Actionable<E, Action = P, Env = E>,
     {
-        if Arc::ptr_eq(&tx.rx().0, &rx.tx().0) {
+        if Arc::ptr_eq(&tx.rx.0, &rx.tx.0) {
             unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) }
         } else {
             panic!("Unrelated channels passed to `Chan::unsplit`")
@@ -966,88 +845,11 @@ where
     }
 }
 
-/// Enter a [`Loop`](crate::types::Loop) on a channel and repeatedly execute the given block until a
-/// `break` statement is encountered. This is syntactic sugar over `loop`.
-///
-/// # Notes
-///
-/// The expression specified as the body of the loop must return the final value of the channel at
-/// the end of the loop iteration.
-///
-/// If the channel is to be used again after the loop is exited, it's necessary to break with a
-/// return value of the channel; otherwise the channel will be dropped at the end of the loop.
-#[macro_export]
-macro_rules! loop_ {
-    ($($label:lifetime :)? $chan:ident => $($t:tt)*) => {
-        {
-            let mut $chan = $chan;
-            $($label :)? loop {
-                let c = { $($t)* };
-                $chan = c;
-            }
-        }
-    };
-}
-
-/// Iterate over some iterable collection, performing one [`Loop`](crate::types::Loop) on the
-/// channel for each item in the collection, and returning the channel as output. This is syntactic
-/// sugar over `for`.
-///
-/// # Notes
-///
-/// The expression specified as the body of the for-loop must return the final value of the channel
-/// at the end of the loop iteration.
-#[macro_export]
-macro_rules! for_ {
-    ($($label:lifetime :)? $x:pat in $e:expr, $chan:ident => $($t:tt)*) => {
-        {
-            let mut $chan = $chan;
-            $($label :)? for $x in $e {
-                let c = { $($t)* };
-                $chan = c;
-            }
-            $chan
-        }
-    }
-}
-
-/// Enter a [`Loop`](crate::types::Loop) on a channel and repeatedly execute the given block until a
-/// condition evaluates to false (or a pattern fails to match). This is syntactic sugar over `while`
-/// and `while let`.
-///
-/// # Notes
-///
-/// The expression specified as the body of the loop must return the final value of the channel at
-/// the end of the loop iteration.
-#[macro_export]
-macro_rules! while_ {
-    ($($label:lifetime :)? $cond:expr, $chan:ident => $($t:tt)*) => {
-        {
-            let mut $chan = $chan;
-            $($label :)? while $cond {
-                let c = { $($t)* };
-                $chan = c;
-            }
-            $chan
-        }
-    };
-    ($($label:lifetime :)? let $p:pat = $e:expr, $chan:ident => $($t:tt)*) => {
-        {
-            let mut $chan = $chan;
-            $($label :)? while let $p = $e {
-                let c = { $($t)* };
-                $chan = c;
-            }
-            $chan
-        }
-    }
-}
-
-impl<Tx, Rx, P: Any, E> Chan<Tx, Rx, P, E>
+impl<Tx, Rx, E, P> Chan<Tx, Rx, P, E>
 where
+    P: Actionable<E>,
     E: Environment,
     E::Dual: Environment,
-    P: Actionable<E>,
     <P::Env as EachSession>::Dual: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
@@ -1061,8 +863,8 @@ where
     {
         let (tx, rx) = self.unwrap();
         Chan {
-            tx: Some(tx),
-            rx: Some(rx),
+            tx,
+            rx,
             environment: PhantomData,
             protocol: PhantomData,
         }
@@ -1075,21 +877,10 @@ where
     ///
     /// If this function is used before the end of a session, it may result in errors when the other
     /// end of the channel attempts to continue the session.
-    pub fn unwrap(mut self) -> (Tx, Rx) {
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        drop(std::mem::ManuallyDrop::new(self));
+    pub fn unwrap(self) -> (Tx, Rx) {
+        let tx = self.tx;
+        let rx = self.rx;
         (tx, rx)
-    }
-
-    /// Borrow the receiving channel (internal-use-only)
-    fn rx(&mut self) -> &mut Rx {
-        self.rx.as_mut().unwrap()
-    }
-
-    /// Borrow the transmitting channel (internal-use-only)
-    fn tx(&mut self) -> &mut Tx {
-        self.tx.as_mut().unwrap()
     }
 
     /// Create a new channel with an arbitrary environment. This is equivalent to casting a new
@@ -1097,35 +888,10 @@ where
     #[must_use]
     unsafe fn with_env(tx: Tx, rx: Rx) -> Chan<Tx, Rx, P, E> {
         Chan {
-            tx: Some(tx),
-            rx: Some(rx),
+            tx,
+            rx,
             environment: PhantomData,
             protocol: PhantomData,
         }
     }
-}
-
-mod sealed {
-    use super::*;
-    use std::any::Any;
-
-    pub trait IsSession: Any {}
-    impl IsSession for End {}
-    impl<T: Any, P: IsSession> IsSession for Recv<T, P> {}
-    impl<T: Any, P: IsSession> IsSession for Send<T, P> {}
-    impl<Ps: EachSession> IsSession for Choose<Ps> {}
-    impl<Ps: EachSession> IsSession for Offer<Ps> {}
-    impl<P: IsSession, Q: IsSession> IsSession for Split<P, Q> {}
-    impl<P: IsSession> IsSession for Loop<P> {}
-    impl<N: Any> IsSession for Recur<N> {}
-
-    pub trait EachSession: Any {}
-    impl EachSession for () {}
-    impl<T: IsSession, Ts: EachSession> EachSession for (T, Ts) {}
-
-    pub trait Select<N> {}
-    impl<T, S> Select<Z> for (T, S) {}
-    impl<T, P, N> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
-
-    pub trait Unsatisfiable {}
 }

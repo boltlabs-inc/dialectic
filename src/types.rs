@@ -3,10 +3,12 @@
 use super::*;
 pub use unary::*;
 
+pub mod unary;
+
 /// A session type describes the sequence of operations performed by one end of a bidirectional
-/// [`Chan`]. Each session type has a [`Session::Dual`], the type of the corresponding client on the
-/// other side of the channel. The sealed trait `Session` enumerates these types, and provides the
-/// dual of each.
+/// [`Chan`]. Each session type has a [`Session::Dual`], the type of the corresponding client on
+/// the other side of the channel. The sealed trait `Session` enumerates these types, and provides
+/// the dual of each.
 pub trait Session: Sized + sealed::IsSession {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
@@ -24,7 +26,10 @@ where
 {
     /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
     /// This steps through [`Loop`] and [`Recur`] transparently.
-    type Action: Session;
+    ///
+    /// The constraints on this associated type ensure that it is idemopotent: the `Action` and
+    /// `Env` of an `Action` are the same as those of that `Action`.
+    type Action: Actionable<Self::Env, Action = Self::Action, Env = Self::Env>;
 
     /// The environment resulting from stepping through one or many [`Loop`] or [`Recur`] points to
     /// the next real channel action.
@@ -33,7 +38,7 @@ where
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachSession`] trait ensures that every protocol in a type level list of
-/// protocols is [`Session`].
+/// protocols [`Session`].
 pub trait EachSession: Sized + sealed::EachSession
 where
     Self::Dual: EachSession<Dual = Self>,
@@ -46,25 +51,40 @@ impl EachSession for () {
     type Dual = ();
 }
 
-impl<P: Session, Ps: EachSession> EachSession for (P, Ps) {
+impl<P, Ps> EachSession for (P, Ps)
+where
+    P: Session,
+    Ps: EachSession,
+{
     type Dual = (P::Dual, Ps::Dual);
 }
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachSession`] trait ensures that every protocol in a type level list of
 /// protocols is [`Actionable`].
-pub trait EachActionable<E: Environment>: EachSession
+pub trait EachActionable<E>: EachSession
 where
+    E: Environment,
     E::Dual: Environment,
 {
 }
-impl<E: Environment> EachActionable<E> for () where E::Dual: Environment {}
-impl<E: Environment, P: Actionable<E>, Ps: EachActionable<E>> EachActionable<E> for (P, Ps)
+
+impl<E> EachActionable<E> for ()
 where
-    P::Dual: Actionable<E::Dual>,
-    <<P::Dual as Actionable<<E>::Dual>>::Env as EachSession>::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
+    E: Environment,
     E::Dual: Environment,
+{
+}
+
+impl<E, P, Ps> EachActionable<E> for (P, Ps)
+where
+    P: Actionable<E>,
+    Ps: EachActionable<E>,
+    P::Dual: Actionable<E::Dual>,
+    E: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <<P::Dual as Actionable<<E>::Dual>>::Env as EachSession>::Dual: Environment,
 {
 }
 
@@ -81,12 +101,13 @@ impl Environment for () {
     type Depth = Z;
 }
 
-impl<P: Session, Ps: Environment> Environment for (P, Ps)
+impl<P, Ps> Environment for (P, Ps)
 where
     P: Scoped<S<Ps::Depth>>,
     P: Scoped<S<<Ps::Dual as Environment>::Depth>>,
     P::Dual: Scoped<S<Ps::Depth>>,
     P::Dual: Scoped<S<<Ps::Dual as Environment>::Depth>>,
+    Ps: Environment,
     Ps::Dual: Environment,
 {
     type Depth = S<Ps::Depth>;
@@ -98,12 +119,12 @@ where
 /// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Recur`] to
 /// any loop above itself, i.e. all `Recur<N>` refer to a loop which they themselves are within.
 pub trait Scoped<N: Unary = Z>: Session {}
-impl<T: 'static, P: Scoped<N>, N: Unary> Scoped<N> for Recv<T, P> {}
-impl<T: 'static, P: Scoped<N>, N: Unary> Scoped<N> for Send<T, P> {}
-impl<Ps: EachScoped<N>, N: Unary> Scoped<N> for Offer<Ps> {}
-impl<Ps: EachScoped<N>, N: Unary> Scoped<N> for Choose<Ps> {}
-impl<P: Scoped<N>, Q: Scoped<N>, N: Unary> Scoped<N> for Split<P, Q> {}
-impl<P: Scoped<S<N>>, N: Unary> Scoped<N> for Loop<P> {}
+impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
+impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Send<T, P> {}
+impl<N: Unary, Choices: EachScoped<N>> Scoped<N> for Offer<Choices> {}
+impl<N: Unary, Choices: EachScoped<N>> Scoped<N> for Choose<Choices> {}
+impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
+impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 impl<N: Unary> Scoped<S<N>> for Recur<Z> {}
 impl<N: Unary> Scoped<S<N>> for Recur<S<N>> where Recur<N>: Scoped<N> {}
 impl<N: Unary> Scoped<N> for End {}
@@ -117,7 +138,7 @@ impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed `Select` trait describes what it means to index into a type level list of
 /// protocols.
-pub trait Select<N>: sealed::Select<N> {
+pub trait Select<N: Unary>: sealed::Select<N> {
     type Selected;
 }
 
@@ -125,43 +146,11 @@ impl<T, S> Select<Z> for (T, S) {
     type Selected = T;
 }
 
-impl<T, P, N> Select<S<N>> for (T, (P, ()))
+impl<T, P, N: Unary> Select<S<N>> for (T, (P, ()))
 where
     (P, ()): Select<N>,
 {
     type Selected = <(P, ()) as Select<N>>::Selected;
-}
-
-pub mod unary {
-    //! The unary numbers, represented by zero [`Z`] and successor [`S`].
-
-    /// The number zero.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Z;
-
-    /// The successor of `N` (i.e. `N + 1`).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct S<N>(N);
-
-    /// All unary numbers can be converted to their value-level equivalent `usize`.
-    pub trait Unary: sealed::Sealed + 'static {
-        const VALUE: usize;
-    }
-
-    impl Unary for Z {
-        const VALUE: usize = 0;
-    }
-
-    impl<N: Unary> Unary for S<N> {
-        const VALUE: usize = N::VALUE + 1;
-    }
-
-    mod sealed {
-        use super::*;
-        pub trait Sealed: 'static {}
-        impl Sealed for Z {}
-        impl<N: Sealed> Sealed for S<N> {}
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -172,8 +161,9 @@ impl Session for End {
     type Dual = End;
 }
 
-impl<E: Environment> Actionable<E> for End
+impl<E> Actionable<E> for End
 where
+    E: Environment,
     E::Dual: Environment,
 {
     type Action = End;
@@ -182,14 +172,15 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
-pub struct Recv<T: 'static, P>(pub PhantomData<T>, pub P);
+pub struct Recv<T, P>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Recv<T, P> {
     type Dual = Send<T, P::Dual>;
 }
 
-impl<E: Environment, T, P: Scoped<E::Depth>> Actionable<E> for Recv<T, P>
+impl<E, T, P: Scoped<E::Depth>> Actionable<E> for Recv<T, P>
 where
+    E: Environment,
     E::Dual: Environment,
 {
     type Action = Recv<T, P>;
@@ -198,14 +189,15 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Send a message of type `T` using [`Chan::send`], then continue with protocol `P`.
-pub struct Send<T: 'static, P>(pub PhantomData<T>, pub P);
+pub struct Send<T, P>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Send<T, P> {
     type Dual = Recv<T, P::Dual>;
 }
 
-impl<E: Environment, T, P: Scoped<E::Depth>> Actionable<E> for Send<T, P>
+impl<E, T, P: Scoped<E::Depth>> Actionable<E> for Send<T, P>
 where
+    E: Environment,
     E::Dual: Environment,
 {
     type Action = Send<T, P>;
@@ -213,35 +205,37 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-/// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Ps`.
-pub struct Choose<Ps>(pub Ps);
+/// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Choices`.
+pub struct Choose<Choices>(pub Choices);
 
-impl<Ps: EachSession> Session for Choose<Ps> {
-    type Dual = Offer<Ps::Dual>;
+impl<Choices: EachSession> Session for Choose<Choices> {
+    type Dual = Offer<Choices::Dual>;
 }
 
-impl<E: Environment, Ps: EachScoped<E::Depth>> Actionable<E> for Choose<Ps>
+impl<E, Choices: EachScoped<E::Depth>> Actionable<E> for Choose<Choices>
 where
+    E: Environment,
     E::Dual: Environment,
 {
-    type Action = Choose<Ps>;
+    type Action = Choose<Choices>;
     type Env = E;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Offer the choice using [`Chan::offer`] or the `offer!` macro between any of the protocols in the
-/// tuple `Ps`.
-pub struct Offer<Ps>(pub Ps);
+/// tuple `Choices`.
+pub struct Offer<Choices>(pub Choices);
 
-impl<Ps: EachSession> Session for Offer<Ps> {
-    type Dual = Choose<Ps::Dual>;
+impl<Choices: EachSession> Session for Offer<Choices> {
+    type Dual = Choose<Choices::Dual>;
 }
 
-impl<E: Environment, Ps: EachScoped<E::Depth>> Actionable<E> for Offer<Ps>
+impl<E, Choices: EachScoped<E::Depth>> Actionable<E> for Offer<Choices>
 where
+    E: Environment,
     E::Dual: Environment,
 {
-    type Action = Offer<Ps>;
+    type Action = Offer<Choices>;
     type Env = E;
 }
 
@@ -257,8 +251,9 @@ impl<P: Session, Q: Session> Session for Split<P, Q> {
     type Dual = Split<Q::Dual, P::Dual>;
 }
 
-impl<E: Environment, P: Scoped<E::Depth>, Q: Scoped<E::Depth>> Actionable<E> for Split<P, Q>
+impl<E, P: Scoped<E::Depth>, Q: Scoped<E::Depth>> Actionable<E> for Split<P, Q>
 where
+    E: Environment,
     E::Dual: Environment,
 {
     type Action = Split<P, Q>;
@@ -290,14 +285,15 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Repeat a loop, which infers from the number in the type which loop head to recur to.
-pub struct Recur<N = Z>(pub N);
+pub struct Recur<N: Unary = Z>(pub N);
 
 impl<N: Unary> Session for Recur<N> {
     type Dual = Recur<N>;
 }
 
-impl<E: Select<N> + Environment, N: Unary> Actionable<E> for Recur<N>
+impl<E, N: Unary> Actionable<E> for Recur<N>
 where
+    E: Select<N> + Environment,
     Recur<N>: Scoped<E::Depth>,
     E::Selected: Actionable<E>,
     <E::Selected as Actionable<E>>::Action: Actionable<E>,
@@ -308,4 +304,26 @@ where
 {
     type Action = <E::Selected as Actionable<E>>::Action;
     type Env = <E::Selected as Actionable<E>>::Env;
+}
+
+mod sealed {
+    use super::*;
+
+    pub trait IsSession {}
+    impl IsSession for End {}
+    impl<T, P: IsSession> IsSession for Recv<T, P> {}
+    impl<T, P: IsSession> IsSession for Send<T, P> {}
+    impl<Ps: EachSession> IsSession for Choose<Ps> {}
+    impl<Ps: EachSession> IsSession for Offer<Ps> {}
+    impl<P: IsSession, Q: IsSession> IsSession for Split<P, Q> {}
+    impl<P: IsSession> IsSession for Loop<P> {}
+    impl<N: Unary> IsSession for Recur<N> {}
+
+    pub trait EachSession {}
+    impl EachSession for () {}
+    impl<T: IsSession, Ts: EachSession> EachSession for (T, Ts) {}
+
+    pub trait Select<N: Unary> {}
+    impl<T, S> Select<Z> for (T, S) {}
+    impl<T, P, N: Unary> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
 }
