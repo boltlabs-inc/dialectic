@@ -94,6 +94,8 @@ pub trait Environment: EachSession
 where
     Self::Dual: Environment,
 {
+    /// The depth of a session environment is the number of loops to which a [`Recur`] could jump,
+    /// i.e. the number of session types in the session environment.
     type Depth: Unary;
 }
 
@@ -139,6 +141,7 @@ impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 /// protocols. The sealed `Select` trait describes what it means to index into a type level list of
 /// protocols.
 pub trait Select<N: Unary>: sealed::Select<N> {
+    /// The thing which is selected from this list by the index `N`.
     type Selected;
 }
 
@@ -153,8 +156,8 @@ where
     type Selected = <(P, ()) as Select<N>>::Selected;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Complete a session. The only thing to do with a [`Chan`] at its `End` is to drop it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct End;
 
 impl Session for End {
@@ -170,16 +173,17 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Recv<T, P>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Recv<T, P> {
     type Dual = Send<T, P::Dual>;
 }
 
-impl<E, T, P: Scoped<E::Depth>> Actionable<E> for Recv<T, P>
+impl<E, T, P> Actionable<E> for Recv<T, P>
 where
+    P: Scoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -187,16 +191,17 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Send a message of type `T` using [`Chan::send`], then continue with protocol `P`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Send<T, P>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Send<T, P> {
     type Dual = Recv<T, P::Dual>;
 }
 
-impl<E, T, P: Scoped<E::Depth>> Actionable<E> for Send<T, P>
+impl<E, T, P> Actionable<E> for Send<T, P>
 where
+    P: Scoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -204,16 +209,17 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Choices`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Choose<Choices>(pub Choices);
 
 impl<Choices: EachSession> Session for Choose<Choices> {
     type Dual = Offer<Choices::Dual>;
 }
 
-impl<E, Choices: EachScoped<E::Depth>> Actionable<E> for Choose<Choices>
+impl<E, Choices> Actionable<E> for Choose<Choices>
 where
+    Choices: EachScoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -221,17 +227,18 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Offer the choice using [`Chan::offer`] or the `offer!` macro between any of the protocols in the
 /// tuple `Choices`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Offer<Choices>(pub Choices);
 
 impl<Choices: EachSession> Session for Offer<Choices> {
     type Dual = Choose<Choices::Dual>;
 }
 
-impl<E, Choices: EachScoped<E::Depth>> Actionable<E> for Offer<Choices>
+impl<E, Choices> Actionable<E> for Offer<Choices>
 where
+    Choices: EachScoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -239,9 +246,9 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Split the connection into send-only and receive-only halves using [`Chan::split`]. These can
 /// subsequently be rejoined using [`Chan::unsplit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Split<P, Q>(pub P, pub Q);
 
 impl<P: Session, Q: Session> Session for Split<P, Q> {
@@ -251,8 +258,10 @@ impl<P: Session, Q: Session> Session for Split<P, Q> {
     type Dual = Split<Q::Dual, P::Dual>;
 }
 
-impl<E, P: Scoped<E::Depth>, Q: Scoped<E::Depth>> Actionable<E> for Split<P, Q>
+impl<E, P, Q> Actionable<E> for Split<P, Q>
 where
+    P: Scoped<E::Depth>,
+    Q: Scoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -260,8 +269,8 @@ where
     type Env = E;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Label a loop point, which can be reiterated with [`Recur`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Loop<P>(pub P);
 
 impl<P: Session> Session for Loop<P> {
@@ -283,8 +292,8 @@ where
     type Env = <P as Actionable<(P, E)>>::Env;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Repeat a loop, which infers from the number in the type which loop head to recur to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Recur<N: Unary = Z>(pub N);
 
 impl<N: Unary> Session for Recur<N> {

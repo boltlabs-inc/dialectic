@@ -4,7 +4,7 @@ use std::{
 };
 use thiserror::Error;
 
-pub use backend::*;
+use backend::*;
 pub use types::*;
 
 pub mod backend;
@@ -397,6 +397,10 @@ where
     /// the connection, alerting the other party to this choice by sending the number `N` over the
     /// channel.
     ///
+    /// The choice `N` is specified as a type-level [`Unary`] number, i.e. `S(S(...Z...))`. For
+    /// small `N`, predefined constants are available in the [`constants`] module, named for its
+    /// corresponding decimal number prefixed with an underscore (e.g. `_0`, or `_42`).
+    ///
     /// # Errors
     ///
     /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
@@ -406,6 +410,7 @@ where
     ///
     /// ```
     /// use dialectic::*;
+    /// use dialectic::constants::*;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -423,7 +428,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<Z>().await?.send(42).await?;
+    /// c1.choose(_0).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -433,6 +438,7 @@ where
     #[must_use]
     pub async fn choose<N: Unary>(
         mut self,
+        _choice: N,
     ) -> Result<
         Chan<
             Tx,
@@ -569,6 +575,7 @@ where
     ///
     /// ```
     /// use dialectic::*;
+    /// use dialectic::constants::*;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -589,7 +596,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<Z>().await?.send(42).await?;
+    /// c1.choose(_0).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -602,6 +609,7 @@ where
     ///
     /// ```
     /// # use dialectic::*;
+    /// # use dialectic::constants::*;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -619,7 +627,7 @@ where
     /// # });
     /// #
     /// # // Choose to send an integer
-    /// # c1.choose::<Z>().await?.send(42).await?;
+    /// # c1.choose(_0).await?.send(42).await?;
     /// #
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
@@ -658,6 +666,7 @@ where
 ///
 /// ```
 /// use dialectic::*;
+/// use dialectic::constants::*;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -675,7 +684,7 @@ where
 /// });
 ///
 /// // Choose to send an integer
-/// c1.choose::<Z>().await?.send(42).await?;
+/// c1.choose(_0).await?.send(42).await?;
 ///
 /// // Wait for the offering thread to finish
 /// t1.await??;
@@ -696,6 +705,7 @@ where
 ///
 /// ```
 /// # use dialectic::*;
+/// # use dialectic::constants::*;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -714,7 +724,7 @@ where
 /// # });
 /// #
 /// # // Choose to send an integer
-/// # c1.choose::<Z>().await?.send(42).await?;
+/// # c1.choose(_0).await?.send(42).await?;
 /// #
 /// # // Wait for the offering thread to finish
 /// # t1.await??;
