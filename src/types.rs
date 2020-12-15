@@ -3,6 +3,7 @@
 use super::*;
 pub use unary::*;
 
+pub mod tuple;
 pub mod unary;
 
 /// A session type describes the sequence of operations performed by one end of a bidirectional
@@ -123,8 +124,18 @@ where
 pub trait Scoped<N: Unary = Z>: Session {}
 impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
 impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Send<T, P> {}
-impl<N: Unary, Choices: EachScoped<N>> Scoped<N> for Offer<Choices> {}
-impl<N: Unary, Choices: EachScoped<N>> Scoped<N> for Choose<Choices> {}
+impl<N: Unary, Choices: Tuple> Scoped<N> for Offer<Choices>
+where
+    Choices::AsList: EachScoped<N>,
+    <Choices::AsList as EachSession>::Dual: List,
+{
+}
+impl<N: Unary, Choices: Tuple> Scoped<N> for Choose<Choices>
+where
+    Choices::AsList: EachScoped<N>,
+    <Choices::AsList as EachSession>::Dual: List,
+{
+}
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 impl<N: Unary> Scoped<S<N>> for Recur<Z> {}
@@ -223,13 +234,21 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Choose<Choices>(pub Choices);
 
-impl<Choices: EachSession> Session for Choose<Choices> {
-    type Dual = Offer<Choices::Dual>;
+impl<Choices> Session for Choose<Choices>
+where
+    Choices: Tuple,
+    Choices::AsList: EachSession,
+    <Choices::AsList as EachSession>::Dual: List + EachSession,
+{
+    type Dual = Offer<<<Choices::AsList as EachSession>::Dual as List>::AsTuple>;
 }
 
 impl<E, Choices> Actionable<E> for Choose<Choices>
 where
-    Choices: EachScoped<E::Depth>,
+    Choices: Tuple,
+    Choices::AsList: EachSession,
+    <Choices::AsList as EachSession>::Dual: List + EachSession,
+    Choices::AsList: EachScoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -242,13 +261,21 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Offer<Choices>(pub Choices);
 
-impl<Choices: EachSession> Session for Offer<Choices> {
-    type Dual = Choose<Choices::Dual>;
+impl<Choices> Session for Offer<Choices>
+where
+    Choices: Tuple,
+    Choices::AsList: EachSession,
+    <Choices::AsList as EachSession>::Dual: List + EachSession,
+{
+    type Dual = Choose<<<Choices::AsList as EachSession>::Dual as List>::AsTuple>;
 }
 
 impl<E, Choices> Actionable<E> for Offer<Choices>
 where
-    Choices: EachScoped<E::Depth>,
+    Choices: Tuple,
+    Choices::AsList: EachSession,
+    <Choices::AsList as EachSession>::Dual: List + EachSession,
+    Choices::AsList: EachScoped<E::Depth>,
     E: Environment,
     E::Dual: Environment,
 {
@@ -330,12 +357,12 @@ mod sealed {
 
     pub trait IsSession {}
     impl IsSession for End {}
-    impl<T, P: IsSession> IsSession for Recv<T, P> {}
-    impl<T, P: IsSession> IsSession for Send<T, P> {}
-    impl<Ps: EachSession> IsSession for Choose<Ps> {}
-    impl<Ps: EachSession> IsSession for Offer<Ps> {}
-    impl<P: IsSession, Q: IsSession> IsSession for Split<P, Q> {}
-    impl<P: IsSession> IsSession for Loop<P> {}
+    impl<T, P> IsSession for Recv<T, P> {}
+    impl<T, P> IsSession for Send<T, P> {}
+    impl<Choices> IsSession for Choose<Choices> {}
+    impl<Choices> IsSession for Offer<Choices> {}
+    impl<P, Q> IsSession for Split<P, Q> {}
+    impl<P> IsSession for Loop<P> {}
     impl<N: Unary> IsSession for Recur<N> {}
 
     pub trait EachSession {}
