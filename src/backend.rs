@@ -11,6 +11,7 @@ use async_trait::async_trait;
 pub use call_by::*;
 use std::future::Future;
 
+#[cfg(any(test, feature = "mpsc"))]
 pub mod mpsc;
 
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
