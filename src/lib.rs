@@ -17,9 +17,8 @@ pub mod types;
 ///
 /// # Examples
 ///
-/// In this example, we make a one-message session type describing a session that sends a single
-/// string and then ends. Then, we use a pair of channels with that session type and its dual to
-/// enact the session:
+/// To construct a new [`Chan`], use one of the static methods of [`NewSession`] on the session type
+/// for which you want to create a channel. Here, we use the session type `Send<String, End>`:
 ///
 /// ```
 /// use dialectic::*;
@@ -30,7 +29,18 @@ pub mod types;
 /// // - `c1` with the session type `Send<String, End>`, and
 /// // - `c2` with the dual session type `Recv<String, End>`
 /// let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
+/// # Ok(())
+/// # }
+/// ```
 ///
+/// Then, you can use a pair of channels with that session type and its dual to enact the session:
+///
+/// ```
+/// # use dialectic::*;
+/// #
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
 /// // Spawn a thread to send a message
 /// let t1 = tokio::spawn(async move {
 ///     c1.send("Hello, world!".to_string()).await?;
@@ -55,19 +65,19 @@ pub mod types;
 /// on. The following **does not compile**:
 ///
 /// ```compile_fail
-/// use dialectic::*;
-///
+/// # use dialectic::*;
+/// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Make a pair of channels:
-/// // - `c1` with the session type `Send<String, End>`, and
-/// // - `c2` with the dual session type `Recv<String, End>`
+/// # // Make a pair of channels:
+/// # // - `c1` with the session type `Send<String, End>`, and
+/// # // - `c2` with the dual session type `Recv<String, End>`
 /// let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
 ///
-/// // try to send on `c2`, but type is `Recv<String, End>`
+/// // Try to send on `c2`, but type is `Recv<String, End>`
 /// c2.send("Hello, world!".to_string()).await?;
 ///
-/// // try to receive on `c1`, but type is `Send<String, End>`
+/// // Try to receive on `c1`, but type is `Send<String, End>`
 /// let (s, c1) = c1.recv().await?;
 /// # Ok(())
 /// # }
@@ -99,6 +109,49 @@ where
 /// #   c2.unwrap();
 /// # }
 /// ```
+///
+/// # Notes
+///
+/// The trait bounds specified for [`NewSession`] ensure that the session type is well-formed.
+/// However, it does not ensure that all the types in the session type can be sent or received over
+/// the given channels.
+///
+/// Valid session types must contain only "productive" recursion: they must not contain any
+/// [`Recur`] directly inside the loop to which that recursion refers. For instance, attempting to
+/// use the session type `Loop<Recur>` will result in a compile-time trait solver overflow.
+///
+/// ```compile_fail
+/// use dialectic::*;
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let (c1, c2) = <Loop<Recur>>::channel(backend::mpsc::unbounded_channel);
+/// #   c1.unwrap();
+/// #   c2.unwrap();
+/// # }
+/// ```
+///
+/// This results in the compiler error:
+///
+///
+/// ```text
+/// error[E0275]: overflow evaluating the requirement `Recur: Actionable<(Recur, ())>`
+///   |
+/// 7 | let (c1, c2) = <Loop<Recur>>::channel(backend::mpsc::unbounded_channel);
+///   |                ^^^^^^^^^^^^^^^^^^^^^^
+///   |
+///   = help: consider adding a `#![recursion_limit="256"]` attribute to your crate
+///   = note: required because of the requirements on the impl of `Actionable<()>` for `Loop<Recur>`
+///   = note: required because of the requirements on the impl of `NewSession` for `Loop<Recur>`
+/// ```
+///
+/// In this situation, you **should not** take `rustc`'s advice. If you add a
+/// `#![recursion_limit="256"]` attribute to your crate: this will only cause the compiler to work
+/// harder before giving you the same error!
+///
+/// What the compiler is trying to tell you is that the session type as specified does not
+/// correspond to a valid sequence of actions on the channel, because it contains unproductive
+/// recursion.
 pub trait NewSession
 where
     Self: Actionable<()>,
@@ -435,6 +488,26 @@ where
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// Attempting to choose an index that's out of bounds results in a compile-time error:
+    ///
+    /// ```compile_fail
+    /// use dialectic::*;
+    /// use dialectic::constants::*;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// type OnlyTwoChoices = Choose<(End, (End, ()))>;
+    /// let (c1, c2) = OnlyTwoChoices::channel(|| backend::mpsc::channel(1));
+    ///
+    /// // Try to choose something out of range (this doesn't typecheck)
+    /// c1.choose(_2).await?;
+    ///
+    /// # // Wait for the offering thread to finish
+    /// # t1.await??;
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub async fn choose<N: Unary>(
         mut self,
@@ -562,9 +635,8 @@ where
     ///
     /// # Notes
     ///
-    /// Where possible, prefer the [`offer!`](crate::offer) macro to simultaneously offer options
-    /// and handle them. This has the benefit of ensuring at compile time that no case is left
-    /// unhandled; it's also more succinct.
+    /// **Where possible, prefer the [`offer!`](crate::offer) macro**. This has the benefit of
+    /// ensuring at compile time that no case is left unhandled; it's also more succinct.
     ///
     /// # Errors
     ///
