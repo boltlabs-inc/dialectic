@@ -4,7 +4,8 @@ use std::{
 };
 use thiserror::Error;
 
-use backend::*;
+use crate::backend::*;
+use tuple::{List, Tuple};
 pub use types::*;
 
 pub mod backend;
@@ -18,7 +19,7 @@ pub mod types;
 /// # Examples
 ///
 /// To construct a new [`Chan`], use one of the static methods of [`NewSession`] on the session type
-/// for which you want to create a channel. Here, we use the session type `Send<String, End>`:
+/// for which you want to create a channel. Here, we use the session type `Send<String>`:
 ///
 /// ```
 /// use dialectic::*;
@@ -26,9 +27,9 @@ pub mod types;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Make a pair of channels:
-/// // - `c1` with the session type `Send<String, End>`, and
-/// // - `c2` with the dual session type `Recv<String, End>`
-/// let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
+/// // - `c1` with the session type `Send<String>`, and
+/// // - `c2` with the dual session type `Recv<String>`
+/// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
 /// # Ok(())
 /// # }
 /// ```
@@ -40,7 +41,7 @@ pub mod types;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
+/// # let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
 /// // Spawn a thread to send a message
 /// let t1 = tokio::spawn(async move {
 ///     c1.send("Hello, world!".to_string()).await?;
@@ -70,14 +71,14 @@ pub mod types;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # // Make a pair of channels:
-/// # // - `c1` with the session type `Send<String, End>`, and
-/// # // - `c2` with the dual session type `Recv<String, End>`
-/// let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
+/// # // - `c1` with the session type `Send<String>`, and
+/// # // - `c2` with the dual session type `Recv<String>`
+/// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
 ///
-/// // Try to send on `c2`, but type is `Recv<String, End>`
+/// // Try to send on `c2`, but type is `Recv<String>`
 /// c2.send("Hello, world!".to_string()).await?;
 ///
-/// // Try to receive on `c1`, but type is `Send<String, End>`
+/// // Try to receive on `c1`, but type is `Send<String>`
 /// let (s, c1) = c1.recv().await?;
 /// # Ok(())
 /// # }
@@ -103,7 +104,7 @@ where
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let (c1, c2) = <Send<String, End>>::channel(backend::mpsc::unbounded_channel);
+/// let (c1, c2) = <Send<String>>::channel(backend::mpsc::unbounded_channel);
 /// // do something with these channels...
 /// #   c1.unwrap();
 /// #   c2.unwrap();
@@ -360,7 +361,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Recv<String, End>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Recv<String>>::channel(|| backend::mpsc::channel(1));
     /// c2.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c1) = c1.recv().await?;
@@ -409,7 +410,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Send<String, End>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
     /// c1.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
@@ -439,12 +440,14 @@ where
 
 impl<Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    Tx: Transmit<'static, usize, Val>,
+    Tx: Transmit<'static, u8, Val>,
     P: Actionable<E, Action = Choose<Choices>>,
+    Choices: Tuple,
+    <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
-    Choices: EachScoped<<P::Env as Environment>::Depth>,
+    Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
 {
     /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
@@ -467,7 +470,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64, End>, (Recv<String, End>, ()))>;
+    /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     ///
     /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
     ///
@@ -497,7 +500,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type OnlyTwoChoices = Choose<(End, (End, ()))>;
+    /// type OnlyTwoChoices = Choose<(End, End)>;
     /// let (c1, c2) = OnlyTwoChoices::channel(|| backend::mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
@@ -516,17 +519,19 @@ where
         Chan<
             Tx,
             Rx,
-            <Choices::Selected as Actionable<E>>::Action,
-            <Choices::Selected as Actionable<E>>::Env,
+            <<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Action,
+            <<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env,
         >,
         Tx::Error,
     >
     where
-        Choices: Select<N>,
-        Choices::Selected: Actionable<E>,
-        <<Choices::Selected as Actionable<E>>::Env as EachSession>::Dual: Environment,
+        N: LessThan<unary::types::_128>,
+        Choices::AsList: Select<N>,
+        <Choices::AsList as Select<N>>::Selected: Actionable<E>,
+        <<<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env as EachSession>::Dual:
+            Environment,
     {
-        match self.tx.send(N::VALUE).await {
+        match self.tx.send(N::VALUE as u8).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => {
                 drop(self.unwrap()); // drop without panicking
@@ -543,21 +548,26 @@ where
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
 #[derive(Debug)]
 #[must_use]
-pub struct Branches<Tx, Rx, Ps: EachActionable<E>, E: Environment = ()>
+pub struct Branches<Tx, Rx, Choices, E = ()>
 where
+    Choices: Tuple,
+    Choices::AsList: EachActionable<E>,
+    E: Environment,
     E::Dual: Environment,
 {
-    variant: usize,
+    variant: u8,
     tx: Tx,
     rx: Rx,
-    protocols: PhantomData<Ps>,
+    protocols: PhantomData<Choices>,
     environment: PhantomData<E>,
 }
 
-impl<'a, Tx, Rx, P, Ps, E> Branches<Tx, Rx, (P, Ps), E>
+impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
 where
+    Choices: Tuple<AsList = (P, Ps)>,
+    (P, Ps): List<AsTuple = Choices>,
     P: Actionable<E>,
-    Ps: EachActionable<E>,
+    Ps: EachActionable<E> + List,
     E: Environment,
     E::Dual: Environment,
     P::Dual: Actionable<E::Dual>,
@@ -572,7 +582,7 @@ where
         self,
     ) -> Result<
         Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
-        Branches<Tx, Rx, Ps, E>,
+        Branches<Tx, Rx, Ps::AsTuple, E>,
     > {
         let variant = self.variant;
         let tx = self.tx;
@@ -622,13 +632,15 @@ where
 
 impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    Rx: Receive<usize>,
+    Rx: Receive<u8>,
     P: Actionable<E, Action = Offer<Choices>>,
+    Choices: Tuple,
+    <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
-    Choices: EachActionable<P::Env>,
-    Choices: EachScoped<<P::Env as Environment>::Depth>,
+    Choices::AsList: EachActionable<P::Env>,
+    Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// by sending a number which protocol to proceed with.
@@ -651,7 +663,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64, End>, (Recv<String, End>, ()))>;
+    /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     ///
     /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
     ///
@@ -685,7 +697,7 @@ where
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type GiveOrTake = Choose<(Send<i64, End>, (Recv<String, End>, ()))>;
+    /// # type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     /// #
     /// # let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
     /// #
@@ -742,7 +754,7 @@ where
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// type GiveOrTake = Choose<(Send<i64, End>, (Recv<String, End>, ()))>;
+/// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
 ///
 /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
 ///
@@ -781,7 +793,7 @@ where
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # type GiveOrTake = Choose<(Send<i64, End>, (Recv<String, End>, ()))>;
+/// # type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
 /// #
 /// # let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
 /// #
@@ -881,6 +893,60 @@ where
 {
     /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
     /// reunited (provided they reach a matching session type) using [`Chan::unsplit`].
+    ///
+    /// # Examples
+    ///
+    /// In this example, both ends of a channel concurrently interact with its split send/receive
+    /// halves. If the underlying channel implementation allows for parallelism, this simultaneous
+    /// interaction can be faster than sequentially sending data back and forth.
+    ///
+    /// ```
+    /// use dialectic::*;
+    /// use dialectic::constants::*;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
+    ///
+    /// let (c1, c2) = SendAndRecv::channel(|| backend::mpsc::channel(1));
+    ///
+    /// // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
+    /// let t1 = tokio::spawn(async move {
+    ///     let (tx, rx) = c1.split();
+    ///     let send_vec = tokio::spawn(async move {
+    ///         tx.send(vec![1, 2, 3, 4, 5]).await?;
+    ///         Ok::<_, backend::mpsc::Error>(())
+    ///     });
+    ///     let recv_string = tokio::spawn(async move {
+    ///         let (string, _) = rx.recv().await?;
+    ///         Ok::<_, backend::mpsc::Error>(string)
+    ///     });
+    ///     send_vec.await.unwrap()?;
+    ///     let string = recv_string.await.unwrap()?;
+    ///     Ok::<_, backend::mpsc::Error>(string)
+    /// });
+    ///
+    /// // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
+    /// // the task above:
+    /// let (tx, rx) = c2.split();
+    /// let send_string = tokio::spawn(async move {
+    ///     tx.send("Hello!".to_string()).await?;
+    ///     Ok::<_, backend::mpsc::Error>(())
+    /// });
+    /// let recv_vec = tokio::spawn(async move {
+    ///     let (vec, _) = rx.recv().await?;
+    ///     Ok::<_, backend::mpsc::Error>(vec)
+    /// });
+    ///
+    /// // Examine the result values:
+    /// send_string.await??;
+    /// let vec = recv_vec.await??;
+    /// let string = t1.await??;
+    /// assert_eq!(vec, &[1, 2, 3, 4, 5]);
+    /// assert_eq!(string, "Hello!");
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn split(
         self,
@@ -907,9 +973,49 @@ where
     /// Reunite the transmit-only and receive-only channels resulting from a call to [`Chan::split`]
     /// into a single channel.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::*;
+    /// use dialectic::constants::*;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// type SplitEnds = Split<End, End>;
+    ///
+    /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
+    ///
+    /// let (tx1, rx1) = c1.split();
+    /// let (tx2, rx2) = c2.split();
+    /// let c1 = Chan::unsplit(tx1, rx1);
+    /// let c2 = Chan::unsplit(tx2, rx2);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// # Panics
     ///
-    /// If the two channels given as input did not result from the same call to [`Chan::split`].
+    /// If the two channels given as input did not result from the same call to [`Chan::split`], a
+    /// panic results, since rewiring channels to be non-bidirectional can violate the session
+    /// typing guarantee. If instead of the above, we did the following, `unsplit` would panic:
+    ///
+    /// ```should_panic
+    /// # use dialectic::*;
+    /// # use dialectic::constants::*;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # type SplitEnds = Split<End, End>;
+    /// #
+    /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
+    ///
+    /// let (tx1, rx1) = c1.split();
+    /// let (tx2, rx2) = c2.split();
+    /// let c1 = Chan::unsplit(tx1, rx2); // <-- pairing tx from c1 with rx from c2
+    /// let c2 = Chan::unsplit(tx2, rx1); // <-- pairing tx from c2 with rx from c1
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn unsplit<Q, R>(
         tx: Chan<Tx, Unavailable<Rx>, Q, E>,
@@ -953,12 +1059,23 @@ where
     }
 
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
-    /// potentially before the end of the session.
+    /// potentially before the end of the session. **Prefer [`Chan::close`] to this method if you
+    /// mean to unwrap a channel at the end of its session.**
     ///
     /// # Errors
     ///
     /// If this function is used before the end of a session, it may result in errors when the other
     /// end of the channel attempts to continue the session.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::*;
+    ///
+    /// let (c1, c2) = <Send<String>>::channel(backend::mpsc::unbounded_channel);
+    /// let (tx1, rx1) = c1.unwrap();
+    /// let (tx2, rx2) = c2.unwrap();
+    /// ```
     pub fn unwrap(self) -> (Tx, Rx) {
         let tx = self.tx;
         let rx = self.rx;
