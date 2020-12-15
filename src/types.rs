@@ -174,8 +174,13 @@ where
 }
 
 /// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
+///
+/// # Notes
+///
+/// A session ending with a `Recv` can be abbreviated: `Recv<String>` is shorthand for `Recv<String,
+/// End>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Recv<T, P>(pub PhantomData<T>, pub P);
+pub struct Recv<T, P = End>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Recv<T, P> {
     type Dual = Send<T, P::Dual>;
@@ -192,8 +197,13 @@ where
 }
 
 /// Send a message of type `T` using [`Chan::send`], then continue with protocol `P`.
+///
+/// # Notes
+///
+/// A session ending with a `Send` can be abbreviated: `Send<String>` is shorthand for `Send<String,
+/// End>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Send<T, P>(pub PhantomData<T>, pub P);
+pub struct Send<T, P = End>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Send<T, P> {
     type Dual = Recv<T, P::Dual>;
