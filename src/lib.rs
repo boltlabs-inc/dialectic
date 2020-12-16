@@ -430,6 +430,35 @@
 //! In order to repeat a loop, we need to re-assign to the channel at the end of the loop so that it
 //! is in scope for the next iteration.
 //!
+//! ## Nested loops
+//!
+//! If the protocol contains nested loops, you can specify which nested loop to continue with  using
+//! the optional parameter of `Recur`. By default, `Recur` jumps to the innermost loop; however,
+//! `Recur<_1>` jumps to the second-innermost, `Recur<_2>` the third-innermost, etc. The types
+//! [`_0`](unary::types::_0), [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are defined
+//! in the [`unary::types`] module.
+//!
+//! ## Automatic looping
+//!
+//! You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
+//! even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
+//! [`Choose`]. This is true in general: if the session type of a [`Chan`] either [`Loop`]s or
+//! [`Recur`]s to a session type for which a given operation is valid, that operation is valid on
+//! the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a [`Chan`] with session
+//! type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a
+//! `Chan`'s type is `Recur`, whatever operation would be valid for the session type at the start of
+//! the corresponding `Loop` is valid for that `Chan`.
+//!
+//! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
+//! on a session type is. For [`End`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the
+//! final session type discussed below), the "real action" is that session type itself. However, for
+//! [`Loop`] and [`Recur`], the next action is whatever follows entering the loop(s) or recurring,
+//! respectively.
+//!
+//! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
+//! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,
+//! because that might help you understand an error message more thoroughly in the future!
+//!
 //! # Splitting off
 //!
 //! Traditional presentations of session types do not allow the channel to be used concurrently to

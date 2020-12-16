@@ -15,7 +15,7 @@ mpsc = ["tokio"]
 [dependencies]
 async-trait = "0.1"
 thiserror = "1"
-call-by = { version = "0.1", path = "../call-by" }
+call-by = "0.1"
 tokio = { version = "0.3", features = ["sync"], optional = true }
 
 [dev-dependencies]
