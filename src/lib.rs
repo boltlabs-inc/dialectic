@@ -365,13 +365,90 @@
 //! [`_1`](crate::constants::_1), [`_2`](crate::constants::_2), ... [`_127`](crate::constants::_127)
 //! are defined in the [`constants`](crate::constants) module.
 //!
-//! # Splitting off
-//!
-//! TODO: Explain full-duplex communication with `Split` with usage examples.
-//!
 //! # Looping back
 //!
 //! TODO: Explain looping, recursion, and `Actionable` with usage examples.
+//!
+//! # Splitting off
+//!
+//! Traditional presentations of session types do not allow the channel to be used concurrently to
+//! send and receive at the same time. Some protocols, however, can be made more efficient by
+//! executing certain portions of them in parallel.
+//!
+//! Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
+//! a session type of `Split<P, Q>` can be [`split`](Chan::split) into a send-only end with the
+//! session type `P` and a receive-only end with the session type `Q`, which can then be used
+//! concurrently. In the example below, the two ends of a channel **concurrently swap** a
+//! `Vec<usize>` and a `String`. If this example were run over a network and these values were
+//! large, this could represent a significant reduction in runtime.
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # use dialectic::constants::*;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
+//! let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
+//!
+//! // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
+//! let t1 = tokio::spawn(async move {
+//!     // Split c1 into a send-only `tx` and receive-only `rx`
+//!     let (tx, rx) = c1.split();
+//!
+//!     // Concurrently send and receive
+//!     let send_vec = tokio::spawn(async move {
+//!         let tx = tx.send(vec![1, 2, 3, 4, 5]).await?;
+//!         Ok::<_, mpsc::Error>(tx)
+//!     });
+//!     let recv_string = tokio::spawn(async move {
+//!         let (string, rx) = rx.recv().await?;
+//!         Ok::<_, mpsc::Error>((string, rx))
+//!     });
+//!     let tx = send_vec.await.unwrap()?;
+//!     let (string, rx) = recv_string.await.unwrap()?;
+//!
+//!     // Unsplit the ends of `c1`
+//!     let c1 = Chan::unsplit(tx, rx).unwrap();
+//!
+//!     Ok::<_, mpsc::Error>(string)
+//! });
+//!
+//! // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
+//! // the task above:
+//! let (tx, rx) = c2.split();
+//! let send_string = tokio::spawn(async move {
+//!     let tx = tx.send("Hello!".to_string()).await?;
+//!     Ok::<_, mpsc::Error>(tx)
+//! });
+//! let recv_vec = tokio::spawn(async move {
+//!     let (vec, rx) = rx.recv().await?;
+//!     Ok::<_, mpsc::Error>((vec, rx))
+//! });
+//!
+//! // Wait for the threads to finish
+//! let tx = send_string.await??;
+//! let (vec, rx) = recv_vec.await??;
+//! let string = t1.await??;
+//!
+//! // Unsplit the ends of `c2`
+//! let c2 = Chan::unsplit(tx, rx).unwrap();
+//!
+//! assert_eq!(vec, &[1, 2, 3, 4, 5]);
+//! assert_eq!(string, "Hello!");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! When using [`Split`], keep in mind its limitations:
+//!
+//! - You cannot [`Send`] or [`Choose`] on the receive-only end.
+//! - You cannot [`Recv`] or [`Offer`] on the transmit-only end.
+//! - You can [`unsplit`](Chan::unsplit) the two ends again only once their session types match each
+//!   other.
+//!
+//! That being said, if you need full-duplex communication in your protocol, `Split` is the right
+//! way to describe and implement it.
 
 use std::{
     marker::{self, PhantomData},
