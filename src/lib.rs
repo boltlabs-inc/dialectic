@@ -367,7 +367,80 @@
 //!
 //! # Looping back
 //!
-//! TODO: Explain looping, recursion, and `Actionable` with usage examples.
+//! While some protocols can be described as a finite sequence of operations, many contain the
+//! possibility of loops. Consider things like retrying after an invalid response, sending an
+//! unbounded stream of messages, or providing a persistent connection for multiple queries. All
+//! these can be modeled with session types by introducing *recursion*.
+//!
+//! Suppose we want to send a stream of as many integers as desired, then receive back their sum. We
+//! could describe this protocol using the [`Loop`] and [`Recur`] types:
+//!
+//! ```
+//! # use dialectic::*;
+//! type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
+//! ```
+//!
+//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Recur` is `Recur`, so we know the
+//! other end of this channel will need to implement:
+//!
+//! ```
+//! # use dialectic::*;
+//! # use static_assertions::assert_type_eq_all;
+//! # type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
+//! type ComputeSum = Loop<Offer<(Recv<i64, Recur>, Send<i64>)>>;
+//! assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
+//! ```
+//!
+//! We can implement this protocol by following the session types. When the session type of a
+//! [`Chan`] hits a [`Recur`] point, it jumps back to the type of the [`Loop`] to which that
+//! [`Recur`] refers. In this case, for example, immediately after the querying task sends an
+//! integer, the resultant channel will have the session type `Choose<(Send<i64, Recur>,
+//! Recv<i64>)>` once more.
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
+//! # type ComputeSum = Loop<Offer<(Recv<i64, Recur>, Send<i64>)>>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # use dialectic::constants::*;
+//! #
+//! let (mut c1, mut c2) = QuerySum::channel(|| mpsc::channel(1));
+//!
+//! // Sum all the numbers sent over the channel
+//! tokio::spawn(async move {
+//!     let mut sum = 0;
+//!     let c2 = loop {
+//!         c2 = offer!(c2 =>
+//!             {
+//!                 let (n, c2) = c2.recv().await?;
+//!                 sum += n;
+//!                 c2
+//!             },
+//!             { break c2; },
+//!         );
+//!     };
+//!     c2.send(sum).await?;
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! // Send some numbers to be summed
+//! for n in 0..=10 {
+//!     c1 = c1.choose(_0).await?.send(n).await?;
+//! }
+//!
+//! // Get the sum
+//! let (sum, c1) = c1.choose(_1).await?.recv().await?;
+//! assert_eq!(sum, 55);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **Notice:** Whenever we loop over a channel, the channel itself needs to be declared `mut`. This
+//! is because each channel operation takes the channel as an owned value, returning a new channel.
+//! In order to repeat a loop, we need to re-assign to the channel at the end of the loop so that it
+//! is in scope for the next iteration.
 //!
 //! # Splitting off
 //!
@@ -384,12 +457,33 @@
 //!
 //! ```
 //! # use dialectic::*;
+//! type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
+//! ```
+//!
+//! The dual of `Split<P, Q>` is `Split<Q::Dual, P::Dual>` -- notice that `P` and `Q` switch places!
+//!
+//! ```
+//! # use dialectic::*;
+//! # use static_assertions::assert_type_eq_all;
+//! assert_type_eq_all!(
+//!     <Split<Send<Vec<usize>>, Recv<String>> as Session>::Dual,
+//!     Split<Send<String>, Recv<Vec<usize>>>,
+//! );
+//! ```
+//!
+//! This is because the left-hand side `P` is always the send-only side, and the right-hand side `Q`
+//! is always the receive-only side.
+//!
+//! Now, let's use a channel of this session type to enact a concurrent swap:
+//!
+//! ```
+//! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
 //! # use dialectic::constants::*;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
-//! let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
+//! # type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
+//! let (c1, c2) = SwapVecString::channel(|| mpsc::channel(1));
 //!
 //! // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
 //! let t1 = tokio::spawn(async move {
@@ -440,7 +534,7 @@
 //! # }
 //! ```
 //!
-//! When using [`Split`], keep in mind its limitations:
+//! When using [`Split`], keep in mind its limitations (all of these enforced by the type checker):
 //!
 //! - You cannot [`Send`] or [`Choose`] on the receive-only end.
 //! - You cannot [`Recv`] or [`Offer`] on the transmit-only end.
