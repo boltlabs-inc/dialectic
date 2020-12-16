@@ -1,9 +1,7 @@
-#![recursion_limit = "256"]
-
-//! # What is Dialectic?
+//! # Dialectic
 //!
 //! > **dialectic (noun):** The process of arriving at the truth by stating a thesis, developing a
-//! contradictory antithesis, and combining them into a coherent synthesis.
+//! > contradictory antithesis, and combining them into a coherent synthesis.
 //! >
 //! > **dialectic (crate):** Zero-cost session types for asynchronous Rust.
 //!
@@ -13,9 +11,9 @@
 //! - **Conventional types** merely describe **what is valid** to communicate.
 //! - **Session types** describe **when it is valid** to communicate, and **in what manner**.
 //!
-//! This crate provides a generic wrapper [`Chan`](crate::Chan) around almost any type of
-//! asynchronous channel that adds compile-time guarantees that a specified *session protocol* will
-//! not be violated by any code using the channel. Such a wrapped channel:
+//! This crate provides a generic wrapper around almost any type of asynchronous channel that adds
+//! compile-time guarantees that a specified *session protocol* will not be violated by any code
+//! using the channel. Such a wrapped channel:
 //!
 //! - has **zero runtime cost** in time or memory;
 //! - is **built on `async`/`.await`** to allow integration with Rust's powerful `async` ecosystem;
@@ -24,18 +22,21 @@
 //!   preserving all the same session-type safety guarantees.
 //!
 //! Together, these make Dialectic ideal for writing networked services that need to ensure **high
-//! levels of availability** and **complex protocol correctness properties** in the real world --
+//! levels of availability** and **complex protocol correctness properties** in the real world,
 //! where protocols might be violated and connections might be dropped.
+//!
+//! <!-- snip -->
 //!
 //! # What now?
 //!
-//! - If you are **new to the idea of session types** (or haven't seen them presented in Rust
-//!   before), you might want to start with the [crate tutorial below](#getting-started).
-//! - If you're **familiar with session types**, you might want to check out the
-//!   [`types`](crate::types) module to familiarize yourself with the language of types and their
-//!   relevant traits, then look at [the reference documentation for `Chan`](crate::Chan).
+//! - If you are **new to session types** you might consider starting with the **[tutorial-style
+//!   tour of the crate](#getting-started)**.
+//! - If you're **familiar with session types**, you might jump to the **[quick
+//!   reference](#quick-reference)**, then read more in the [`types`](crate::types) module and the
+//!   documentation for [`Chan`](crate::Chan).
 //! - If you want to **integrate your own channel type** with Dialectic, you need to implement the
 //!   [`Transmit`] and [`Receive`] traits from the [`backend`] module.
+//! - Or, you can **[dive into the reference documentation](#modules)**...
 //!
 //! # Getting started
 //!
@@ -141,7 +142,7 @@
 //!
 //! # Moving forward
 //!
-//! Almost every operation on a `Chan`:
+//! Almost every operation on a [`Chan`]:
 //!
 //! - is **asynchronous** due to the inherent asynchrony of the protocol,
 //! - is **fallible** to account for issues in the underlying transport channel,
@@ -460,7 +461,7 @@
 //! type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
 //! ```
 //!
-//! The dual of `Split<P, Q>` is `Split<Q::Dual, P::Dual>` -- notice that `P` and `Q` switch places!
+//! The dual of `Split<P, Q>` is `Split<Q::Dual, P::Dual>`:
 //!
 //! ```
 //! # use dialectic::*;
@@ -471,8 +472,8 @@
 //! );
 //! ```
 //!
-//! This is because the left-hand side `P` is always the send-only side, and the right-hand side `Q`
-//! is always the receive-only side.
+//! Notice that `P` and `Q` switch places! This is because the left-hand `P` is always the send-only
+//! session, and the right-hand `Q` is always the receive-only session.
 //!
 //! Now, let's use a channel of this session type to enact a concurrent swap:
 //!
@@ -534,16 +535,40 @@
 //! # }
 //! ```
 //!
-//! When using [`Split`], keep in mind its limitations (all of these enforced by the type checker):
+//! When using [`Split`], keep in mind its limitations:
 //!
-//! - You cannot [`Send`] or [`Choose`] on the receive-only end.
-//! - You cannot [`Recv`] or [`Offer`] on the transmit-only end.
+//! - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
+//! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
 //! - You can [`unsplit`](Chan::unsplit) the two ends again only once their session types match each
 //!   other.
+//! - It's a runtime [`UnsplitError`] to attempt to [`unsplit`](Chan::unsplit) two [`Chan`]s which
+//!   did not originate from the same call to [`split`](Chan::split), even if their types match.
 //!
-//! That being said, if you need full-duplex communication in your protocol, `Split` is the right
-//! way to describe and implement it.
+//! # Quick reference
+//!
+//! The tutorial above covers all the constructs necessary to write session-typed programs with
+//! Dialectic. A quick summary:
+//!
+//! - To make a pair of dual [`Chan`]s for a session type `P`: [`let (c1, c2) = P::channel(||
+//!   {...})`](NewSession::channel) with some closure that builds a unidirectional underlying
+//!   channel.
+//! - To wrap an existing sender `tx` and receiver `rx` in a single [`Chan`] for `P`: [`let c =
+//!   P::wrap(tx, rx)`](NewSession::wrap).
+//!
+//! Once you've got a channel, here's what you can do:
+//!
+//! | Session Type | Channel Operation(s) | Dual Type |
+//! | :----------- | :------------------- | :-------- |
+//! | [`Send<T, P = End>`](Send) | [`let c = c.send(t: T).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P = End>`](Recv) | [`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Choose<Choices>`](Choose) | [`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
+//! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => {...}, ...);`](offer) | [`Choose<Choices::Dual>`](Choose) |
+//! | [`Split<P, Q>`](Split) | [`let (tx, rx) = c.split();`](Chan::split)<br>`// concurrently use tx and rx`<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Loop<P>`](Loop) | (none) | [`Loop<P::Dual>`](Loop) |
+//! | [`Recur<N = Z>`](Recur) | (none) | [`Recur<N>`](Recur) |
+//! | [`End`] | [`let (tx, rx) = c.close();`](Chan::close) | [`End`] | [`c.close()`](Chan::close) |
 
+#![recursion_limit = "256"]
 use std::{
     marker::{self, PhantomData},
     sync::Arc,
@@ -842,8 +867,8 @@ where
     /// ```
     ///
     /// If you *really* want to destruct a channel before the end of its session, use
-    /// [`Chan::unwrap`], but beware that this may cause the party on the other end of the channel
-    /// to throw errors due to your violation of the channel's protocol!
+    /// [`unwrap`](Chan::unwrap), but beware that this may cause the party on the other end of the
+    /// channel to throw errors due to your violation of the channel's protocol!
     pub fn close(self) -> (Tx, Rx) {
         self.unwrap()
     }
@@ -964,7 +989,7 @@ where
     <P::Env as EachSession>::Dual: Environment,
     Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
 {
-    /// Actively choose to enter the `N`th protocol offered via [`Chan::offer`] by the other end of
+    /// Actively choose to enter the `N`th protocol offered via [`offer`](Chan::offer) by the other end of
     /// the connection, alerting the other party to this choice by sending the number `N` over the
     /// channel.
     ///
@@ -1057,7 +1082,7 @@ where
     }
 }
 
-/// The result of [`Chan::offer`], `Branches<Tx, Rx, Ps>` represents an enumeration of the possible
+/// The result of [`offer`](Chan::offer), `Branches<Tx, Rx, Ps>` represents an enumeration of the possible
 /// new channel states that could result from the offering of the type-level list of protocols `Ps`.
 ///
 /// To find out which protocol was selected by the other party, use [`Branches::case`], or better
@@ -1372,7 +1397,7 @@ macro_rules! offer {
 
 /// A placeholder for a missing transmit or receive end of a connection.
 ///
-/// When using [`Chan::split`], the resultant two channels can only send or only receive,
+/// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
 /// respectively. This is reflected at the type level by the presence of `Unavailable` on the type
 /// of the connection which is not present for each part of the split.
 #[derive(Debug)]
@@ -1408,7 +1433,7 @@ where
     <<<R as Actionable<P::Env>>::Action as Actionable<<R as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
-    /// reunited (provided they reach a matching session type) using [`Chan::unsplit`].
+    /// reunited (provided they reach a matching session type) using [`unsplit`](Chan::unsplit).
     ///
     /// # Examples
     ///
@@ -1479,6 +1504,58 @@ where
     }
 }
 
+/// The error returned when two channels cannot be [`unsplit`](Chan::unsplit) together because they
+/// originate from different channels contains the two channels which couldn't be reunited.
+#[derive(Debug)]
+pub struct UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    P: Actionable<E>,
+    Q: Actionable<F>,
+    E: Environment,
+    F: Environment,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+    /// The transmit-only half.
+    pub tx: Chan<Tx, Unavailable<Rx>, P, E>,
+
+    /// The receive-only half.
+    pub rx: Chan<Unavailable<Tx>, Rx, Q, F>,
+}
+
+impl<Tx, Rx, P, Q, E, F> std::error::Error for UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    Tx: std::fmt::Debug,
+    Rx: std::fmt::Debug,
+    P: Actionable<E> + std::fmt::Debug,
+    Q: Actionable<F> + std::fmt::Debug,
+    E: Environment + std::fmt::Debug,
+    F: Environment + std::fmt::Debug,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+}
+
+impl<Tx, Rx, P, Q, E, F> std::fmt::Display for UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    P: Actionable<E>,
+    Q: Actionable<F>,
+    E: Environment,
+    F: Environment,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "cannot `Chan::unsplit` two unrelated channels")
+    }
+}
+
 impl<Tx, Rx, E, P> Chan<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = P, Env = E>,
@@ -1486,7 +1563,7 @@ where
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
 {
-    /// Reunite the transmit-only and receive-only channels resulting from a call to [`Chan::split`]
+    /// Reunite the transmit-only and receive-only channels resulting from a call to [`split`](Chan::split)
     /// into a single channel.
     ///
     /// # Examples
@@ -1497,26 +1574,24 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type SplitEnds = Split<End, End>;
-    ///
-    /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
-    ///
+    /// let (c1, c2) = <Split<End, End>>::channel(|| backend::mpsc::channel(1));
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
-    /// let c1 = Chan::unsplit(tx1, rx1).unwrap();
-    /// let c2 = Chan::unsplit(tx2, rx2).unwrap();
+    ///
+    /// let c1 = Chan::unsplit(tx1, rx1)?;
+    /// let c2 = Chan::unsplit(tx2, rx2)?;
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// # Errors
     ///
-    /// If the two channels given as input did not result from the same call to [`Chan::split`], a
-    /// panic results, since rewiring channels to be non-bidirectional can violate the session
-    /// typing guarantee. If instead of the above, we did the following, `unsplit` would return an
-    /// error:
+    /// If the two channels given as input did not result from the same call to [`split`](Chan::split),
+    /// this function returns an [`UnsplitError`] containing the two channels, since rewiring
+    /// channels to be non-bidirectional can violate the session typing guarantee. If instead of the
+    /// above, we did the following, `unsplit` would return an error:
     ///
-    /// ```should_panic
+    /// ```
     /// # use dialectic::*;
     /// # use dialectic::constants::*;
     /// #
@@ -1525,33 +1600,31 @@ where
     /// # type SplitEnds = Split<End, End>;
     /// #
     /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
-    ///
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
-    /// let c1 = Chan::unsplit(tx1, rx2).unwrap(); // <-- pairing tx from c1 with rx from c2
-    /// let c2 = Chan::unsplit(tx2, rx1).unwrap(); // <-- pairing tx from c2 with rx from c1
+    ///
+    /// assert!(Chan::unsplit(tx1, rx2).is_err()); // <-- pairing tx from c1 with rx from c2
+    /// assert!(Chan::unsplit(tx2, rx1).is_err()); // <-- pairing tx from c2 with rx from c1
     /// # Ok(())
     /// # }
     /// ```
     #[must_use]
-    pub fn unsplit<Q, R>(
-        tx: Chan<Tx, Unavailable<Rx>, Q, E>,
-        rx: Chan<Unavailable<Tx>, Rx, R, E>,
-    ) -> Result<
-        Self,
-        (
-            Chan<Tx, Unavailable<Rx>, Q, E>,
-            Chan<Unavailable<Tx>, Rx, R, E>,
-        ),
-    >
+    pub fn unsplit<Q, R, F, G>(
+        tx: Chan<Tx, Unavailable<Rx>, Q, F>,
+        rx: Chan<Unavailable<Tx>, Rx, R, G>,
+    ) -> Result<Self, UnsplitError<Tx, Rx, Q, R, F, G>>
     where
-        Q: Actionable<E, Action = P, Env = E>,
-        R: Actionable<E, Action = P, Env = E>,
+        Q: Actionable<F, Action = P, Env = E>,
+        R: Actionable<G, Action = P, Env = E>,
+        F: Environment,
+        F::Dual: Environment,
+        G: Environment,
+        G::Dual: Environment,
     {
         if Arc::ptr_eq(&tx.rx.0, &rx.tx.0) {
             Ok(unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) })
         } else {
-            Err((tx, rx))
+            Err(UnsplitError { tx, rx })
         }
     }
 }
@@ -1582,7 +1655,7 @@ where
     }
 
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
-    /// potentially before the end of the session. **Prefer [`Chan::close`] to this method if you
+    /// potentially before the end of the session. **Prefer [`close`](Chan::close) to this method if you
     /// mean to unwrap a channel at the end of its session.**
     ///
     /// # Errors

@@ -32,7 +32,7 @@ where
     /// The type of future returned by [`Transmit::send`].
     type Future: Future<Output = Result<(), Self::Error>>;
 
-    /// Send a message.
+    /// Send a message using the [`CallingConvention`] specified by the trait implementation.
     fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future;
 }
 
