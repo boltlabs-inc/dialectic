@@ -2,8 +2,8 @@
 
 //! # What is Dialectic?
 //!
-//! > **dialectic (noun):** The process... of arriving at the truth by stating a thesis, developing
-//! a contradictory antithesis, and combining and resolving them into a coherent synthesis.
+//! > **dialectic (noun):** The process of arriving at the truth by stating a thesis, developing a
+//! contradictory antithesis, and combining them into a coherent synthesis.
 //! >
 //! > **dialectic (crate):** Zero-cost session types for asynchronous Rust.
 //!
@@ -23,9 +23,9 @@
 //! - allows for **full duplex concurrent communication**, if specified in its type, while
 //!   preserving all the same session-type safety guarantees.
 //!
-//! Together, these make Dialectic ideal for writing networked services that need to ensure high
-//! levels of availability and complex protocol correctness properties in the real world -- where
-//! protocols might be violated and connections might be dropped.
+//! Together, these make Dialectic ideal for writing networked services that need to ensure **high
+//! levels of availability** and **complex protocol correctness properties** in the real world --
+//! where protocols might be violated and connections might be dropped.
 //!
 //! # What now?
 //!
@@ -149,25 +149,58 @@
 //!
 //! As a result, each invocation of an operation on a channel is usually followed by an `.await?`,
 //! and the result of each operation should usually be rebound via `let` to the same name as the
-//! original channel. Like this:
+//! original channel.
 //!
-//! ```no_run
+//! In this example, two interlocking threads collaborate to compute the parity of the length of the
+//! string "Hello, world!". Notice how each time a channel operation is invoked, its name is rebound
+//! to a new channel.
+//!
+//! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, End>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! type Protocol = Send<String, Recv<u64, Send<bool>>>;
-//! let (c1, _) = Protocol::channel(|| mpsc::channel(1));
+//! type ParityOfLength = Send<String, Recv<usize, Send<bool>>>;
+//! let (c1, c2) = ParityOfLength::channel(|| mpsc::channel(1));
 //!
-//! // `send` returns the channel
-//! let c1 = c1.send("Hello, world!".to_string()).await?;
+//! // The string whose length's parity we'll compute
+//! let string = "Hello, world!".to_string();
 //!
-//! // `recv` returns a pair of (received value, channel)
-//! let (i, c1) = c1.recv().await?;
+//! // Send "Hello, world!", receive its length, then send its parity
+//! let t1 = tokio::spawn(async move {
+//!     // `send` returns the channel
+//!     let c1 = c1.send(string).await?;
 //!
-//! // When we're done with a channel, we close it
-//! c1.send(i % 2 == 0).await?.close();
+//!     // `recv` returns a pair of (received value, channel)
+//!     let (len, c1) = c1.recv().await?;
+//!
+//!     // `send` returns the channel
+//!     let c1 = c1.send(len % 2 == 0).await?;
+//!
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! // Receive a string, send its length, and receive its parity
+//! let t2 = tokio::spawn(async move {
+//!     // `recv` returns a pair of (received value, channel)
+//!     let (string, c2) = c2.recv().await?;
+//!
+//!     // `send` returns the channel
+//!     let c2 = c2.send(string.chars().count()).await?;
+//!
+//!     // `recv` returns a pair of (received value, channel)
+//!     let (parity, c2) = c2.recv().await?;
+//!
+//!     Ok::<_, mpsc::Error>(parity)
+//! });
+//!
+//! // Wait for the tasks to finish
+//! t1.await??;
+//! let parity = t2.await??;
+//!
+//! // Check that the parity was correct
+//! assert_eq!(parity, false);
 //! # Ok(())
 //! # }
 //! ```
@@ -274,7 +307,63 @@
 //! );
 //! ```
 //!
-//! TODO: Usage example.
+//! Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the [`Send`] and
+//! [`Recv`] session types, the [`choose`](Chan::choose) method and [`offer!`](crate::offer) macro
+//! enact the [`Choose`] and [`Offer`] session types.
+//!
+//! Suppose we want to offer a choice between two protocols: either sending a single integer
+//! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
+//! channel must indicate a choice of which protocol to follow -- and we need to handle the result
+//! of either selection by enacting the protocol chosen.
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use dialectic::constants::*;
+//!
+//! let (c1, c2) = <Offer<(Send<i64>, Recv<String>)>>::channel(|| mpsc::channel(1));
+//!
+//! // Offer a choice
+//! let t1 = tokio::spawn(async move {
+//!     let c1 = offer!(c1 =>
+//!         { c1.send(42).await? },  // handle `c2.choose(_0)`
+//!         { c1.recv().await?.1 },  // handle `c2.choose(_1)`
+//!     );
+//! #   c1.close();
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! // Make a choice
+//! let t2 = tokio::spawn(async move {
+//!     let c2 = c2.choose(_1).await?;            // select to `Send<String>`
+//!     c2.send("Hi there!".to_string()).await?;  // enact the selected choice
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! // Wait for the tasks to finish
+//! t1.await??;
+//! t2.await??;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! In the above, we can see how the [`offer!`](crate::offer) macro takes the name of a channel
+//! (this must be an identifier, not an expression) and a list of expressions which may use that
+//! channel. In each expression, the channel's type corresponds to the session type for that choice.
+//! The type of each expression in the list must be the same, which means that if we want to bind a
+//! channel name to the result of the `offer!`, each expression must step the channel forward to an
+//! identical session type (in the case above, that's `End`).
+//!
+//! Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
+//! channel, passing it as input a constant corresponding to the index of the choice. These
+//! constants are *not* Rust's built-in numeric types, but rather [unary type-level
+//! numbers](crate::types::unary). Dialectic supports up to 128 possible choices in an `Offer` or
+//! `Choose`, and the corresponding constants [`_0`](crate::constants::_0),
+//! [`_1`](crate::constants::_1), [`_2`](crate::constants::_2), ... [`_127`](crate::constants::_127)
+//! are defined in the [`constants`](crate::constants) module.
 //!
 //! # Splitting off
 //!

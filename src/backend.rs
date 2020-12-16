@@ -1,8 +1,8 @@
 //! A [`Chan<Tx, Rx, P, E>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
-//! session (and in the case of [`Transmit`], the calling conventions used to pass those types to
-//! [`Chan::send`](crate::Chan::send)).
+//! session (and in the case of [`Transmit`], for the particular calling conventions used to pass
+//! those types to [`Chan::send`](crate::Chan::send)).
 //!
 //! Additionally, in order to support [`offer!`](crate::Chan::offer) and
 //! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement `Transmit<'static, u8,
