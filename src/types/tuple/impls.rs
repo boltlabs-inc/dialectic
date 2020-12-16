@@ -17,6 +17,7 @@
 // print("\n".join(impl_tuple(n) + "\n" + impl_list(n) for n in range(2, 129)))
 // ```
 
+#![allow(clippy::type_complexity)]
 use crate::types::tuple::{List, Tuple};
 
 impl Tuple for () {

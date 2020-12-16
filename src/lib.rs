@@ -177,20 +177,7 @@
 //!     let (len, c1) = c1.recv().await?;
 //!
 //!     // `send` returns the channel
-//!     let c1 = c1.send(len % 2 == 0).await?;
-//!
-//!     Ok::<_, mpsc::Error>(())
-//! });
-//!
-//! // Receive a string, send its length, and receive its parity
-//! let t2 = tokio::spawn(async move {
-//!     // `recv` returns a pair of (received value, channel)
-//!     let (string, c2) = c2.recv().await?;
-//!
-//!     // `send` returns the channel
-//!     let c2 = c2.send(string.chars().count()).await?;
-//!
-//!     // `recv` returns a pair of (received value, channel)
+//!     let c1 = c1.send(len % 2 == 0).await?;    #[must_use]
 //!     let (parity, c2) = c2.recv().await?;
 //!
 //!     Ok::<_, mpsc::Error>(parity)
@@ -569,6 +556,7 @@
 //! | [`End`] | [`let (tx, rx) = c.close();`](Chan::close) | [`End`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
+#![allow(clippy::type_complexity)]
 use std::{
     marker::{self, PhantomData},
     sync::Arc,
@@ -717,7 +705,6 @@ where
     /// let (c1, c2) = End::channel(backend::mpsc::unbounded_channel);
     /// # }
     /// ```
-    #[must_use]
     fn channel<Tx, Rx>(
         make: impl FnMut() -> (Tx, Rx),
     ) -> (
@@ -745,7 +732,6 @@ where
     /// );
     /// # }
     /// ```
-    #[must_use]
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
@@ -780,7 +766,6 @@ where
     /// let (tx, rx) = c.close();             // and get them back when the channel is closed.
     /// # }
     /// ```
-    #[must_use]
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self::Action, Self::Env>;
 }
 
@@ -791,7 +776,6 @@ where
     <Self::Env as EachSession>::Dual: Environment,
     <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
 {
-    #[must_use]
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
     ) -> (
@@ -803,7 +787,6 @@ where
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
     }
 
-    #[must_use]
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
@@ -816,7 +799,6 @@ where
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
     }
 
-    #[must_use]
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self::Action, Self::Env> {
         unsafe { Chan::with_env(tx, rx) }
     }
@@ -909,7 +891,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, Q::Action, Q::Env>), Rx::Error> {
         match self.rx.recv().await {
             Ok(result) => Ok((result, unsafe { self.cast() })),
@@ -955,7 +936,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub async fn send<Convention: CallingConvention>(
         mut self,
         message: <T as CallBy<'a, Convention>>::Type,
@@ -1046,7 +1026,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub async fn choose<N: Unary>(
         mut self,
         _choice: N,
@@ -1250,14 +1229,13 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         match rx.recv().await {
             Ok(variant) => Ok(Branches {
                 variant,
-                tx: tx,
-                rx: rx,
+                tx,
+                rx,
                 protocols: PhantomData,
                 environment: PhantomData,
             }),
@@ -1479,7 +1457,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub fn split(
         self,
     ) -> (
@@ -1599,7 +1576,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[must_use]
     pub fn unsplit<Q, R, F, G>(
         tx: Chan<Tx, Unavailable<Rx>, Q, F>,
         rx: Chan<Unavailable<Tx>, Rx, R, G>,
@@ -1628,7 +1604,6 @@ where
     <P::Env as EachSession>::Dual: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    #[must_use]
     unsafe fn cast<F, Q>(self) -> Chan<Tx, Rx, Q, F>
     where
         F: Environment,
@@ -1671,7 +1646,6 @@ where
 
     /// Create a new channel with an arbitrary environment. This is equivalent to casting a new
     /// channel to an arbitrary environment. Use with care!
-    #[must_use]
     unsafe fn with_env(tx: Tx, rx: Rx) -> Chan<Tx, Rx, P, E> {
         Chan {
             tx,
