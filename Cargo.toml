@@ -3,8 +3,10 @@ name = "dialectic"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+description = "Transport-polymorphic, asynchronous, concurrent session types for Rust"
+repository = "https://github.com/boltlabs-inc/dialectic"
+keywords = ["session", "types", "async", "channel", "protocol"]
 
 [features]
 default = ["mpsc"]
