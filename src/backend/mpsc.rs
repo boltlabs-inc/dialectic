@@ -7,29 +7,34 @@ use async_trait::async_trait;
 pub use mpsc::error::SendError;
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc;
+
+/// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
+pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + std::marker::Send + 'a>>;
+
+/// A bounded sender for dynamically typed values. See [`tokio::sync::mpsc::Sender`].
+pub type Sender<'a> = mpsc::Sender<Box<dyn Any + std::marker::Send + 'a>>;
+
+/// An unbounded receiver for dynamically typed values. See
+/// [`tokio::sync::mpsc::UnboundedReceiver`].
+pub type UnboundedReceiver<'a> = mpsc::UnboundedReceiver<Box<dyn Any + std::marker::Send + 'a>>;
+
+/// An unbounded sender for dynamically typed values. See [`tokio::sync::mpsc::UnboundedSender`].
+pub type UnboundedSender<'a> = mpsc::UnboundedSender<Box<dyn Any + std::marker::Send + 'a>>;
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See the documentation
-/// for [`tokio::sync::mpsc::channel`] for more details.
-pub fn channel(
-    buffer: usize,
-) -> (
-    Sender<Box<dyn Any + std::marker::Send>>,
-    Receiver<Box<dyn Any + std::marker::Send>>,
-) {
+/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// [`tokio::sync::mpsc::channel`].
+pub fn channel<'a>(buffer: usize) -> (Sender<'a>, Receiver<'a>) {
     mpsc::channel(buffer)
 }
 
 /// Create an unbounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See the documentation
-/// for [`tokio::sync::mpsc::unbounded_channel`] for more details.
-pub fn unbounded_channel() -> (
-    UnboundedSender<Box<dyn Any + std::marker::Send>>,
-    UnboundedReceiver<Box<dyn Any + std::marker::Send>>,
-) {
+/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// [`tokio::sync::mpsc::unbounded_channel`].
+pub fn unbounded_channel<'a>() -> (UnboundedSender<'a>, UnboundedReceiver<'a>) {
     mpsc::unbounded_channel()
 }
 
@@ -88,9 +93,7 @@ pub enum RecvError {
     DowncastFailed(Box<dyn Any + std::marker::Send>),
 }
 
-impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val>
-    for Sender<Box<dyn Any + std::marker::Send + 'b>>
-{
+impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for Sender<'b> {
     type Error = SendError<T>;
     type Future = Pin<Box<dyn Future<Output = Result<(), SendError<T>>> + std::marker::Send>>;
 
@@ -107,9 +110,7 @@ impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val>
 }
 
 #[async_trait]
-impl<'a, T: std::marker::Send + Any> Receive<T>
-    for Receiver<Box<dyn Any + std::marker::Send + 'a>>
-{
+impl<'a, T: std::marker::Send + Any> Receive<T> for Receiver<'a> {
     type Error = RecvError;
 
     async fn recv(&mut self) -> Result<T, Self::Error> {
@@ -123,9 +124,7 @@ impl<'a, T: std::marker::Send + Any> Receive<T>
     }
 }
 
-impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val>
-    for UnboundedSender<Box<dyn Any + std::marker::Send + 'b>>
-{
+impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for UnboundedSender<'b> {
     type Error = SendError<T>;
     type Future = Pin<Box<dyn Future<Output = Result<(), SendError<T>>> + std::marker::Send>>;
 
@@ -142,9 +141,7 @@ impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val>
 }
 
 #[async_trait]
-impl<'a, T: std::marker::Send + Any> Receive<T>
-    for UnboundedReceiver<Box<dyn Any + std::marker::Send + 'a>>
-{
+impl<'a, T: std::marker::Send + Any> Receive<T> for UnboundedReceiver<'a> {
     type Error = RecvError;
 
     async fn recv(&mut self) -> Result<T, Self::Error> {

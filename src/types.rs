@@ -231,6 +231,9 @@ where
 }
 
 /// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Choices`.
+///
+/// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
+/// `Choose`s within each other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Choose<Choices>(pub Choices);
 
@@ -256,8 +259,11 @@ where
     type Env = E;
 }
 
-/// Offer the choice using [`Chan::offer`] or the `offer!` macro between any of the protocols in the
-/// tuple `Choices`.
+/// Offer the choice using [`Chan::offer`] or the [`offer!`](crate::offer) macro between any of the
+/// protocols in the tuple `Choices`.
+///
+/// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest
+/// `Offer`s within each other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Offer<Choices>(pub Choices);
 
@@ -329,7 +335,8 @@ where
     type Env = <P as Actionable<(P, E)>>::Env;
 }
 
-/// Repeat a loop, which infers from the number in the type which loop head to recur to.
+/// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
+/// innermost starting at [`Z`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Recur<N: Unary = Z>(pub N);
 

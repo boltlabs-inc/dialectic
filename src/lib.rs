@@ -1,4 +1,286 @@
+//! # What is Dialectic?
 //!
+//! > **dialectic (noun):** The process... of arriving at the truth by stating a thesis, developing
+//! a contradictory antithesis, and combining and resolving them into a coherent synthesis.
+//! >
+//! > **dialectic (crate):** Zero-cost session types for asynchronous Rust.
+//!
+//! When two concurrent processes communicate, it's good to give their messages *types*, which
+//! ensure every message is of an expected form.
+//!
+//! - **Conventional types** merely describe **what is valid** to communicate.
+//! - **Session types** describe **when it is valid** to communicate, and **in what manner**.
+//!
+//! This crate provides a generic wrapper [`Chan`](crate::Chan) around almost any type of
+//! asynchronous channel that adds compile-time guarantees that a specified *session protocol* will
+//! not be violated by any code using the channel. Such a wrapped channel:
+//!
+//! - has **zero runtime cost** in time or memory;
+//! - is **built on `async`/`.await`** to allow integration with Rust's powerful `async` ecosystem;
+//! - gracefully handles runtime protocol violations, introducing **no panics**; and
+//! - allows for **full duplex concurrent communication**, if specified in its type, while
+//!   preserving all the same session-type safety guarantees.
+//!
+//! Together, these make Dialectic ideal for writing networked services that need to ensure high
+//! levels of availability and complex protocol correctness properties in the real world -- where
+//! protocols might be violated and connections might be dropped.
+//!
+//! # What now?
+//!
+//! - If you are **new to the idea of session types** (or haven't seen them presented in Rust
+//!   before), you might want to start with the [crate tutorial below](#getting-started).
+//! - If you're **familiar with session types**, you might want to check out the
+//!   [`types`](crate::types) module to familiarize yourself with the language of types and their
+//!   relevant traits, then look at [the reference documentation for `Chan`](crate::Chan).
+//! - If you want to **integrate your own channel type** with Dialectic, you need to implement the
+//!   [`Transmit`] and [`Receive`] traits from the [`backend`] module.
+//!
+//! # Getting started
+//!
+//! The first step to communicating is figuring out what you mean to say.
+//!
+//! This crate provides a concise [type-level language for expressing session types](crate::types).
+//! The session type attached to a wrapped communications channel indicates precisely which actions
+//! are available for each end of the channel.
+//!
+//! Let's write our first session type:
+//!
+//! ```
+//! use dialectic::*;
+//!
+//! type JustSendOneString = Send<String, End>;
+//! ```
+//!
+//! This type specifies a very simple protocol: "send a string, then finish." The first argument to
+//! `Send` is the type sent, and the second is the rest of the protocol, which in this case is the
+//! empty protocol [`End`].
+//!
+//! Every session type has a [`Dual`](crate::Session::Dual), which describes what the other end of
+//! the channel must do to follow the channel's protocol; if one end [`Send`]s, the other end must
+//! [`Recv`]:
+//!
+//! ```
+//! # use dialectic::*;
+//! # use static_assertions::assert_type_eq_all;
+//! assert_type_eq_all!(<Send<String, End> as Session>::Dual, Recv<String, End>);
+//! ```
+//!
+//! Because many sessions end with either a `Send` or a `Recv`, their types can be abbreviated when
+//! the rest of the session is `End`:
+//!
+//! ```
+//! # use dialectic::*;
+//! # use static_assertions::assert_type_eq_all;
+//! assert_type_eq_all!(Send<String>, Send<String, End>);
+//! assert_type_eq_all!(Recv<String>, Recv<String, End>);
+//! ```
+//!
+//! Given a valid session type, we can wrap an underlying communications channel with it. Here,
+//! let's make two ends of a channel for playing out our `JustSendOneString` protocol.
+//!
+//! In this case, we're using the [`mpsc`](crate::backend::mpsc) backend Dialectic provides, which
+//! is built on [`tokio::sync::mpsc`]. However, the mechanism for wrapping underlying channels is
+//! extensible, meaning you can choose your own transport if you want.
+//!
+//! ```
+//! # use dialectic::*;
+//! use dialectic::backend::mpsc;
+//! ```
+//!
+//! The static method [`channel`](crate::NewSession::channel) is automatically defined for all valid
+//! session types (note: its corresponding trait [`NewSession`] needs to be in scope for it to be
+//! callable). It takes as input a closure that creates some underlying unidirectional transport
+//! channel, and creates a matched pair of bidirectional session-typed channels wrapping the
+//! underlying channel type.
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! ```
+//!
+//! The types of `c1` and `c2` are inferred from the session type specified: `c1`'s type corresponds
+//! to the given session type, and `c2`'s type corresponds to its dual:
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! let _: Chan<mpsc::Sender, mpsc::Receiver, Send<String>> = c1;
+//! let _: Chan<mpsc::Sender, mpsc::Receiver, Recv<String>> = c2;
+//! ```
+//!
+//! Now that we have the two ends of a bidirectional session-typed channel, we can use them to
+//! concurrently enact the protocol specified by their type. In this case, we're going to run them
+//! in two parallel [`tokio`] tasks. However, Dialectic is generic over the underlying async
+//! runtime, provided the underlying transport channel is of a compatible type.
+//!
+//! ```
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! tokio::spawn(async move {
+//!     c1.send("Hello, world!".to_string()).await?;
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! let (greeting, c2) = c2.recv().await?;
+//! assert_eq!(greeting, "Hello, world!");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! 🎉 **Tada!** We've just written an asynchronous session-typed program with Dialectic!
+//!
+//! # Moving forward
+//!
+//! Almost every operation on a `Chan`:
+//!
+//! - is **asynchronous** due to the inherent asynchrony of the protocol,
+//! - is **fallible** to account for issues in the underlying transport channel,
+//! - and **takes ownership** of the `Chan` upon which it is invoked to enforce type correctness.
+//!
+//! As a result, each invocation of an operation on a channel is usually followed by an `.await?`,
+//! and the result of each operation should usually be rebound via `let` to the same name as the
+//! original channel. Like this:
+//!
+//! ```no_run
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! type Protocol = Send<String, Recv<u64, Send<bool>>>;
+//! let (c1, _) = Protocol::channel(|| mpsc::channel(1));
+//!
+//! // `send` returns the channel
+//! let c1 = c1.send("Hello, world!".to_string()).await?;
+//!
+//! // `recv` returns a pair of (received value, channel)
+//! let (i, c1) = c1.recv().await?;
+//!
+//! // When we're done with a channel, we close it
+//! c1.send(i % 2 == 0).await?.close();
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Getting stopped
+//!
+//! The most important benefit to session typing is not what it lets you do, but rather, what it
+//! *prevents you from doing*. Below are some things we *can't do* with our `JustSendOneString`
+//! channel from above:
+//!
+//! ```
+//! # use dialectic::*;
+//! type JustSendOneString = Send<String, End>;
+//! ```
+//!
+//! Trying to do any of the below things results in a compile-time type error (edited for brevity).
+//!
+//! If we try to send on the end of the channel that's meant to receive...
+//!
+//! ```compile_fail
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! c2.send("Hello, world!".to_string()).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ...we get an error telling us exactly that:with another implementation of session types in Rust
+//!
+//! ```text
+//! error[E0599]: no method named `send` found for struct `Chan<Sender, Receiver, Recv<String>>` in the current scope
+//! ```
+//!
+//! If we try to receive the wrong type of thing...
+//!
+//! ```compile_fail
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! c1.send("Hello, world!".to_string()).await?;
+//! let (n, c2): (i64, _) = c2.recv().await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ...we get an error informing us so:
+//!
+//! ```text
+//! error[E0308]: try expression alternatives have incompatible types
+//!    |
+//!    | let (n, c2): (i64, _) = c2.recv().await?;
+//!    |                         ^^^^^^^^^^^^^^^^ expected `i64`, found struct `String`
+//! ```
+//!
+//! But the unique power session types bring to the table is enforcing the validity of *sequences*
+//! of messages. If we try to send twice in a row...
+//!
+//! ```compile_fail
+//! # use dialectic::*;
+//! # use dialectic::backend::mpsc;
+//! # type JustSendOneString = Send<String, End>;
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
+//! let c1 = c1.send("Hello, world!".to_string()).await?;
+//! c1.send("Hello again!".to_string()).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ...we get an error we saying the returned channel is now of type `Chan<_, _, End>`, and we can't
+//! send when it's the end:
+//!
+//! ```text
+//! error[E0599]: no method named `send` found for struct `Chan<Sender, Receiver, End>` in the current scope
+//! ```
+//!
+//! # Branching out
+//!
+//! Most interesting protocols don't just consist of linear sequences of [`Send`]s and [`Recv`]s.
+//! Sometimes, one party offers the other a choice of different ways to proceed, and the other
+//! chooses which path to take.
+//!
+//! In Dialectic, this possibility is represented by the [`Offer`] and [`Choose`] types. Each is
+//! parameterized by a *tuple* of session types representing, respectively, the choices offered by
+//! one end of the channel, or the choices available to choose from.
+//!
+//! `Offer` is dual to `Choose` if the choices offered are dual to the choices available to choose
+//! from:
+//!
+//! ```
+//! # use dialectic::*;
+//! # use static_assertions::assert_type_eq_all;
+//! assert_type_eq_all!(
+//!     <Offer<(Send<String>, Recv<i64>)> as Session>::Dual,
+//!     Choose<(Recv<String>, Send<i64>)>,
+//! );
+//! ```
+//!
+//! TODO: Usage example.
+//!
+//! # Splitting off
+//!
+//! TODO: Explain full-duplex communication with `Split` with usage examples.
+//!
+//! # Looping back
+//!
+//! TODO: Explain looping, recursion, and `Actionable` with usage examples.
 
 use std::{
     marker::{self, PhantomData},
@@ -18,10 +300,12 @@ pub mod types;
 /// by the session type `P`. The `E` parameter is a type-level list describing the *session
 /// environment* of the channel: the stack of [`Loop`]s the channel has entered.
 ///
-/// # Examples
+/// # Creating new `Chan`s: use [`NewSession`]
 ///
 /// To construct a new [`Chan`], use one of the static methods of [`NewSession`] on the session type
-/// for which you want to create a channel. Here, we use the session type `Send<String>`:
+/// for which you want to create a channel. Here, we create two `Chan`s with the session type
+/// `Send<String>` and its dual `Recv<String>`, wrapping an underlying bidirectional transport built
+/// from a pair of [`tokio::sync::mpsc::channel`]s:
 ///
 /// ```
 /// use dialectic::*;
@@ -36,52 +320,19 @@ pub mod types;
 /// # }
 /// ```
 ///
-/// Then, you can use a pair of channels with that session type and its dual to enact the session:
+/// If you already have a sender and receiver and want to wrap them in a `Chan`, use the
+/// [`wrap`](NewSession::wrap) method for a session type. This is useful, for example, if you're
+/// talking to another process over a network connection, where it's not possible to build both
+/// halves of the channel on one computer, and instead each computer will wrap one end of the
+/// connection:
 ///
 /// ```
 /// # use dialectic::*;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
-/// // Spawn a thread to send a message
-/// let t1 = tokio::spawn(async move {
-///     c1.send("Hello, world!".to_string()).await?;
-///     Ok::<_, backend::mpsc::SendError<String>>(())
-/// });
-///
-/// // Spawn a thread to receive a message
-/// let t2 = tokio::spawn(async move {
-///     let (s, c2) = c2.recv().await?;
-///     assert_eq!(s, "Hello, world!");
-///     Ok::<_, backend::mpsc::RecvError>(())
-/// });
-///
-/// // Wait for both threads to complete
-/// t1.await??;
-/// t2.await??;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// However, suppose we accidentally tried to *send* on the channel we were supposed to *receive*
-/// on. The following **does not compile**:
-///
-/// ```compile_fail
-/// # use dialectic::*;
-/// #
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # // Make a pair of channels:
-/// # // - `c1` with the session type `Send<String>`, and
-/// # // - `c2` with the dual session type `Recv<String>`
-/// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
-///
-/// // Try to send on `c2`, but type is `Recv<String>`
-/// c2.send("Hello, world!".to_string()).await?;
-///
-/// // Try to receive on `c1`, but type is `Send<String>`
-/// let (s, c1) = c1.recv().await?;
+/// let (tx, rx) = backend::mpsc::channel(1);
+/// let c = <Send<String>>::wrap(tx, rx);
 /// # Ok(())
 /// # }
 /// ```
@@ -455,9 +706,10 @@ where
     /// the connection, alerting the other party to this choice by sending the number `N` over the
     /// channel.
     ///
-    /// The choice `N` is specified as a type-level [`Unary`] number, i.e. `S(S(...Z...))`. For
-    /// small `N`, predefined constants are available in the [`constants`] module, named for its
-    /// corresponding decimal number prefixed with an underscore (e.g. `_0`, or `_42`).
+    /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
+    /// supported numbers of choices (up to a maximum of 127) are available in the [`constants`]
+    /// module, each named for its corresponding decimal number prefixed with an underscore (e.g.
+    /// `_0`, or `_42`).
     ///
     /// # Errors
     ///
@@ -989,17 +1241,18 @@ where
     ///
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
-    /// let c1 = Chan::unsplit(tx1, rx1);
-    /// let c2 = Chan::unsplit(tx2, rx2);
+    /// let c1 = Chan::unsplit(tx1, rx1).unwrap();
+    /// let c2 = Chan::unsplit(tx2, rx2).unwrap();
     /// # Ok(())
     /// # }
     /// ```
     ///
-    /// # Panics
+    /// # Errors
     ///
     /// If the two channels given as input did not result from the same call to [`Chan::split`], a
     /// panic results, since rewiring channels to be non-bidirectional can violate the session
-    /// typing guarantee. If instead of the above, we did the following, `unsplit` would panic:
+    /// typing guarantee. If instead of the above, we did the following, `unsplit` would return an
+    /// error:
     ///
     /// ```should_panic
     /// # use dialectic::*;
@@ -1013,8 +1266,8 @@ where
     ///
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
-    /// let c1 = Chan::unsplit(tx1, rx2); // <-- pairing tx from c1 with rx from c2
-    /// let c2 = Chan::unsplit(tx2, rx1); // <-- pairing tx from c2 with rx from c1
+    /// let c1 = Chan::unsplit(tx1, rx2).unwrap(); // <-- pairing tx from c1 with rx from c2
+    /// let c2 = Chan::unsplit(tx2, rx1).unwrap(); // <-- pairing tx from c2 with rx from c1
     /// # Ok(())
     /// # }
     /// ```
@@ -1022,15 +1275,21 @@ where
     pub fn unsplit<Q, R>(
         tx: Chan<Tx, Unavailable<Rx>, Q, E>,
         rx: Chan<Unavailable<Tx>, Rx, R, E>,
-    ) -> Self
+    ) -> Result<
+        Self,
+        (
+            Chan<Tx, Unavailable<Rx>, Q, E>,
+            Chan<Unavailable<Tx>, Rx, R, E>,
+        ),
+    >
     where
         Q: Actionable<E, Action = P, Env = E>,
         R: Actionable<E, Action = P, Env = E>,
     {
         if Arc::ptr_eq(&tx.rx.0, &rx.tx.0) {
-            unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) }
+            Ok(unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) })
         } else {
-            panic!("Unrelated channels passed to `Chan::unsplit`")
+            Err((tx, rx))
         }
     }
 }

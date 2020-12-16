@@ -1,11 +1,12 @@
 //! A [`Chan<Tx, Rx, P, E>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
-//! session.
+//! session (and in the case of [`Transmit`], the calling conventions used to pass those types to
+//! [`Chan::send`](crate::Chan::send)).
 //!
 //! Additionally, in order to support [`offer!`](crate::Chan::offer) and
-//! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement `Transmit<'static,
-//! usize, Val>`, and the receiving channel `Rx` must implement `Receive<usize>`.
+//! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement `Transmit<'static, u8,
+//! Val>`, and the receiving channel `Rx` must implement `Receive<u8>`.
 
 use async_trait::async_trait;
 pub use call_by::*;
@@ -16,6 +17,10 @@ pub mod mpsc;
 
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
 /// type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
+///
+/// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
+/// implement `Transmit<'static, u8, Val>`, in addition to whatever other types and calling
+/// conventions they support.
 pub trait Transmit<'a, T, Convention: CallingConvention>
 where
     T: CallBy<'a, Convention>,
@@ -47,6 +52,9 @@ where
 }
 
 /// If something is `Receive<T>`, we can use it to [`Receive::recv`] a message of type `T`.
+///
+/// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
+/// `Receive<u8>`, in addition to whatever other types they support.
 #[async_trait]
 pub trait Receive<T> {
     /// The type of possible errors when receiving.

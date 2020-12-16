@@ -18,3 +18,4 @@ tokio = { version = "0.3", features = ["sync"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "0.3", features = ["full"] }
+static_assertions = "1.1"
