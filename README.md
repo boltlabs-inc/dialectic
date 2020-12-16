@@ -15,7 +15,7 @@ This crate provides a generic wrapper around almost any type of asynchronous cha
 compile-time guarantees that a specified *session protocol* will not be violated by any code
 using the channel. Such a wrapped channel:
 
-- has **zero runtime cost** in time or memory;
+- has **almost no runtime cost** in time or memory;
 - is **built on `async`/`.await`** to allow integration with Rust's powerful `async` ecosystem;
 - gracefully handles runtime protocol violations, introducing **no panics**; and
 - allows for **full duplex concurrent communication**, if specified in its type, while
