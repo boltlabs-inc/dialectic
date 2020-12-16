@@ -15,7 +15,7 @@
 //! compile-time guarantees that a specified *session protocol* will not be violated by any code
 //! using the channel. Such a wrapped channel:
 //!
-//! - has **almost no runtime cost** in time or memory;
+//! - has **zero runtime cost** in time or memory;
 //! - is **built on `async`/`.await`** to allow integration with Rust's powerful `async` ecosystem;
 //! - gracefully handles runtime protocol violations, introducing **no panics**; and
 //! - allows for **full duplex concurrent communication**, if specified in its type, while
@@ -177,7 +177,20 @@
 //!     let (len, c1) = c1.recv().await?;
 //!
 //!     // `send` returns the channel
-//!     let c1 = c1.send(len % 2 == 0).await?;    #[must_use]
+//!     let c1 = c1.send(len % 2 == 0).await?;
+//!
+//!     Ok::<_, mpsc::Error>(())
+//! });
+//!
+//! // Receive a string, send its length, and receive its parity
+//! let t2 = tokio::spawn(async move {
+//!     // `recv` returns a pair of (received value, channel)
+//!     let (string, c2) = c2.recv().await?;
+//!
+//!     // `send` returns the channel
+//!     let c2 = c2.send(string.chars().count()).await?;
+//!
+//!     // `recv` returns a pair of (received value, channel)
 //!     let (parity, c2) = c2.recv().await?;
 //!
 //!     Ok::<_, mpsc::Error>(parity)
