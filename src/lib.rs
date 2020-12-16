@@ -913,10 +913,7 @@ where
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, Q::Action, Q::Env>), Rx::Error> {
         match self.rx.recv().await {
             Ok(result) => Ok((result, unsafe { self.cast() })),
-            Err(err) => {
-                drop(self.unwrap()); // drop without panicking
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -970,10 +967,7 @@ where
     {
         match self.tx.send(message).await {
             Ok(()) => Ok(unsafe { self.cast() }),
-            Err(err) => {
-                drop(self.unwrap()); // drop without panicking
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -1074,10 +1068,7 @@ where
     {
         match self.tx.send(N::VALUE as u8).await {
             Ok(()) => Ok(unsafe { self.cast() }),
-            Err(err) => {
-                drop(self.unwrap()); // drop without panicking
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 }
