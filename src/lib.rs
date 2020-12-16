@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! # What is Dialectic?
 //!
 //! > **dialectic (noun):** The process... of arriving at the truth by stating a thesis, developing
