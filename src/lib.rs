@@ -233,7 +233,7 @@
 //! # }
 //! ```
 //!
-//! ...we get an error telling us exactly that:with another implementation of session types in Rust
+//! ...we get an error telling us exactly that:
 //!
 //! ```text
 //! error[E0599]: no method named `send` found for struct `Chan<Sender, Receiver, Recv<String>>` in the current scope
