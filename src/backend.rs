@@ -8,12 +8,16 @@
 //! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement `Transmit<'static, u8,
 //! Val>`, and the receiving channel `Rx` must implement `Receive<u8>`.
 
-use async_trait::async_trait;
 pub use call_by::*;
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 
+#[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
 #[cfg(any(test, feature = "mpsc"))]
 pub mod mpsc;
+
+#[cfg_attr(docsrs, doc(cfg(feature = "serialize")))]
+#[cfg(any(test, feature = "serialize"))]
+pub mod serde;
 
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
 /// type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
@@ -29,11 +33,13 @@ where
     /// The type of possible errors when sending.
     type Error;
 
-    /// The type of future returned by [`Transmit::send`].
-    type Future: Future<Output = Result<(), Self::Error>>;
-
     /// Send a message using the [`CallingConvention`] specified by the trait implementation.
-    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future;
+    fn send<'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as CallBy<'a, Convention>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime;
 }
 
 impl<'a, T, C, Convention> Transmit<'a, T, Convention> for &'_ mut C
@@ -44,9 +50,14 @@ where
     <T as CallBy<'a, Convention>>::Type: Send,
 {
     type Error = C::Error;
-    type Future = C::Future;
 
-    fn send(&mut self, message: <T as CallBy<'a, Convention>>::Type) -> Self::Future {
+    fn send<'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as CallBy<'a, Convention>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
         (**self).send(message)
     }
 }
@@ -55,20 +66,22 @@ where
 ///
 /// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
 /// `Receive<u8>`, in addition to whatever other types they support.
-#[async_trait]
 pub trait Receive<T> {
     /// The type of possible errors when receiving.
     type Error;
 
     /// Receive a message. This may require type annotations for disambiguation.
-    async fn recv(&mut self) -> Result<T, Self::Error>;
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
 }
 
-#[async_trait]
 impl<T: 'static, C: Receive<T> + Send> Receive<T> for &'_ mut C {
     type Error = C::Error;
 
-    async fn recv(&mut self) -> Result<T, Self::Error> {
-        (**self).recv().await
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
+        (**self).recv()
     }
 }

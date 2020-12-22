@@ -599,6 +599,7 @@
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 use std::{
     marker::{self, PhantomData},
     sync::Arc,
