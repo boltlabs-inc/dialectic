@@ -9,15 +9,31 @@ repository = "https://github.com/boltlabs-inc/dialectic"
 keywords = ["session", "types", "async", "channel", "protocol"]
 
 [features]
-default = ["mpsc"]
+default = ["mpsc", "serialize"]
 mpsc = ["tokio"]
+serialize = ["futures", "tokio", "tokio-util", "tokio-serde", "serde", "bytes"]
 
 [dependencies]
-async-trait = "0.1"
 thiserror = "1"
 call-by = "0.1"
 tokio = { version = "0.3", features = ["sync"], optional = true }
+tokio-util = { version = "0.5", features = ["codec"], optional = true }
+tokio-serde = { version = "0.7", optional = true }
+bincode-crate = { package = "bincode", version = "1.3", optional = true }
+serde = { version = "1", optional = true }
+bytes = { version = "0.6", optional = true }
+futures = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "0.3", features = ["full"] }
 static_assertions = "1.1"
+tokio-util = { version = "0.5", features = ["codec"] }
+tokio-serde = { version = "0.7" }
+bincode-crate = { package = "bincode", version = "1.3" }
+serde = { version = "1" }
+bytes = { version = "0.6" }
+futures = { version = "0.3" }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

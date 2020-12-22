@@ -3,7 +3,6 @@
 //! end of the channel.
 
 use crate::*;
-use async_trait::async_trait;
 pub use mpsc::error::SendError;
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
@@ -95,12 +94,16 @@ pub enum RecvError {
 
 impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for Sender<'b> {
     type Error = SendError<T>;
-    type Future = Pin<Box<dyn Future<Output = Result<(), SendError<T>>> + std::marker::Send>>;
 
-    fn send(&mut self, message: T) -> Self::Future {
-        let this = self.clone();
+    fn send<'async_lifetime>(
+        &'async_lifetime mut self,
+        message: T,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
         Box::pin(async move {
-            Sender::send(&this, Box::new(message)).await.map_err(
+            Sender::send(self, Box::new(message)).await.map_err(
                 |SendError(message): SendError<Box<dyn Any + std::marker::Send>>| {
                     SendError(*message.downcast().unwrap())
                 },
@@ -109,29 +112,37 @@ impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for Sender<'b> {
     }
 }
 
-#[async_trait]
 impl<'a, T: std::marker::Send + Any> Receive<T> for Receiver<'a> {
     type Error = RecvError;
 
-    async fn recv(&mut self) -> Result<T, Self::Error> {
-        match Receiver::recv(self).await {
-            None => Err(RecvError::Closed),
-            Some(b) => match b.downcast() {
-                Err(b) => Err(RecvError::DowncastFailed(b)),
-                Ok(t) => Ok(*t),
-            },
-        }
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
+    {
+        Box::pin(async move {
+            match Receiver::recv(self).await {
+                None => Err(RecvError::Closed),
+                Some(b) => match b.downcast() {
+                    Err(b) => Err(RecvError::DowncastFailed(b)),
+                    Ok(t) => Ok(*t),
+                },
+            }
+        })
     }
 }
 
 impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for UnboundedSender<'b> {
     type Error = SendError<T>;
-    type Future = Pin<Box<dyn Future<Output = Result<(), SendError<T>>> + std::marker::Send>>;
 
-    fn send(&mut self, message: T) -> Self::Future {
-        let this = self.clone();
+    fn send<'async_lifetime>(
+        &'async_lifetime mut self,
+        message: T,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
         Box::pin(async move {
-            UnboundedSender::send(&this, Box::new(message)).map_err(
+            UnboundedSender::send(self, Box::new(message)).map_err(
                 |SendError(message): SendError<Box<dyn Any + std::marker::Send>>| {
                     SendError(*message.downcast().unwrap())
                 },
@@ -140,17 +151,21 @@ impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for UnboundedSende
     }
 }
 
-#[async_trait]
 impl<'a, T: std::marker::Send + Any> Receive<T> for UnboundedReceiver<'a> {
     type Error = RecvError;
 
-    async fn recv(&mut self) -> Result<T, Self::Error> {
-        match UnboundedReceiver::recv(self).await {
-            None => Err(RecvError::Closed),
-            Some(b) => match b.downcast() {
-                Err(b) => Err(RecvError::DowncastFailed(b)),
-                Ok(t) => Ok(*t),
-            },
-        }
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
+    {
+        Box::pin(async move {
+            match UnboundedReceiver::recv(self).await {
+                None => Err(RecvError::Closed),
+                Some(b) => match b.downcast() {
+                    Err(b) => Err(RecvError::DowncastFailed(b)),
+                    Ok(t) => Ok(*t),
+                },
+            }
+        })
     }
 }
