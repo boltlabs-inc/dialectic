@@ -1,18 +1,16 @@
-use super::*;
+use crate::serde::*;
 use bincode_crate as bincode;
 use bytes::Bytes;
 use serde_crate::{Deserialize, Serialize};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 
-pub use bincode::Options;
-
 /// The [Bincode](bincode) binary serialization format.
 ///
 /// To construct with default options, use `Bincode::default()`. To configure custom options, use
-/// the Bincode crate's [Options] builder, then the [`.into()`](Into::into) method to construct a
-/// [`Bincode`].
+/// the Bincode crate's [bincode::Options] builder, then the [`.into()`](Into::into) method to
+/// construct a [`Bincode`].
 #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Bincode<O: bincode::Options = bincode::DefaultOptions>(O);
 
 impl<O: bincode::Options> From<O> for Bincode<O> {
@@ -42,7 +40,7 @@ where
 }
 
 /// Pairs the [`Bincode`] serialization format with the
-/// [`LengthDelimitedCodec`](super::codec::LengthDelimitedCodec) for framing, returning a
+/// [`LengthDelimitedCodec`](tokio_util::codec::LengthDelimitedCodec) for framing, returning a
 /// symmetrical pair of [`Sender`] and [`Receiver`].
 ///
 /// The `length_field_bytes` parameter indicates how many bytes to use for representing the length

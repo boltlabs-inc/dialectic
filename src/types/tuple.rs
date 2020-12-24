@@ -7,6 +7,8 @@
 //!
 //! At present, tuples up to size 128 are supported.
 
+use super::unary::*;
+
 /// Convert a tuple into its corresponding inductive list structure.
 pub trait Tuple: Sized {
     /// The corresponding inductive list.
@@ -17,6 +19,20 @@ pub trait Tuple: Sized {
 pub trait List: Sized {
     /// The corresponding tuple.
     type AsTuple: Tuple<AsList = Self>;
+}
+
+/// Take the length of a type-level list as a unary type-level number.
+pub trait HasLength {
+    /// The length of a type-level list.
+    type Length: Unary;
+}
+
+impl HasLength for () {
+    type Length = Z;
+}
+
+impl<T, Ts: HasLength> HasLength for (T, Ts) {
+    type Length = S<Ts::Length>;
 }
 
 mod impls;
