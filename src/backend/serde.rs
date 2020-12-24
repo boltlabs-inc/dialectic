@@ -18,6 +18,8 @@ mod json;
 #[cfg(feature = "json")]
 pub use json::*;
 
+pub mod var_length_delimited;
+
 /// The serialization end of a serialization format: an object which can serialize any [`Serialize`]
 /// value.
 pub trait Serializer {
