@@ -4,9 +4,10 @@
 //! session (and in the case of [`Transmit`], for the particular calling conventions used to pass
 //! those types to [`Chan::send`](crate::Chan::send)).
 //!
-//! Additionally, in order to support [`offer!`](crate::Chan::offer) and
-//! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement `Transmit<'static, u8,
-//! Val>`, and the receiving channel `Rx` must implement `Receive<u8>`.
+//! Additionally, in order to support [`offer!`](crate::offer) and [`choose`](crate::Chan::choose),
+//! the sending channel `Tx` must implement `Transmit<'static, Choice<N>, Val>`, and the receiving
+//! channel `Rx` must implement `Receive<Choice<N>>`, for all `N`. For more information, see
+//! [`Choice`](crate::Choice).
 
 pub use call_by::*;
 use std::{future::Future, pin::Pin};
@@ -23,8 +24,8 @@ pub mod serde;
 /// type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 ///
 /// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
-/// implement `Transmit<'static, u8, Val>`, in addition to whatever other types and calling
-/// conventions they support.
+/// implement `Transmit<'static, Choice<N>, Val>` for all `N`. For more information, see
+/// [`Choice`](crate::Choice).
 pub trait Transmit<'a, T, Convention: CallingConvention>
 where
     T: CallBy<'a, Convention>,
@@ -65,7 +66,7 @@ where
 /// If something is `Receive<T>`, we can use it to [`Receive::recv`] a message of type `T`.
 ///
 /// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
-/// `Receive<u8>`, in addition to whatever other types they support.
+/// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information, see [`Choice`](crate::Choice).
 pub trait Receive<T> {
     /// The type of possible errors when receiving.
     type Error;

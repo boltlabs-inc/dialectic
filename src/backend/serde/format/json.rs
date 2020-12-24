@@ -1,10 +1,10 @@
-use super::*;
+use crate::serde::*;
 use serde_json as json;
 use tokio_util::codec::LinesCodec;
 
 /// The [JSON](json) serialization format.
 #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct Json {
     pretty: bool,
 }
@@ -17,8 +17,9 @@ impl Json {
 
     /// Construct a new `Json` serialization format which pretty-formats its output.
     ///
-    /// **Important:** This is *not compatible* with line-delimited codecs, because its output
-    /// will contain newlines.
+    /// ⚠️ **Caution:** Pretty-printed JSON serialization is **not compatible with line-delimited
+    /// codecs** such as [`LinesCodec`], because pretty-printed JSON contains newlines. Combining
+    /// the two will result in runtime deserialization failures.
     pub fn pretty() -> Self {
         Json { pretty: true }
     }
@@ -47,8 +48,8 @@ impl<Input: AsRef<str>> Deserializer<Input> for Json {
     }
 }
 
-/// Pairs the [`Json`] serialization format with the [`LinesCodec`](super::codec::LinesCodec) for
-/// framing, returning a symmetrical pair of [`Sender`] and [`Receiver`].
+/// Pairs the [`Json`] serialization format with the [`LinesCodec`](tokio_util::codec::LinesCodec)
+/// for framing, returning a symmetrical pair of [`Sender`] and [`Receiver`].
 ///
 /// The `max_length` parameter indicates the maximum length of any message received or sent. An
 /// error is thrown during encoding and decoding if a message exceeds this length.

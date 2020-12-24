@@ -601,15 +601,18 @@
 #![allow(clippy::type_complexity)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 use std::{
+    convert::TryInto,
     marker::{self, PhantomData},
     sync::Arc,
 };
-use thiserror::Error;
+use types::tuple::HasLength;
 
 use crate::backend::*;
 use tuple::{List, Tuple};
 pub use types::*;
 
+mod choice;
+pub use choice::*;
 pub mod backend;
 pub mod types;
 
@@ -997,9 +1000,11 @@ where
 
 impl<Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    Tx: Transmit<'static, u8, Val>,
+    Tx: Transmit<'static, Choice<<Choices::AsList as HasLength>::Length>, Val>,
     P: Actionable<E, Action = Choose<Choices>>,
     Choices: Tuple,
+    Choices::AsList: HasLength,
+    <Choices::AsList as HasLength>::Length: marker::Send,
     <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
     E::Dual: Environment,
@@ -1088,7 +1093,10 @@ where
         <<<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env as EachSession>::Dual:
             Environment,
     {
-        match self.tx.send(N::VALUE as u8).await {
+        let choice = (N::VALUE as u8)
+            .try_into()
+            .expect("type system prevents out of range choice in `choose`");
+        match self.tx.send(choice).await {
             Ok(()) => Ok(unsafe { self.cast() }),
             Err(err) => Err(err),
         }
@@ -1155,19 +1163,6 @@ where
     }
 }
 
-/// An error representing a protocol violation where the other end of the channel has selected a
-/// choice whose index is too high to be handled by the current session type.
-///
-/// For instance, if the current channel's session type is `Offer<(..., (..., (..., ())))>`, then
-/// this error is thrown if an invocation of `offer!` encounters a discriminant sent from the other
-/// side which is greater than `2`.
-///
-/// Authors of backends may wish to write a `From<OutOfRangeChoice>` implementation for their
-/// backend's error type so that these errors are automatically handled.
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[error("received discriminant out of range in `Chan::offer`")]
-pub struct OutOfRangeChoice;
-
 impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
 where
     E::Dual: Environment,
@@ -1179,16 +1174,17 @@ where
     /// means it proves the unreachability of its calling location. However, if the other end of the
     /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
     /// will then signal an error.
-    pub fn empty_case<T>(self) -> Result<T, OutOfRangeChoice> {
-        Err(OutOfRangeChoice)
+    pub fn empty_case<T>(self) -> T {
+        unreachable!("empty `Branches` cannot be constructed")
     }
 }
 
 impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
-    Rx: Receive<u8>,
+    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
     P: Actionable<E, Action = Offer<Choices>>,
     Choices: Tuple,
+    Choices::AsList: HasLength,
     <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
     E::Dual: Environment,
@@ -1227,7 +1223,7 @@ where
     ///         Ok(c2) => { c2.recv().await?; },
     ///         Err(rest) => match rest.case() {
     ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
-    ///             Err(rest) => rest.empty_case()?,
+    ///             Err(rest) => rest.empty_case(),
     ///         }
     ///     }
     ///     Ok::<_, backend::mpsc::Error>(())
@@ -1274,16 +1270,14 @@ where
     /// ```
     pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
-        match rx.recv().await {
-            Ok(variant) => Ok(Branches {
-                variant,
-                tx,
-                rx,
-                protocols: PhantomData,
-                environment: PhantomData,
-            }),
-            Err(err) => Err(err),
-        }
+        let variant = rx.recv().await?.into();
+        Ok(Branches {
+            variant,
+            tx,
+            rx,
+            protocols: PhantomData,
+            environment: PhantomData,
+        })
     }
 }
 
@@ -1328,46 +1322,6 @@ where
 /// # Ok(())
 /// # }
 /// ```
-///
-/// # Errors
-///
-/// The generated code may result in the [`Transmit::Error`] of the underlying connection, as well
-/// as [`OutOfRangeChoice`] in the case where the other side of the connection breaks the protocol
-/// and selects a choice that does not exist. If the other side of the channel is also using this
-/// session type, that case is impossible.
-///
-/// Alternatively, you may specify an optional clause to handle protocol violations where the other
-/// side signals an invalid choice. In the example above, we could choose to immediately panic in
-/// that scenario:
-///
-/// ```
-/// # use dialectic::*;
-/// # use dialectic::constants::*;
-/// #
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
-/// #
-/// # let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
-/// #
-/// # // Spawn a thread to offer a choice
-/// # let t1 = tokio::spawn(async move {
-/// offer! { c2 =>
-///     { c2.recv().await?; },
-///     { c2.send("Hello!".to_string()).await?; },
-///     ? => panic!("Protocol violation!"),
-/// }
-/// # Ok::<_, backend::mpsc::Error>(())
-/// # });
-/// #
-/// # // Choose to send an integer
-/// # c1.choose(_0).await?.send(42).await?;
-/// #
-/// # // Wait for the offering thread to finish
-/// # t1.await??;
-/// # Ok(())
-/// # }
-/// ```
 #[macro_export]
 macro_rules! offer {
     (
@@ -1386,7 +1340,7 @@ macro_rules! offer {
     (
         match $crate::Branches::case($branch) {
             std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch)?,
+            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
         }
     );
     (
@@ -1395,14 +1349,6 @@ macro_rules! offer {
         match $crate::Branches::case($branch) {
             std::result::Result::Ok($chan) => $code,
             std::result::Result::Err($branch) => $crate::offer!{@branches $branch, $chan, $($t)+ },
-        }
-    );
-    (
-        @branches $branch:ident, $chan:ident, ? => $empty:expr $(,)?
-    ) => (
-        {
-            let _: $crate::Branches<_, _, (), _> = $branch;
-            $empty
         }
     );
 }

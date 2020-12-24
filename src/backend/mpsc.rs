@@ -45,8 +45,6 @@ pub enum Error {
     Recv(RecvError),
     /// Error during send.
     Send(Box<dyn Any + marker::Send>),
-    /// Error during offer.
-    Offer(OutOfRangeChoice),
 }
 
 impl std::fmt::Display for Error {
@@ -54,7 +52,6 @@ impl std::fmt::Display for Error {
         match self {
             Error::Recv(e) => e.fmt(fmt),
             Error::Send(_) => write!(fmt, "channel closed"),
-            Error::Offer(e) => e.fmt(fmt),
         }
     }
 }
@@ -70,12 +67,6 @@ impl From<RecvError> for Error {
 impl<T: Any + marker::Send> From<SendError<T>> for Error {
     fn from(SendError(err): SendError<T>) -> Self {
         Error::Send(Box::new(err))
-    }
-}
-
-impl From<OutOfRangeChoice> for Error {
-    fn from(err: OutOfRangeChoice) -> Self {
-        Error::Offer(err)
     }
 }
 
