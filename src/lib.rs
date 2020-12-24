@@ -3,7 +3,7 @@
 //! > **dialectic (noun):** The process of arriving at the truth by stating a thesis, developing a
 //! > contradictory antithesis, and combining them into a coherent synthesis.
 //! >
-//! > **dialectic (crate):** Zero-cost session types for asynchronous Rust.
+//! > **dialectic (crate):** Transport-polymorphic session types for asynchronous Rust.
 //!
 //! When two concurrent processes communicate, it's good to give their messages *types*, which
 //! ensure every message is of an expected form.
@@ -15,7 +15,7 @@
 //! compile-time guarantees that a specified *session protocol* will not be violated by any code
 //! using the channel. Such a wrapped channel:
 //!
-//! - has **zero runtime cost** in time or memory;
+//! - has **almost no runtime cost** in time or memory;
 //! - is **built on `async`/`.await`** to allow integration with Rust's powerful `async` ecosystem;
 //! - gracefully handles runtime protocol violations, introducing **no panics**; and
 //! - allows for **full duplex concurrent communication**, if specified in its type, while

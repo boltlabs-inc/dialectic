@@ -12,11 +12,11 @@ pub use call_by::*;
 use std::{future::Future, pin::Pin};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
-#[cfg(any(test, feature = "mpsc"))]
+#[cfg(feature = "mpsc")]
 pub mod mpsc;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "serialize")))]
-#[cfg(any(test, feature = "serialize"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
+#[cfg(feature = "serde")]
 pub mod serde;
 
 /// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
