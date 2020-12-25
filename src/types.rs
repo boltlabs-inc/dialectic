@@ -7,9 +7,26 @@ pub mod tuple;
 pub mod unary;
 
 /// A session type describes the sequence of operations performed by one end of a bidirectional
-/// [`Chan`]. Each session type has a [`Session::Dual`], the type of the corresponding client on
-/// the other side of the channel. The sealed trait `Session` enumerates these types, and provides
-/// the dual of each.
+/// [`Chan`].
+///
+/// Each session type has a [`Session::Dual`], the type of the corresponding client on the other
+/// side of the channel. The sealed trait `Session` enumerates these types, and provides the dual of
+/// each.
+///
+/// # Examples
+///
+/// Here we define a `Client` and `Server` session type, which are duals of each other. This example
+/// illustrates every construct in the language of session types.
+///
+/// ```
+/// # use static_assertions::assert_type_eq_all;
+/// use dialectic::types::*;
+///
+/// type Client = Loop<Offer<(Split<Send<String, End>, Recv<usize, End>>, Recv<bool, Recur>)>>;
+/// type Server = Loop<Choose<(Split<Send<usize, End>, Recv<String, End>>, Send<bool, Recur>)>>;
+///
+/// assert_type_eq_all!(Client, <Server as Session>::Dual);
+/// ```
 pub trait Session: Sized + sealed::IsSession {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
@@ -190,6 +207,7 @@ where
 ///
 /// A session ending with a `Recv` can be abbreviated: `Recv<String>` is shorthand for `Recv<String,
 /// End>`.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Recv<T, P = End>(pub PhantomData<T>, pub P);
 
@@ -213,6 +231,7 @@ where
 ///
 /// A session ending with a `Send` can be abbreviated: `Send<String>` is shorthand for `Send<String,
 /// End>`.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Send<T, P = End>(pub PhantomData<T>, pub P);
 
@@ -234,6 +253,7 @@ where
 ///
 /// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
 /// `Choose`s within each other.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Choose<Choices>(pub Choices);
 
@@ -264,6 +284,7 @@ where
 ///
 /// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest
 /// `Offer`s within each other.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Offer<Choices>(pub Choices);
 
@@ -313,6 +334,7 @@ where
 }
 
 /// Label a loop point, which can be reiterated with [`Recur`].
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Loop<P>(pub P);
 
@@ -337,6 +359,7 @@ where
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at [`Z`].
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Recur<N: Unary = Z>(pub N);
 
@@ -379,4 +402,25 @@ mod sealed {
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, N: Unary> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
+}
+
+mod test {
+    #[allow(unused_imports)]
+    use super::*;
+
+    // The session type `P` incorporates every construct in the session type language. This unit
+    // test assures that even a complex nested session type is still a ZST.
+    #[test]
+    fn complex_session_zero_size() {
+        type P = Loop<
+            Loop<
+                Choose<(
+                    Send<usize>,
+                    Recv<String>,
+                    Offer<(Send<bool>, Recur<S<Z>>, Split<Send<isize>, Recv<isize>>)>,
+                )>,
+            >,
+        >;
+        assert_eq!(std::mem::size_of::<P>(), 0);
+    }
 }

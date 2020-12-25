@@ -4,6 +4,7 @@
 # section of the crate documentation.
 
 with open("README.md", "w") as readme:
+    readme.write("# Dialectic\n\n")
     with open("src/lib.rs", "r") as lib:
         for line in lib:
             if len(line) > 4:

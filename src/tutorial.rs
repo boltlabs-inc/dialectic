@@ -276,7 +276,7 @@
 //!
 //! Suppose we want to offer a choice between two protocols: either sending a single integer
 //! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
-//! channel must indicate a choice of which protocol to follow -- and we need to handle the result
+//! channel must indicate a choice of which protocol to follow, and we need to handle the result
 //! of either selection by enacting the protocol chosen.
 //!
 //! ```

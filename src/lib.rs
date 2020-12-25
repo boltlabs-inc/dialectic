@@ -1,4 +1,6 @@
-//! # Dialectic
+//! ![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
+//! [![crates.io](https://img.shields.io/crates/v/dialectic)](https://crates.io/crates/dialectic)
+//! [![docs.rs documentation](https://docs.rs/dialectic/badge.svg)](https://docs.rs/dialectic)
 //!
 //! > **dialectic (noun):** The process of arriving at the truth by stating a thesis, developing a
 //! > contradictory antithesis, and combining them into a coherent synthesis.
