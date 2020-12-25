@@ -25,6 +25,14 @@ pub type UnboundedSender<'a> = mpsc::UnboundedSender<Box<dyn Any + std::marker::
 ///
 /// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::channel`].
+///
+/// # Examples
+///
+/// ```
+/// use dialectic;
+///
+/// let (tx, rx) = dialectic::backend::mpsc::channel(1);
+/// ```
 pub fn channel<'a>(buffer: usize) -> (Sender<'a>, Receiver<'a>) {
     mpsc::channel(buffer)
 }
@@ -33,6 +41,14 @@ pub fn channel<'a>(buffer: usize) -> (Sender<'a>, Receiver<'a>) {
 ///
 /// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::unbounded_channel`].
+///
+/// # Examples
+///
+/// ```
+/// use dialectic;
+///
+/// let (tx, rx) = dialectic::backend::mpsc::unbounded_channel();
+/// ```
 pub fn unbounded_channel<'a>() -> (UnboundedSender<'a>, UnboundedReceiver<'a>) {
     mpsc::unbounded_channel()
 }

@@ -34,6 +34,11 @@ pub mod serde;
 /// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
 /// implement `Transmit<'static, Choice<N>, Val>` for all `N`. For more information, see
 /// [`Choice`](crate::Choice).
+///
+/// # Examples
+///
+/// For an example of implementing [`Transmit`], check out the source for the implementation of
+/// [`Transmit`] for [`mpsc::Sender`].
 pub trait Transmit<'a, T, Convention: CallingConvention>
 where
     T: CallBy<'a, Convention>,
@@ -76,6 +81,11 @@ where
 /// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
 /// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information,
 /// see [`Choice`](crate::Choice).
+///
+/// # Examples
+///
+/// For an example of implementing [`Receive`], check out the source for the implementation of
+/// [`Receive`] for [`mpsc::Receiver`].
 pub trait Receive<T> {
     /// The type of possible errors when receiving.
     type Error;

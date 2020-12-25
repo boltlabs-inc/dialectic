@@ -6,14 +6,62 @@ use thiserror::Error;
 /// A `Choice` represents a selection between several protocols offered by [`offer!`](crate::offer).
 ///
 /// It wraps an ordinary non-negative number, with the guarantee that it is *strictly less than* the
-/// type level number `N`. Note that this means `Choice<Z>` is unrepresentable, because you cannot
-/// choose something from a set of zero things.
+/// type level number `N`.
 ///
 /// Unless you are implementing a [`backend`](crate::backend), you do not need to interact with
 /// `Choice`s directly. However, all backends must implement [`Transmit<'static, Choice<N>,
-/// Val>`](crate::backend::Transmit) and [`Receive<Choice<N>>`](crate::backend::Receive) for all
-/// `N` in order to support the [`Choose`](crate::Choose) and [`Offer`](crate::Offer)
-/// constructs.
+/// Val>`](crate::backend::Transmit) and [`Receive<Choice<N>>`](crate::backend::Receive) for all `N`
+/// in order to support the [`Choose`](crate::Choose) and [`Offer`](crate::Offer) constructs.
+///
+/// # Examples
+///
+/// It's possible to construct a [`Choice`] from all `u8` strictly less than its type parameter `N`:
+///
+/// ```
+/// use std::convert::TryInto;
+/// use dialectic::backend::Choice;
+/// use dialectic::types::unary::types::*;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let zero: Choice<_3> = 0_u8.try_into()?;
+/// let one: Choice<_3> = 1_u8.try_into()?;
+/// let two: Choice<_3> = 2_u8.try_into()?;
+///
+/// assert_eq!(zero, 0_u8);
+/// assert_eq!(one, 1_u8);
+/// assert_eq!(two, 2_u8);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// But we cannot construct a [`Choice`] from a `u8` equal to or greater than its type parameter
+/// `N`:
+///
+/// ```
+/// # use std::convert::TryInto;
+/// # use dialectic::backend::Choice;
+/// # use dialectic::types::unary::types::*;
+/// #
+/// let attempted_three: Result<Choice<_3>, _> = 3_u8.try_into();
+/// let attempted_four: Result<Choice<_4>, _> = 4_u8.try_into();
+///
+/// assert!(attempted_three.is_err());
+/// assert!(attempted_four.is_err());
+/// ```
+///
+/// Note that this means `Choice<_0>` is unrepresentable, because you cannot choose something from a
+/// set of zero things:
+///
+/// ```
+/// # use std::convert::TryInto;
+/// # use dialectic::backend::Choice;
+/// # use dialectic::types::unary::types::*;
+/// #
+/// for i in 0 ..= u8::MAX {
+///    let attempt: Result<Choice<_0>, _> = i.try_into();
+///    assert!(attempt.is_err());
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Choice<N: Unary> {
     choice: u8,
@@ -25,6 +73,12 @@ impl<N: Unary> Default for Choice<S<N>> {
     fn default() -> Self {
         0.try_into()
             .expect("0 is in bounds for all non-zero-bounded `Choice`s")
+    }
+}
+
+impl<N: Unary> PartialEq<u8> for Choice<N> {
+    fn eq(&self, other: &u8) -> bool {
+        self.choice == *other
     }
 }
 
