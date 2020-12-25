@@ -3,7 +3,7 @@
 > **dialectic (noun):** The process of arriving at the truth by stating a thesis, developing a
 > contradictory antithesis, and combining them into a coherent synthesis.
 >
-> **dialectic (crate):** Zero-cost session types for asynchronous Rust.
+> **dialectic (crate):** Transport-polymorphic session types for asynchronous Rust.
 
 When two concurrent processes communicate, it's good to give their messages *types*, which
 ensure every message is of an expected form.
