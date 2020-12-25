@@ -48,6 +48,8 @@
 //!   channel.
 //! - To wrap an existing sender `tx` and receiver `rx` in a single [`Chan`] for `P`: [`let c =
 //!   P::wrap(tx, rx)`](NewSession::wrap).
+//! - Backend transports suitable for being wrapped in a [`Chan`] are provided in [`backend`], along
+//!   with the traits necessary to implement your own.
 //!
 //! Once you've got a channel, here's what you can do:
 //!
@@ -56,7 +58,7 @@
 //! | [`Send<T, P = End>`](Send) | [`let c = c.send(t: T).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
 //! | [`Recv<T, P = End>`](Recv) | [`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
 //! | [`Choose<Choices>`](Choose) | [`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
-//! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => {...}, ...);`](offer) | [`Choose<Choices::Dual>`](Choose) |
+//! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
 //! | [`Split<P, Q>`](Split) | [`let (tx, rx) = c.split();`](Chan::split)<br>`// concurrently use tx and rx`<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | (none) | [`Loop<P::Dual>`](Loop) |
 //! | [`Recur<N = Z>`](Recur) | (none) | [`Recur<N>`](Recur) |
@@ -76,16 +78,17 @@ use crate::backend::*;
 use tuple::{List, Tuple};
 pub use types::*;
 
-mod choice;
-pub use choice::*;
 pub mod backend;
 pub mod tutorial;
 pub mod types;
 
 /// A bidirectional communications channel sending outgoing messages via the `Tx` connection and
 /// receiving incoming messages via the `Rx` connection, whose future session behavior is determined
-/// by the session type `P`. The `E` parameter is a type-level list describing the *session
-/// environment* of the channel: the stack of [`Loop`]s the channel has entered.
+/// by the session type `P`.
+///
+/// The fourth `E` parameter to a [`Chan`] is a type-level list describing the *session environment*
+/// of the channel: the stack of [`Loop`]s the channel has entered. When a [`Recur<N>`](Recur)
+/// occurs, the next session type is retrieved by selecting the `N`th element of this list.
 ///
 /// # Creating new `Chan`s: use [`NewSession`]
 ///
@@ -137,7 +140,9 @@ where
 }
 
 /// The `NewSession` extension trait gives methods to create session-typed channels from session
-/// types. These are implemented as static methods on the session type itself. For instance:
+/// types. These are implemented as static methods on the session type itself.
+///
+/// # Examplees
 ///
 /// ```
 /// use dialectic::*;
@@ -154,8 +159,8 @@ where
 /// # Notes
 ///
 /// The trait bounds specified for [`NewSession`] ensure that the session type is well-formed.
-/// However, it does not ensure that all the types in the session type can be sent or received over
-/// the given channels.
+/// However, it does not ensure that all the types in the session type can be sent or received
+/// over the given channels.
 ///
 /// Valid session types must contain only "productive" recursion: they must not contain any
 /// [`Recur`] directly inside the loop to which that recursion refers. For instance, attempting to
@@ -404,10 +409,8 @@ where
     /// # }
     /// ```
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, Q::Action, Q::Env>), Rx::Error> {
-        match self.rx.recv().await {
-            Ok(result) => Ok((result, unsafe { self.cast() })),
-            Err(err) => Err(err),
-        }
+        let result = self.rx.recv().await?;
+        Ok((result, unsafe { self.cast() }))
     }
 }
 
@@ -457,10 +460,8 @@ where
         T: CallBy<'a, Convention>,
         <T as CallBy<'a, Convention>>::Type: marker::Send,
     {
-        match self.tx.send(message).await {
-            Ok(()) => Ok(unsafe { self.cast() }),
-            Err(err) => Err(err),
-        }
+        self.tx.send(message).await?;
+        Ok(unsafe { self.cast() })
     }
 }
 
@@ -477,9 +478,9 @@ where
     <P::Env as EachSession>::Dual: Environment,
     Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
 {
-    /// Actively choose to enter the `N`th protocol offered via [`offer`](Chan::offer) by the other end of
-    /// the connection, alerting the other party to this choice by sending the number `N` over the
-    /// channel.
+    /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
+    /// other end of the connection, alerting the other party to this choice by sending the number
+    /// `N` over the channel.
     ///
     /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
     /// supported numbers of choices (up to a maximum of 127) are available in the [`constants`]
@@ -505,10 +506,10 @@ where
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     offer! { c2 =>
-    ///         { c2.recv().await?; },
-    ///         { c2.send("Hello!".to_string()).await?; },
-    ///     }
+    ///     offer!(c2 => {
+    ///         _0 => { c2.recv().await?; },
+    ///         _1 => { c2.send("Hello!".to_string()).await?; },
+    ///     });
     ///     Ok::<_, backend::mpsc::Error>(())
     /// });
     ///
@@ -562,10 +563,8 @@ where
         let choice = (N::VALUE as u8)
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        match self.tx.send(choice).await {
-            Ok(()) => Ok(unsafe { self.cast() }),
-            Err(err) => Err(err),
-        }
+        self.tx.send(choice).await?;
+        Ok(unsafe { self.cast() })
     }
 }
 
@@ -576,6 +575,7 @@ where
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
 #[derive(Debug)]
 #[must_use]
+#[doc(hidden)]
 pub struct Branches<Tx, Rx, Choices, E = ()>
 where
     Choices: Tuple,
@@ -719,10 +719,10 @@ where
     /// #
     /// # // Spawn a thread to offer a choice
     /// # let t1 = tokio::spawn(async move {
-    /// offer! { c2 =>
-    ///     { c2.recv().await?; },
-    ///     { c2.send("Hello!".to_string()).await?; },
-    /// }
+    /// offer!(c2 => {
+    ///     _0 => { c2.recv().await?; },
+    ///     _1 => { c2.send("Hello!".to_string()).await?; },
+    /// });
     /// # Ok::<_, backend::mpsc::Error>(())
     /// # });
     /// #
@@ -734,6 +734,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
+    #[doc(hidden)]
     pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         let variant = rx.recv().await?.into();
@@ -754,7 +755,8 @@ where
 /// # Notes
 ///
 /// - You must specify exactly as many branches as there are options in the type of the
-///   [`Offer`](crate::types::Offer) to which this expression corresponds.
+///   [`Offer`](crate::types::Offer) to which this expression corresponds, and they must be in the
+///   same order as the choices are in the tuple [`Offer`](crate::types::Offer)ed.
 /// - In the body of each branch, the identifier for the channel is rebound to have the session type
 ///   corresponding to that branch.
 /// - To use `offer!` as an expression, ensure the type of every branch matches.
@@ -773,10 +775,10 @@ where
 ///
 /// // Spawn a thread to offer a choice
 /// let t1 = tokio::spawn(async move {
-///     offer! { c2 =>
-///         { c2.recv().await?; },
-///         { c2.send("Hello!".to_string()).await?; },
-///     }
+///     offer!(c2 => {
+///         _0 => { c2.recv().await?; },
+///         _1 => { c2.send("Hello!".to_string()).await?; },
+///     });
 ///     Ok::<_, backend::mpsc::Error>(())
 /// });
 ///
@@ -791,30 +793,38 @@ where
 #[macro_export]
 macro_rules! offer {
     (
-        $chan:ident => $($t:tt)*
+        $chan:ident => { $($t:tt)* }
     ) => (
         {
             match $crate::Chan::offer($chan).await {
-                Ok(b) => $crate::offer!{@branches b, $chan, $($t)* },
+                Ok(b) => $crate::offer!{@branches b, $chan, $crate::types::unary::Z, $($t)* },
                 Err(e) => Err(e)?,
             }
         }
     );
     (
-        @branches $branch:ident, $chan:ident, $code:expr $(,)?
+        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr $(,)?
     ) =>
     (
         match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => $code,
+            std::result::Result::Ok($chan) => {
+                let _: $n = $label;
+                $code
+            },
             std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
         }
     );
     (
-        @branches $branch:ident, $chan:ident, $code:expr, $($t:tt)+
+        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr, $($t:tt)+
     ) => (
         match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => $code,
-            std::result::Result::Err($branch) => $crate::offer!{@branches $branch, $chan, $($t)+ },
+            std::result::Result::Ok($chan) => {
+                let _: $n = $label;
+                $code
+            },
+            std::result::Result::Err($branch) => {
+                $crate::offer!{@branches $branch, $chan, $crate::types::unary::S<$n>, $($t)+ }
+            },
         }
     );
 }

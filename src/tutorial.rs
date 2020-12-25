@@ -291,10 +291,10 @@
 //!
 //! // Offer a choice
 //! let t1 = tokio::spawn(async move {
-//!     let c1 = offer!(c1 =>
-//!         { c1.send(42).await? },  // handle `c2.choose(_0)`
-//!         { c1.recv().await?.1 },  // handle `c2.choose(_1)`
-//!     );
+//!     let c1 = offer!(c1 => {
+//!         _0 => c1.send(42).await?,  // handle `c2.choose(_0)`
+//!         _1 => c1.recv().await?.1,  // handle `c2.choose(_1)`
+//!     });
 //! #   c1.close();
 //!     Ok::<_, mpsc::Error>(())
 //! });
@@ -314,11 +314,11 @@
 //! ```
 //!
 //! In the above, we can see how the [`offer!`](crate::offer) macro takes the name of a channel
-//! (this must be an identifier, not an expression) and a list of expressions which may use that
-//! channel. In each expression, the channel's type corresponds to the session type for that choice.
-//! The type of each expression in the list must be the same, which means that if we want to bind a
-//! channel name to the result of the `offer!`, each expression must step the channel forward to an
-//! identical session type (in the case above, that's `End`).
+//! (this must be an identifier, not an expression) and a list of branches labeled by index which
+//! may use that channel. In each expression, the channel's type corresponds to the session type for
+//! that choice. The type of each expression in the list must be the same, which means that if we
+//! want to bind a channel name to the result of the `offer!`, each expression must step the channel
+//! forward to an identical session type (in the case above, that's `End`).
 //!
 //! Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
 //! channel, passing it as input a constant corresponding to the index of the choice. These
@@ -375,14 +375,14 @@
 //! tokio::spawn(async move {
 //!     let mut sum = 0;
 //!     let c2 = loop {
-//!         c2 = offer!(c2 =>
-//!             {
+//!         c2 = offer!(c2 => {
+//!             _0 => {
 //!                 let (n, c2) = c2.recv().await?;
 //!                 sum += n;
 //!                 c2
 //!             },
-//!             { break c2; },
-//!         );
+//!             _1 => break c2,
+//!         });
 //!     };
 //!     c2.send(sum).await?;
 //!     Ok::<_, mpsc::Error>(())

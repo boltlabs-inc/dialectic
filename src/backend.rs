@@ -1,3 +1,6 @@
+//! Transport backends for [`Chan`](crate::Chan), and the traits they implement in order to be used
+//! as such.
+//!
 //! A [`Chan<Tx, Rx, P, E>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
@@ -9,8 +12,12 @@
 //! channel `Rx` must implement `Receive<Choice<N>>`, for all `N`. For more information, see
 //! [`Choice`](crate::Choice).
 
+#[doc(no_inline)]
 pub use call_by::*;
 use std::{future::Future, pin::Pin};
+
+mod choice;
+pub use choice::*;
 
 #[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
 #[cfg(feature = "mpsc")]
@@ -20,8 +27,9 @@ pub mod mpsc;
 #[cfg(feature = "serde")]
 pub mod serde;
 
-/// If something is `Transmit<'a, T, Convention>`, we can use it to [`Transmit::send`] a message of
-/// type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
+/// If a transport is `Transmit<'a, T, Convention>`, we can use it to [`send`](Transmit::send) a
+/// message of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention
+/// specified.
 ///
 /// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
 /// implement `Transmit<'static, Choice<N>, Val>` for all `N`. For more information, see
@@ -63,10 +71,11 @@ where
     }
 }
 
-/// If something is `Receive<T>`, we can use it to [`Receive::recv`] a message of type `T`.
+/// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
 ///
 /// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
-/// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information, see [`Choice`](crate::Choice).
+/// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information,
+/// see [`Choice`](crate::Choice).
 pub trait Receive<T> {
     /// The type of possible errors when receiving.
     type Error;
