@@ -14,6 +14,11 @@ mpsc = ["tokio/sync"]
 serde = ["futures", "tokio/io-util", "tokio-util/codec", "serde-crate"]
 bincode = ["serde", "bincode-crate", "bytes"]
 json = ["serde", "serde_json"]
+json_arbitrary_precision = [ "json", "serde_json/arbitrary_precision" ]
+json_float_roundtrip = [ "json", "serde_json/float_roundtrip" ]
+json_preserve_order = [ "json", "serde_json/preserve_order" ]
+json_raw_value = [ "json", "serde_json/raw_value" ]
+json_unbounded_depth = [ "json", "serde_json/unbounded_depth" ]
 
 [dependencies]
 thiserror = "1"
