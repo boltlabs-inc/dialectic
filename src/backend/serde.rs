@@ -19,7 +19,10 @@
 
 use std::{future::Future, pin::Pin};
 
-use crate::backend::{Receive, Ref, Transmit, Val};
+use crate::{
+    backend::{Choice, Receive, Ref, Transmit, Val},
+    Unary,
+};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde_crate::{Deserialize, Serialize};
@@ -169,9 +172,12 @@ where
     }
 }
 
-impl<'a, T: 'a, F, E, W> Transmit<'a, T, Val> for Sender<F, E, W>
+// We could allow *anything* to be sent by value, but that would create ambiguity at the callsites
+// for `send`, and since everything is actually sent by reference, there's no reason to provide the
+// extra ability. Instead, we specifically implement send-by-value for `Choice`, because it's
+// required for all backends, and let everything else be send-by-ref only.
+impl<'a, N: Unary + Send + 'a, F, E, W> Transmit<'a, Choice<N>, Val> for Sender<F, E, W>
 where
-    T: Serialize + Send,
     F: Serializer + Unpin + Send,
     F::Output: Send,
     F::Error: Send,
@@ -182,7 +188,7 @@ where
 
     fn send<'async_lifetime>(
         &'async_lifetime mut self,
-        message: T,
+        message: Choice<N>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
