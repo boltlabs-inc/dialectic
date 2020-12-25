@@ -575,7 +575,6 @@ where
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
 #[derive(Debug)]
 #[must_use]
-#[doc(hidden)]
 pub struct Branches<Tx, Rx, Choices, E = ()>
 where
     Choices: Tuple,
@@ -734,7 +733,6 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    #[doc(hidden)]
     pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
         let (tx, mut rx) = self.unwrap();
         let variant = rx.recv().await?.into();
@@ -801,6 +799,11 @@ macro_rules! offer {
                 Err(e) => Err(e)?,
             }
         }
+    );
+    (
+        @branches $branch:ident, $chan:ident, $n:ty, $(,)?
+    ) => (
+        $crate::Branches::empty_case($branch),
     );
     (
         @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr $(,)?
