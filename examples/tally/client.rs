@@ -32,7 +32,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(l) if l.trim() == "+" => break Operation::Sum,
                 Some(l) if l.trim() == "*" => break Operation::Product,
                 Some(_) => continue,
-                None => std::process::exit(1),
+                None => {
+                    // If the user ends the input stream here, before selecting an operation, there
+                    // is no possible way (aside from inventing an operation from thin air) to
+                    // continue to follow the protocol and make it to the end. We choose to
+                    // ungracefully end the program immediately, triggering an error on the server
+                    // side.
+                    std::process::exit(1)
+                }
             };
         };
 
