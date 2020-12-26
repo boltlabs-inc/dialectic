@@ -155,8 +155,7 @@ where
 }
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
-impl<N: Unary> Scoped<S<N>> for Recur<Z> {}
-impl<N: Unary> Scoped<S<N>> for Recur<S<N>> where Recur<N>: Scoped<N> {}
+impl<N: Unary, M: Unary> Scoped<M> for Recur<N> where N: LessThan<M> {}
 impl<N: Unary> Scoped<N> for End {}
 
 /// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
@@ -168,20 +167,36 @@ impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed `Select` trait describes what it means to index into a type level list of
 /// protocols.
+///
+/// # Examples
+///
+/// ```
+/// # use static_assertions::assert_type_eq_all;
+/// use dialectic::Select;
+/// use dialectic::unary::types::*;
+///
+/// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_0>>::Selected, _0);
+/// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_2>>::Selected, _2);
+/// ```
 pub trait Select<N: Unary>: sealed::Select<N> {
     /// The thing which is selected from this list by the index `N`.
     type Selected;
+
+    /// The rest of the list after the selected thing.
+    type Remainder;
 }
 
-impl<T, S> Select<Z> for (T, S) {
+impl<T, Rest> Select<Z> for (T, Rest) {
     type Selected = T;
+    type Remainder = Rest;
 }
 
-impl<T, P, N: Unary> Select<S<N>> for (T, (P, ()))
+impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest))
 where
-    (P, ()): Select<N>,
+    (P, Rest): Select<N>,
 {
-    type Selected = <(P, ()) as Select<N>>::Selected;
+    type Selected = <(P, Rest) as Select<N>>::Selected;
+    type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
 
 /// Complete a session. The only thing to do with a [`Chan`] at its `End` is to drop it.
@@ -371,15 +386,20 @@ impl<E, N: Unary> Actionable<E> for Recur<N>
 where
     E: Select<N> + Environment,
     Recur<N>: Scoped<E::Depth>,
-    E::Selected: Actionable<E>,
-    <E::Selected as Actionable<E>>::Action: Actionable<E>,
-    <<E::Selected as Actionable<E>>::Env as EachSession>::Dual: Environment,
-    <<<E::Selected as Actionable<E>>::Action as Actionable<E>>::Env as EachSession>::Dual:
+    E::Selected: Actionable<(E::Selected, E::Remainder)>,
+    E::Remainder: Environment,
+    E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
+    <E::Remainder as EachSession>::Dual: Environment,
+    E::Selected: Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
+    <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
+    <E::Selected as Session>::Dual:
+        Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
+    <<E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env as EachSession>::Dual:
         Environment,
     E::Dual: Environment,
 {
-    type Action = <E::Selected as Actionable<E>>::Action;
-    type Env = <E::Selected as Actionable<E>>::Env;
+    type Action = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Action;
+    type Env = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env;
 }
 
 mod sealed {
@@ -401,7 +421,7 @@ mod sealed {
 
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
-    impl<T, P, N: Unary> Select<S<N>> for (T, (P, ())) where (P, ()): Select<N> {}
+    impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
 }
 
 mod test {
