@@ -336,22 +336,41 @@
 //! these can be modeled with session types by introducing *recursion*.
 //!
 //! Suppose we want to send a stream of as many integers as desired, then receive back their sum. We
-//! could describe this protocol using the [`Loop`] and [`Continue`] types:
+//! could describe this protocol using the [`Loop`], [`Continue`], and [`Break`] types:
 //!
 //! ```
 //! # use dialectic::*;
-//! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
+//! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
 //! ```
 //!
-//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Continue` is `Continue`, so we know
-//! the other end of this channel will need to implement:
+//! The dual to `Loop<P>` is `Loop<P::Dual>`, the dual to `Continue` is `Continue`, and the dual to
+//! `Break` is `Break`, so we know the other end of this channel will need to implement:
 //!
 //! ```
 //! # use dialectic::*;
 //! # use static_assertions::assert_type_eq_all;
-//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
-//! type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64>)>>;
+//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
+//! type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64, Break>)>>;
 //! assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
+//! ```
+//!
+//! **Note:** **[`Break`] is the only way to exit a [`Loop`]**. Just like in Rust, when you reach
+//! the end of a [`Loop`], control implicitly jumps again to its head. When inside a [`Loop`], the
+//! [`Done`] session type is equivalent to the [`Continue`] session type, so this is an infinitely
+//! looping session type, even though the session after [`Send`] is [`Done`]:
+//!
+//! ```
+//! # use dialectic::*;
+//! type SendForever = Loop<Send<i64, Done>>;
+//! ```
+//!
+//! Because [`Send`] and [`Recv`] have [`Done`] as a default second parameter, we can abbreviate
+//! these two types in our `QuerySum` and `ComputeSum` to omit the explicit [`Continue`]:
+//!
+//! ```
+//! # use dialectic::*;
+//! type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
+//! type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
 //! ```
 //!
 //! We can implement this protocol by following the session types. When the session type of a
@@ -363,8 +382,8 @@
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
-//! # type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64>)>>;
+//! # type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
+//! # type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # use dialectic::constants::*;
@@ -384,7 +403,7 @@
 //!             _1 => break c2,
 //!         });
 //!     };
-//!     c2.send(sum).await?;
+//!     c2.send(sum).await?.close();
 //!     Ok::<_, mpsc::Error>(())
 //! });
 //!
@@ -395,6 +414,7 @@
 //!
 //! // Get the sum
 //! let (sum, c1) = c1.choose(_1).await?.recv().await?;
+//! c1.close();
 //! assert_eq!(sum, 55);
 //! # Ok(())
 //! # }
@@ -410,25 +430,28 @@
 //! If the protocol contains nested loops, you can specify which nested loop to continue with  using
 //! the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop;
 //! however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc.
-//! The types [`_0`](unary::types::_0), [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are
-//! defined in the [`unary::types`] module.
+//! Likewise, `Break` breaks out of the innermost loop, `Break<_1>` breaks out of the
+//! second-innermost, `Break<_2>` the third-innermost, etc. The types [`_0`](unary::types::_0),
+//! [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are defined in the [`unary::types`]
+//! module and imported by default in the [`dialectic::*`](crate) namespace.
 //!
 //! ## Automatic looping
 //!
 //! You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
 //! even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
-//! [`Choose`]. This is true in general: if the session type of a [`Chan`] either [`Loop`]s or
-//! [`Continue`]s to a session type for which a given operation is valid, that operation is valid on
-//! the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a [`Chan`] with session
-//! type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a
-//! `Chan`'s type is `Continue`, whatever operation would be valid for the session type at the start
-//! of the corresponding `Loop` is valid for that `Chan`.
+//! [`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`], [`Break`],
+//! or [`Continue`] that leads to a session type for which a given operation is valid, that
+//! operation is valid on the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a
+//! [`Chan`] with session type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the
+//! `Choose`. Similarly, if a `Chan`'s type is `Continue`, whatever operation would be valid for the
+//! session type at the start of the corresponding `Loop` is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
-//! on a session type is. For [`Done`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`]
-//! (the final session type discussed below), the "real action" is that session type itself.
-//! However, for [`Loop`] and [`Continue`], the next action is whatever follows entering the loop(s)
-//! or recurring, respectively.
+//! on a session type is. For [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the final
+//! session type discussed below), and [`Done`] when it occurs *outside* a `Loop`, the "real action"
+//! is that session type itself. However, for [`Loop`], [`Break`], [`Continue`], and [`Done`] when
+//! it occurs *inside* a loop, the next action is whatever follows entering the loop(s) or
+//! recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
 //! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,
