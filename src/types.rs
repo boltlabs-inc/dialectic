@@ -22,8 +22,8 @@ pub mod unary;
 /// # use static_assertions::assert_type_eq_all;
 /// use dialectic::types::*;
 ///
-/// type Client = Loop<Offer<(Split<Send<String, Done>, Recv<usize, Done>>, Recv<bool, Recur>)>>;
-/// type Server = Loop<Choose<(Split<Send<usize, Done>, Recv<String, Done>>, Send<bool, Recur>)>>;
+/// type Client = Loop<Offer<(Split<Send<String, Done>, Recv<usize, Done>>, Recv<bool, Continue>)>>;
+/// type Server = Loop<Choose<(Split<Send<usize, Done>, Recv<String, Done>>, Send<bool, Continue>)>>;
 ///
 /// assert_type_eq_all!(Client, <Server as Session>::Dual);
 /// ```
@@ -34,7 +34,7 @@ pub trait Session: Sized + sealed::IsSession {
 }
 
 /// The [`Actionable`] trait infers the next action necessary on a channel, automatically stepping
-/// through [`Loop`]s and [`Recur`]sion points.
+/// through [`Loop`]s and [`Continue`]sion points.
 pub trait Actionable<E>: Session
 where
     E: Environment,
@@ -43,13 +43,13 @@ where
     Self: Scoped<E::Depth>,
 {
     /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
-    /// This steps through [`Loop`] and [`Recur`] transparently.
+    /// This steps through [`Loop`] and [`Continue`] transparently.
     ///
     /// The constraints on this associated type ensure that it is idemopotent: the `Action` and
     /// `Env` of an `Action` are the same as those of that `Action`.
     type Action: Actionable<Self::Env, Action = Self::Action, Env = Self::Env>;
 
-    /// The environment resulting from stepping through one or many [`Loop`] or [`Recur`] points to
+    /// The environment resulting from stepping through one or many [`Loop`] or [`Continue`] points to
     /// the next real channel action.
     type Env: Environment;
 }
@@ -107,13 +107,13 @@ where
 }
 
 /// A valid session environment is a type-level list of session types, each of which may refer by
-/// [`Recur`] index to any other session in the list which is *below or including* itself.
+/// [`Continue`] index to any other session in the list which is *below or including* itself.
 pub trait Environment: EachSession
 where
     Self::Dual: Environment,
 {
-    /// The depth of a session environment is the number of loops to which a [`Recur`] could jump,
-    /// i.e. the number of session types in the session environment.
+    /// The depth of a session environment is the number of loops to which a [`Continue`] could
+    /// jump, i.e. the number of session types in the session environment.
     type Depth: Unary;
 }
 
@@ -133,11 +133,11 @@ where
     type Depth = S<Ps::Depth>;
 }
 
-/// A session type is scoped for a given environment depth `N` if it [`Recur`]s no more than `N`
+/// A session type is scoped for a given environment depth `N` if it [`Continue`]s no more than `N`
 /// [`Loop`] levels above itself.
 ///
-/// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Recur`] to
-/// any loop above itself, i.e. all `Recur<N>` refer to a loop which they themselves are within.
+/// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Continue`] to
+/// any loop above itself, i.e. all `Continue<N>` refer to a loop which they themselves are within.
 pub trait Scoped<N: Unary = Z>: Session {}
 impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
 impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Send<T, P> {}
@@ -155,7 +155,7 @@ where
 }
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
-impl<N: Unary, M: Unary> Scoped<M> for Recur<N> where N: LessThan<M> {}
+impl<N: Unary, M: Unary> Scoped<M> for Continue<N> where N: LessThan<M> {}
 impl<N: Unary> Scoped<N> for Done {}
 
 /// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
@@ -214,15 +214,15 @@ impl Actionable<()> for Done {
 
 impl<P, Rest> Actionable<(P, Rest)> for Done
 where
-    Recur: Actionable<(P, Rest)>,
+    Continue: Actionable<(P, Rest)>,
     P: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
     P::Dual: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
     Rest: Environment,
     Rest::Dual: Environment,
-    <<Recur as Actionable<(P, Rest)>>::Env as EachSession>::Dual: Environment,
+    <<Continue as Actionable<(P, Rest)>>::Env as EachSession>::Dual: Environment,
 {
-    type Action = <Recur as Actionable<(P, Rest)>>::Action;
-    type Env = <Recur as Actionable<(P, Rest)>>::Env;
+    type Action = <Continue as Actionable<(P, Rest)>>::Action;
+    type Env = <Continue as Actionable<(P, Rest)>>::Env;
 }
 
 /// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
@@ -340,9 +340,9 @@ where
 pub struct Split<P, Q>(pub P, pub Q);
 
 impl<P: Session, Q: Session> Session for Split<P, Q> {
-    // Note how the dual flips the position of P and Q, because P::Dual is a receiving session, and
-    // therefore belongs on the right of the split, and Q::Dual is a sending session, and therefore
-    // belongs on the left of the split.
+    /// Note how the dual flips the position of P and Q, because P::Dual is a receiving session, and
+    /// therefore belongs on the right of the split, and Q::Dual is a sending session, and therefore
+    /// belongs on the left of the split.
     type Dual = Split<Q::Dual, P::Dual>;
 }
 
@@ -357,7 +357,7 @@ where
     type Env = E;
 }
 
-/// Label a loop point, which can be reiterated with [`Recur`].
+/// Label a loop point, which can be reiterated with [`Continue`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Loop<P>(pub P);
@@ -385,16 +385,16 @@ where
 /// innermost starting at [`Z`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Recur<N: Unary = Z>(pub N);
+pub struct Continue<N: Unary = Z>(pub N);
 
-impl<N: Unary> Session for Recur<N> {
-    type Dual = Recur<N>;
+impl<N: Unary> Session for Continue<N> {
+    type Dual = Continue<N>;
 }
 
-impl<E, N: Unary> Actionable<E> for Recur<N>
+impl<E, N: Unary> Actionable<E> for Continue<N>
 where
     E: Select<N> + Environment,
-    Recur<N>: Scoped<E::Depth>,
+    Continue<N>: Scoped<E::Depth>,
     E::Selected: Actionable<(E::Selected, E::Remainder)>,
     E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
     <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
@@ -422,7 +422,7 @@ mod sealed {
     impl<Choices> IsSession for Offer<Choices> {}
     impl<P, Q> IsSession for Split<P, Q> {}
     impl<P> IsSession for Loop<P> {}
-    impl<N: Unary> IsSession for Recur<N> {}
+    impl<N: Unary> IsSession for Continue<N> {}
 
     pub trait EachSession {}
     impl EachSession for () {}
@@ -446,7 +446,7 @@ mod test {
                 Choose<(
                     Send<usize>,
                     Recv<String>,
-                    Offer<(Send<bool>, Recur<S<Z>>, Split<Send<isize>, Recv<isize>>)>,
+                    Offer<(Send<bool>, Continue<S<Z>>, Split<Send<isize>, Recv<isize>>)>,
                 )>,
             >,
         >;

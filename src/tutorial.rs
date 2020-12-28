@@ -336,35 +336,35 @@
 //! these can be modeled with session types by introducing *recursion*.
 //!
 //! Suppose we want to send a stream of as many integers as desired, then receive back their sum. We
-//! could describe this protocol using the [`Loop`] and [`Recur`] types:
+//! could describe this protocol using the [`Loop`] and [`Continue`] types:
 //!
 //! ```
 //! # use dialectic::*;
-//! type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
+//! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
 //! ```
 //!
-//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Recur` is `Recur`, so we know the
+//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Continue` is `Continue`, so we know the
 //! other end of this channel will need to implement:
 //!
 //! ```
 //! # use dialectic::*;
 //! # use static_assertions::assert_type_eq_all;
-//! # type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
-//! type ComputeSum = Loop<Offer<(Recv<i64, Recur>, Send<i64>)>>;
+//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
+//! type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64>)>>;
 //! assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
 //! ```
 //!
 //! We can implement this protocol by following the session types. When the session type of a
-//! [`Chan`] hits a [`Recur`] point, it jumps back to the type of the [`Loop`] to which that
-//! [`Recur`] refers. In this case, for example, immediately after the querying task sends an
-//! integer, the resultant channel will have the session type `Choose<(Send<i64, Recur>,
+//! [`Chan`] hits a [`Continue`] point, it jumps back to the type of the [`Loop`] to which that
+//! [`Continue`] refers. In this case, for example, immediately after the querying task sends an
+//! integer, the resultant channel will have the session type `Choose<(Send<i64, Continue>,
 //! Recv<i64>)>` once more.
 //!
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type QuerySum = Loop<Choose<(Send<i64, Recur>, Recv<i64>)>>;
-//! # type ComputeSum = Loop<Offer<(Recv<i64, Recur>, Send<i64>)>>;
+//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
+//! # type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64>)>>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # use dialectic::constants::*;
@@ -408,8 +408,8 @@
 //! ## Nested loops
 //!
 //! If the protocol contains nested loops, you can specify which nested loop to continue with  using
-//! the optional parameter of `Recur`. By default, `Recur` jumps to the innermost loop; however,
-//! `Recur<_1>` jumps to the second-innermost, `Recur<_2>` the third-innermost, etc. The types
+//! the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop; however,
+//! `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc. The types
 //! [`_0`](unary::types::_0), [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are defined
 //! in the [`unary::types`] module.
 //!
@@ -418,16 +418,16 @@
 //! You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
 //! even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
 //! [`Choose`]. This is true in general: if the session type of a [`Chan`] either [`Loop`]s or
-//! [`Recur`]s to a session type for which a given operation is valid, that operation is valid on
+//! [`Continue`]s to a session type for which a given operation is valid, that operation is valid on
 //! the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a [`Chan`] with session
 //! type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a
-//! `Chan`'s type is `Recur`, whatever operation would be valid for the session type at the start of
+//! `Chan`'s type is `Continue`, whatever operation would be valid for the session type at the start of
 //! the corresponding `Loop` is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
 //! on a session type is. For [`Done`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`]
 //! (the final session type discussed below), the "real action" is that session type itself.
-//! However, for [`Loop`] and [`Recur`], the next action is whatever follows entering the loop(s) or
+//! However, for [`Loop`] and [`Continue`], the next action is whatever follows entering the loop(s) or
 //! recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
