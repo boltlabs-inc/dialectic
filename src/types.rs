@@ -207,13 +207,22 @@ impl Session for Done {
     type Dual = Done;
 }
 
-impl<E> Actionable<E> for Done
-where
-    E: Environment,
-    E::Dual: Environment,
-{
+impl Actionable<()> for Done {
     type Action = Done;
-    type Env = E;
+    type Env = ();
+}
+
+impl<P, Rest> Actionable<(P, Rest)> for Done
+where
+    Recur: Actionable<(P, Rest)>,
+    P: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
+    P::Dual: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
+    Rest: Environment,
+    Rest::Dual: Environment,
+    <<Recur as Actionable<(P, Rest)>>::Env as EachSession>::Dual: Environment,
+{
+    type Action = <Recur as Actionable<(P, Rest)>>::Action;
+    type Env = <Recur as Actionable<(P, Rest)>>::Env;
 }
 
 /// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
@@ -387,16 +396,16 @@ where
     E: Select<N> + Environment,
     Recur<N>: Scoped<E::Depth>,
     E::Selected: Actionable<(E::Selected, E::Remainder)>,
-    E::Remainder: Environment,
     E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    <E::Remainder as EachSession>::Dual: Environment,
-    E::Selected: Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
     <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
+    E::Selected: Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
     <E::Selected as Session>::Dual:
         Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
+    E::Dual: Environment,
+    E::Remainder: Environment,
+    <E::Remainder as EachSession>::Dual: Environment,
     <<E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env as EachSession>::Dual:
         Environment,
-    E::Dual: Environment,
 {
     type Action = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Action;
     type Env = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env;

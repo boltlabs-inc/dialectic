@@ -325,7 +325,7 @@ where
 
 impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E, Action = Done>,
+    P: Actionable<E, Action = Done, Env = ()>,
     E: Environment,
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
