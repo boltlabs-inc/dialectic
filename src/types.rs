@@ -57,7 +57,7 @@ pub trait Session: Sized + sealed::IsSession {
 
 /// The [`Actionable`] trait infers the next action necessary on a channel, automatically stepping
 /// through [`Loop`]s and [`Continue`]sion points.
-pub trait Actionable<E>: Session
+pub trait Actionable<E = ()>: Session
 where
     E: Environment,
     E::Dual: Environment,
@@ -102,7 +102,7 @@ where
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachSession`] trait ensures that every protocol in a type level list of
 /// protocols is [`Actionable`].
-pub trait EachActionable<E>: EachSession
+pub trait EachActionable<E = ()>: EachSession
 where
     E: Environment,
     E::Dual: Environment,
@@ -155,16 +155,16 @@ where
     type Depth = S<Ps::Depth>;
 }
 
-/// A session type is scoped for a given environment depth `N` if it [`Continue`]s no more than `N`
-/// [`Loop`] levels above itself.
+/// A session type is *scoped* for a given environment depth `N` if it [`Continue`]s no more than
+/// `N` [`Loop`] levels above itself.
 ///
 /// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Continue`] to
 /// any loop above itself, i.e. all `Continue<N>` refer to a loop which they themselves are within.
 pub trait Scoped<N: Unary = Z>: Session {}
 
 /// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
-/// choice or offering is well-[`Scoped`].
-pub trait EachScoped<N: Unary>: EachSession {}
+/// choice or offering is [`Scoped`].
+pub trait EachScoped<N: Unary = Z>: EachSession {}
 impl<N: Unary> EachScoped<N> for () {}
 impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 
@@ -202,7 +202,6 @@ where
     type Selected = <(P, Rest) as Select<N>>::Selected;
     type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
-
 mod sealed {
     use super::*;
 
@@ -220,7 +219,32 @@ mod sealed {
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
 }
 
-mod test {
+/// Asserts that the specified type is a valid *closed* session type (that is, it does not
+/// `Continue` outside itself).
+#[macro_export]
+macro_rules! assert_all_closed_sessions {
+    () => {};
+    ($session:ty) => { assert_all_closed_sessions!($session,) };
+    ($session:ty, $($rest:tt)*) => {
+        const _: fn() = || {
+            fn assert_impl_all<T>()
+            where
+                T: $crate::NewSession,
+                T: $crate::Actionable,
+                T::Dual: $crate::Actionable,
+                <T::Env as $crate::EachSession>::Dual: $crate::Environment,
+                <<T::Dual as $crate::Actionable>::Env as $crate::EachSession>::Dual:
+                    $crate::Environment,
+            {
+            }
+            assert_impl_all::<$session>();
+        };
+        assert_all_closed_sessions!($($rest)*);
+    };
+}
+
+#[cfg(test)]
+mod tests {
     #[allow(unused_imports)]
     use super::*;
 
