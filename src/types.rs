@@ -6,6 +6,28 @@ pub use unary::*;
 pub mod tuple;
 pub mod unary;
 
+// Each construct in the session types language lives in its own module, along with the
+// implementation of its various typing rules.
+mod r#break;
+mod choose;
+mod r#continue;
+mod done;
+mod r#loop;
+mod offer;
+mod recv;
+mod send;
+mod split;
+
+pub use choose::*;
+pub use done::*;
+pub use offer::*;
+pub use r#break::*;
+pub use r#continue::*;
+pub use r#loop::*;
+pub use recv::*;
+pub use send::*;
+pub use split::*;
+
 /// A session type describes the sequence of operations performed by one end of a bidirectional
 /// [`Chan`].
 ///
@@ -139,24 +161,6 @@ where
 /// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Continue`] to
 /// any loop above itself, i.e. all `Continue<N>` refer to a loop which they themselves are within.
 pub trait Scoped<N: Unary = Z>: Session {}
-impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
-impl<N: Unary, T, P: Scoped<N>> Scoped<N> for Send<T, P> {}
-impl<N: Unary, Choices: Tuple> Scoped<N> for Offer<Choices>
-where
-    Choices::AsList: EachScoped<N>,
-    <Choices::AsList as EachSession>::Dual: List,
-{
-}
-impl<N: Unary, Choices: Tuple> Scoped<N> for Choose<Choices>
-where
-    Choices::AsList: EachScoped<N>,
-    <Choices::AsList as EachSession>::Dual: List,
-{
-}
-impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
-impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
-impl<N: Unary, M: Unary> Scoped<M> for Continue<N> where N: LessThan<M> {}
-impl<N: Unary> Scoped<N> for Done {}
 
 /// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
 /// choice or offering is well-[`Scoped`].
@@ -303,131 +307,18 @@ where
     type Env = E;
 }
 
-/// Offer the choice using [`Chan::offer`] or the [`offer!`](crate::offer) macro between any of the
-/// protocols in the tuple `Choices`.
-///
-/// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest
-/// `Offer`s within each other.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Offer<Choices>(pub Choices);
-
-impl<Choices> Session for Offer<Choices>
-where
-    Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
-{
-    type Dual = Choose<<<Choices::AsList as EachSession>::Dual as List>::AsTuple>;
-}
-
-impl<E, Choices> Actionable<E> for Offer<Choices>
-where
-    Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
-    Choices::AsList: EachScoped<E::Depth>,
-    E: Environment,
-    E::Dual: Environment,
-{
-    type Action = Offer<Choices>;
-    type Env = E;
-}
-
-/// Split the connection into send-only and receive-only halves using [`Chan::split`]. These can
-/// subsequently be rejoined using [`Chan::unsplit`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Split<P, Q>(pub P, pub Q);
-
-impl<P: Session, Q: Session> Session for Split<P, Q> {
-    /// Note how the dual flips the position of P and Q, because P::Dual is a receiving session, and
-    /// therefore belongs on the right of the split, and Q::Dual is a sending session, and therefore
-    /// belongs on the left of the split.
-    type Dual = Split<Q::Dual, P::Dual>;
-}
-
-impl<E, P, Q> Actionable<E> for Split<P, Q>
-where
-    P: Scoped<E::Depth>,
-    Q: Scoped<E::Depth>,
-    E: Environment,
-    E::Dual: Environment,
-{
-    type Action = Split<P, Q>;
-    type Env = E;
-}
-
-/// Label a loop point, which can be reiterated with [`Continue`].
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Loop<P>(pub P);
-
-impl<P: Session> Session for Loop<P> {
-    type Dual = Loop<P::Dual>;
-}
-
-impl<P, E> Actionable<E> for Loop<P>
-where
-    E: Environment,
-    E::Dual: Environment,
-    P: Actionable<(P, E)>,
-    P: Scoped<S<E::Depth>>,
-    P: Scoped<S<<E::Dual as Environment>::Depth>>,
-    P::Dual: Scoped<S<E::Depth>>,
-    P::Dual: Scoped<S<<E::Dual as Environment>::Depth>>,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    type Action = <P as Actionable<(P, E)>>::Action;
-    type Env = <P as Actionable<(P, E)>>::Env;
-}
-
-/// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
-/// innermost starting at [`Z`].
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Continue<N: Unary = Z>(pub N);
-
-impl<N: Unary> Session for Continue<N> {
-    type Dual = Continue<N>;
-}
-
-impl<E, N: Unary> Actionable<E> for Continue<N>
-where
-    E: Select<N> + Environment,
-    Continue<N>: Scoped<E::Depth>,
-    E::Selected: Actionable<(E::Selected, E::Remainder)>,
-    E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    E::Selected: Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
-    <E::Selected as Session>::Dual:
-        Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
-    E::Dual: Environment,
-    E::Remainder: Environment,
-    <E::Remainder as EachSession>::Dual: Environment,
-    <<E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env as EachSession>::Dual:
-        Environment,
-{
-    type Action = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Action;
-    type Env = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env;
-}
-
 mod sealed {
     use super::*;
 
+    /// Seal the [`Session`] trait so only types defined in this crate can be session types.
     pub trait IsSession {}
-    impl IsSession for Done {}
-    impl<T, P> IsSession for Recv<T, P> {}
-    impl<T, P> IsSession for Send<T, P> {}
-    impl<Choices> IsSession for Choose<Choices> {}
-    impl<Choices> IsSession for Offer<Choices> {}
-    impl<P, Q> IsSession for Split<P, Q> {}
-    impl<P> IsSession for Loop<P> {}
-    impl<N: Unary> IsSession for Continue<N> {}
 
+    /// Seal the [`EachSession`] trait so it can't be extended in weird ways.
     pub trait EachSession {}
     impl EachSession for () {}
     impl<T: IsSession, Ts: EachSession> EachSession for (T, Ts) {}
 
+    /// Seal the [`Select`] trait so it can't be extended in weird ways.
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
