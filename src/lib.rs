@@ -63,7 +63,7 @@
 //! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
 //! | [`Split<P, Q>`](Split) | [`let (tx, rx) = c.split();`](Chan::split)<br>`// concurrently use tx and rx`<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | (none) | [`Loop<P::Dual>`](Loop) |
-//! | [`Recur<N = Z>`](Recur) | (none) | [`Recur<N>`](Recur) |
+//! | [`Continue<N = Z>`](Continue) | (none) | [`Continue<N>`](Continue) |
 //! | [`Done`] | [`let (tx, rx) = c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
@@ -89,7 +89,7 @@ pub mod types;
 /// by the session type `P`.
 ///
 /// The fourth `E` parameter to a [`Chan`] is a type-level list describing the *session environment*
-/// of the channel: the stack of [`Loop`]s the channel has entered. When a [`Recur<N>`](Recur)
+/// of the channel: the stack of [`Loop`]s the channel has entered. When a [`Continue<N>`](Continue)
 /// occurs, the next session type is retrieved by selecting the `N`th element of this list.
 ///
 /// # Creating new `Chan`s: use [`NewSession`]
@@ -161,19 +161,19 @@ where
 /// # Notes
 ///
 /// The trait bounds specified for [`NewSession`] ensure that the session type is well-formed.
-/// However, it does not ensure that all the types in the session type can be sent or received
-/// over the given channels.
+/// However, it does not ensure that all the types in the session type can be sent or received over
+/// the given channels.
 ///
 /// Valid session types must contain only "productive" recursion: they must not contain any
-/// [`Recur`] directly inside the loop to which that recursion refers. For instance, attempting to
-/// use the session type `Loop<Recur>` will result in a compile-time trait solver overflow.
+/// [`Continue`] directly inside the loop to which that recursion refers. For instance, attempting
+/// to use the session type `Loop<Continue>` will result in a compile-time trait solver overflow.
 ///
 /// ```compile_fail
 /// use dialectic::*;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let (c1, c2) = <Loop<Recur>>::channel(backend::mpsc::unbounded_channel);
+/// let (c1, c2) = <Loop<Continue>>::channel(backend::mpsc::unbounded_channel);
 /// #   c1.unwrap();
 /// #   c2.unwrap();
 /// # }
@@ -183,14 +183,14 @@ where
 ///
 ///
 /// ```text
-/// error[E0275]: overflow evaluating the requirement `Recur: Actionable<(Recur, ())>`
+/// error[E0275]: overflow evaluating the requirement `Continue: Actionable<(Continue, ())>`
 ///   |
-/// 7 | let (c1, c2) = <Loop<Recur>>::channel(backend::mpsc::unbounded_channel);
+/// 7 | let (c1, c2) = <Loop<Continue>>::channel(backend::mpsc::unbounded_channel);
 ///   |                ^^^^^^^^^^^^^^^^^^^^^^
 ///   |
 ///   = help: consider adding a `#![recursion_limit="256"]` attribute to your crate
-///   = note: required because of the requirements on the impl of `Actionable<()>` for `Loop<Recur>`
-///   = note: required because of the requirements on the impl of `NewSession` for `Loop<Recur>`
+///   = note: required because of the requirements on the impl of `Actionable<()>` for `Loop<Continue>`
+///   = note: required because of the requirements on the impl of `NewSession` for `Loop<Continue>`
 /// ```
 ///
 /// In this situation, you **should not** take `rustc`'s advice. If you add a
@@ -361,7 +361,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = <Loop<Send<String, Recur>>>::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(backend::mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.close();
     /// let (tx2, rx2) = c2.close();
     /// # }
