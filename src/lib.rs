@@ -391,85 +391,6 @@ where
     }
 }
 
-/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states that
-/// could result from the offering of the tuple of protocols `Choices`.
-///
-/// To find out which protocol was selected by the other party, use [`Branches::case`], or better
-/// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
-///
-/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
-/// [`case`](Branches::case).**
-#[derive(Debug)]
-#[must_use]
-pub struct Branches<Tx, Rx, Choices, E = ()>
-where
-    Choices: Tuple,
-    Choices::AsList: EachActionable<E>,
-    E: Environment,
-    E::Dual: Environment,
-{
-    variant: u8,
-    tx: Tx,
-    rx: Rx,
-    protocols: PhantomData<Choices>,
-    environment: PhantomData<E>,
-}
-
-impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
-where
-    Choices: Tuple<AsList = (P, Ps)>,
-    (P, Ps): List<AsTuple = Choices>,
-    P: Actionable<E>,
-    Ps: EachActionable<E> + List,
-    E: Environment,
-    E::Dual: Environment,
-    P::Dual: Actionable<E::Dual>,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
-{
-    /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
-    /// channel; otherwise, return all the other possibilities.
-    #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(
-        self,
-    ) -> Result<
-        Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
-        Branches<Tx, Rx, Ps::AsTuple, E>,
-    > {
-        let variant = self.variant;
-        let tx = self.tx;
-        let rx = self.rx;
-        if variant == 0 {
-            Ok(unsafe { Chan::with_env(tx, rx) })
-        } else {
-            Err(Branches {
-                variant: variant - 1,
-                tx,
-                rx,
-                protocols: PhantomData,
-                environment: PhantomData,
-            })
-        }
-    }
-}
-
-impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
-where
-    E::Dual: Environment,
-{
-    /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
-    /// discriminant for this set of protocol choices was out of range.
-    ///
-    /// This function is only callable on empty [`Branches`], which under ordinary circumstances
-    /// means it proves the unreachability of its calling location. However, if the other end of the
-    /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
-    /// will then signal an error.
-    pub fn empty_case<T>(self) -> T {
-        unreachable!("empty `Branches` cannot be constructed")
-    }
-}
-
 impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
 where
     Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
@@ -572,118 +493,6 @@ where
     }
 }
 
-/// Offer a set of different protocols, allowing the other side of the channel to choose with which
-/// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
-/// make sense to use.
-///
-/// # Notes
-///
-/// - You must specify exactly as many branches as there are options in the type of the
-///   [`Offer`](crate::types::Offer) to which this expression corresponds, and they must be in the
-///   same order as the choices are in the tuple [`Offer`](crate::types::Offer)ed.
-/// - In the body of each branch, the identifier for the channel is rebound to have the session type
-///   corresponding to that branch.
-/// - To use `offer!` as an expression, ensure the type of every branch matches.
-///
-/// # Examples
-///
-/// ```
-/// use dialectic::*;
-/// use dialectic::constants::*;
-///
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
-///
-/// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
-///
-/// // Spawn a thread to offer a choice
-/// let t1 = tokio::spawn(async move {
-///     offer!(c2 => {
-///         _0 => { c2.recv().await?; },
-///         _1 => { c2.send("Hello!".to_string()).await?; },
-///     });
-///     Ok::<_, backend::mpsc::Error>(())
-/// });
-///
-/// // Choose to send an integer
-/// c1.choose(_0).await?.send(42).await?;
-///
-/// // Wait for the offering thread to finish
-/// t1.await??;
-/// # Ok(())
-/// # }
-/// ```
-#[macro_export]
-macro_rules! offer {
-    (
-        $chan:ident => { $($t:tt)* }
-    ) => (
-        {
-            match $crate::Chan::offer($chan).await {
-                Ok(b) => $crate::offer!{@branches b, $chan, $crate::types::unary::Z, $($t)* },
-                Err(e) => Err(e)?,
-            }
-        }
-    );
-    (
-        @branches $branch:ident, $chan:ident, $n:ty, $(,)?
-    ) => (
-        $crate::Branches::empty_case($branch),
-    );
-    (
-        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr $(,)?
-    ) =>
-    (
-        match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => {
-                let _: $n = $label;
-                $code
-            },
-            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
-        }
-    );
-    (
-        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr, $($t:tt)+
-    ) => (
-        match $crate::Branches::case($branch) {
-            std::result::Result::Ok($chan) => {
-                let _: $n = $label;
-                $code
-            },
-            std::result::Result::Err($branch) => {
-                $crate::offer!{@branches $branch, $chan, $crate::types::unary::S<$n>, $($t)+ }
-            },
-        }
-    );
-}
-
-/// A placeholder for a missing transmit or receive end of a connection.
-///
-/// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
-/// respectively. This is reflected at the type level by the presence of `Unavailable` on the type
-/// of the connection which is not present for each part of the split.
-#[derive(Debug)]
-pub struct Unavailable<T>(Arc<()>, PhantomData<T>);
-
-impl<T> Clone for Unavailable<T> {
-    fn clone(&self) -> Self {
-        Unavailable(Arc::clone(&self.0), PhantomData)
-    }
-}
-
-impl<T> Unavailable<T> {
-    /// Make a new `Unavailable`.
-    fn new() -> Self {
-        Unavailable(Arc::new(()), PhantomData)
-    }
-
-    /// Cast an `Unavailable` to a new phantom type.
-    fn cast<S>(self) -> Unavailable<S> {
-        Unavailable(self.0, PhantomData)
-    }
-}
-
 impl<Tx, Rx, E, P, Q, R> Chan<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = Split<Q, R>>,
@@ -763,58 +572,6 @@ where
         let tx_only = unsafe { Chan::with_env(tx, unavailable.clone()) };
         let rx_only = unsafe { Chan::with_env(unavailable.cast(), rx) };
         (tx_only, rx_only)
-    }
-}
-
-/// The error returned when two channels cannot be [`unsplit`](Chan::unsplit) together because they
-/// originate from different channels contains the two channels which couldn't be reunited.
-#[derive(Debug)]
-pub struct UnsplitError<Tx, Rx, P, Q, E, F>
-where
-    P: Actionable<E>,
-    Q: Actionable<F>,
-    E: Environment,
-    F: Environment,
-    E::Dual: Environment,
-    F::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-{
-    /// The transmit-only half.
-    pub tx: Chan<Tx, Unavailable<Rx>, P, E>,
-
-    /// The receive-only half.
-    pub rx: Chan<Unavailable<Tx>, Rx, Q, F>,
-}
-
-impl<Tx, Rx, P, Q, E, F> std::error::Error for UnsplitError<Tx, Rx, P, Q, E, F>
-where
-    Tx: std::fmt::Debug,
-    Rx: std::fmt::Debug,
-    P: Actionable<E> + std::fmt::Debug,
-    Q: Actionable<F> + std::fmt::Debug,
-    E: Environment + std::fmt::Debug,
-    F: Environment + std::fmt::Debug,
-    E::Dual: Environment,
-    F::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-{
-}
-
-impl<Tx, Rx, P, Q, E, F> std::fmt::Display for UnsplitError<Tx, Rx, P, Q, E, F>
-where
-    P: Actionable<E>,
-    Q: Actionable<F>,
-    E: Environment,
-    F: Environment,
-    E::Dual: Environment,
-    F::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "cannot `Chan::unsplit` two unrelated channels")
     }
 }
 
@@ -947,5 +704,248 @@ where
             environment: PhantomData,
             protocol: PhantomData,
         }
+    }
+}
+
+/// Offer a set of different protocols, allowing the other side of the channel to choose with which
+/// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
+/// make sense to use.
+///
+/// # Notes
+///
+/// - You must specify exactly as many branches as there are options in the type of the
+///   [`Offer`](crate::types::Offer) to which this expression corresponds, and they must be in the
+///   same order as the choices are in the tuple [`Offer`](crate::types::Offer)ed.
+/// - In the body of each branch, the identifier for the channel is rebound to have the session type
+///   corresponding to that branch.
+/// - To use `offer!` as an expression, ensure the type of every branch matches.
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::*;
+/// use dialectic::constants::*;
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
+///
+/// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
+///
+/// // Spawn a thread to offer a choice
+/// let t1 = tokio::spawn(async move {
+///     offer!(c2 => {
+///         _0 => { c2.recv().await?; },
+///         _1 => { c2.send("Hello!".to_string()).await?; },
+///     });
+///     Ok::<_, backend::mpsc::Error>(())
+/// });
+///
+/// // Choose to send an integer
+/// c1.choose(_0).await?.send(42).await?;
+///
+/// // Wait for the offering thread to finish
+/// t1.await??;
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! offer {
+    (
+        $chan:ident => { $($t:tt)* }
+    ) => (
+        {
+            match $crate::Chan::offer($chan).await {
+                Ok(b) => $crate::offer!{@branches b, $chan, $crate::types::unary::Z, $($t)* },
+                Err(e) => Err(e)?,
+            }
+        }
+    );
+    (
+        @branches $branch:ident, $chan:ident, $n:ty, $(,)?
+    ) => (
+        $crate::Branches::empty_case($branch),
+    );
+    (
+        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr $(,)?
+    ) =>
+    (
+        match $crate::Branches::case($branch) {
+            std::result::Result::Ok($chan) => {
+                let _: $n = $label;
+                $code
+            },
+            std::result::Result::Err($branch) => $crate::Branches::empty_case($branch),
+        }
+    );
+    (
+        @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr, $($t:tt)+
+    ) => (
+        match $crate::Branches::case($branch) {
+            std::result::Result::Ok($chan) => {
+                let _: $n = $label;
+                $code
+            },
+            std::result::Result::Err($branch) => {
+                $crate::offer!{@branches $branch, $chan, $crate::types::unary::S<$n>, $($t)+ }
+            },
+        }
+    );
+}
+
+/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states that
+/// could result from the offering of the tuple of protocols `Choices`.
+///
+/// To find out which protocol was selected by the other party, use [`Branches::case`], or better
+/// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
+///
+/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
+/// [`case`](Branches::case).**
+#[derive(Debug)]
+#[must_use]
+pub struct Branches<Tx, Rx, Choices, E = ()>
+where
+    Choices: Tuple,
+    Choices::AsList: EachActionable<E>,
+    E: Environment,
+    E::Dual: Environment,
+{
+    variant: u8,
+    tx: Tx,
+    rx: Rx,
+    protocols: PhantomData<Choices>,
+    environment: PhantomData<E>,
+}
+
+impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
+where
+    Choices: Tuple<AsList = (P, Ps)>,
+    (P, Ps): List<AsTuple = Choices>,
+    P: Actionable<E>,
+    Ps: EachActionable<E> + List,
+    E: Environment,
+    E::Dual: Environment,
+    P::Dual: Actionable<E::Dual>,
+    <P::Env as EachSession>::Dual: Environment,
+    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
+    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
+{
+    /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
+    /// channel; otherwise, return all the other possibilities.
+    #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
+    pub fn case(
+        self,
+    ) -> Result<
+        Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
+        Branches<Tx, Rx, Ps::AsTuple, E>,
+    > {
+        let variant = self.variant;
+        let tx = self.tx;
+        let rx = self.rx;
+        if variant == 0 {
+            Ok(unsafe { Chan::with_env(tx, rx) })
+        } else {
+            Err(Branches {
+                variant: variant - 1,
+                tx,
+                rx,
+                protocols: PhantomData,
+                environment: PhantomData,
+            })
+        }
+    }
+}
+
+impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
+where
+    E::Dual: Environment,
+{
+    /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
+    /// discriminant for this set of protocol choices was out of range.
+    ///
+    /// This function is only callable on empty [`Branches`], which under ordinary circumstances
+    /// means it proves the unreachability of its calling location. However, if the other end of the
+    /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
+    /// will then signal an error.
+    pub fn empty_case<T>(self) -> T {
+        unreachable!("empty `Branches` cannot be constructed")
+    }
+}
+
+/// A placeholder for a missing transmit or receive end of a connection.
+///
+/// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
+/// respectively. This is reflected at the type level by the presence of `Unavailable` on the type
+/// of the connection which is not present for each part of the split.
+#[derive(Debug)]
+pub struct Unavailable<T>(Arc<()>, PhantomData<T>);
+
+impl<T> Clone for Unavailable<T> {
+    fn clone(&self) -> Self {
+        Unavailable(Arc::clone(&self.0), PhantomData)
+    }
+}
+
+impl<T> Unavailable<T> {
+    /// Make a new `Unavailable`.
+    fn new() -> Self {
+        Unavailable(Arc::new(()), PhantomData)
+    }
+
+    /// Cast an `Unavailable` to a new phantom type.
+    fn cast<S>(self) -> Unavailable<S> {
+        Unavailable(self.0, PhantomData)
+    }
+}
+
+/// The error returned when two channels cannot be [`unsplit`](Chan::unsplit) together because they
+/// originate from different channels contains the two channels which couldn't be reunited.
+#[derive(Debug)]
+pub struct UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    P: Actionable<E>,
+    Q: Actionable<F>,
+    E: Environment,
+    F: Environment,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+    /// The transmit-only half.
+    pub tx: Chan<Tx, Unavailable<Rx>, P, E>,
+
+    /// The receive-only half.
+    pub rx: Chan<Unavailable<Tx>, Rx, Q, F>,
+}
+
+impl<Tx, Rx, P, Q, E, F> std::error::Error for UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    Tx: std::fmt::Debug,
+    Rx: std::fmt::Debug,
+    P: Actionable<E> + std::fmt::Debug,
+    Q: Actionable<F> + std::fmt::Debug,
+    E: Environment + std::fmt::Debug,
+    F: Environment + std::fmt::Debug,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+}
+
+impl<Tx, Rx, P, Q, E, F> std::fmt::Display for UnsplitError<Tx, Rx, P, Q, E, F>
+where
+    P: Actionable<E>,
+    Q: Actionable<F>,
+    E: Environment,
+    F: Environment,
+    E::Dual: Environment,
+    F::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+    <Q::Env as EachSession>::Dual: Environment,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "cannot `Chan::unsplit` two unrelated channels")
     }
 }
