@@ -1,7 +1,8 @@
 //! The types in this module enumerate the shapes of all expressible sessions.
 
 use super::*;
-pub use unary::*;
+pub use unary::types::*;
+pub use unary::{constants, LessThan, Unary, S, Z};
 
 pub mod tuple;
 pub mod unary;
@@ -202,6 +203,7 @@ where
     type Selected = <(P, Rest) as Select<N>>::Selected;
     type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
+
 mod sealed {
     use super::*;
 
@@ -221,6 +223,7 @@ mod sealed {
 
 /// Asserts that the specified type is a valid *closed* session type (that is, it does not
 /// `Continue` outside itself).
+#[cfg(test)]
 #[macro_export]
 macro_rules! assert_all_closed_sessions {
     () => {};

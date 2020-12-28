@@ -67,7 +67,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::unary::types::*;
     use super::*;
     use crate::assert_all_closed_sessions;
 

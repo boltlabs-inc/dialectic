@@ -51,20 +51,21 @@
 //! - To wrap an existing sender `tx` and receiver `rx` in a single [`Chan`] for `P`: [`let c =
 //!   P::wrap(tx, rx)`](NewSession::wrap).
 //! - Backend transports suitable for being wrapped in a [`Chan`] are provided in [`backend`], along
-//!   with the traits necessary to implement your own.
+//!   with the [`Transmit`] and [`Receive`] traits necessary to implement your own.
 //!
 //! Once you've got a channel, here's what you can do:
 //!
-//! | Session Type | Channel Operation(s) | Dual Type |
+//! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<_, _, S, _>`) | Dual Type (`S::Dual`) |
 //! | :----------- | :------------------- | :-------- |
-//! | [`Send<T, P = Done>`](Send) | [`let c = c.send(t: T).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
-//! | [`Recv<T, P = Done>`](Recv) | [`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
-//! | [`Choose<Choices>`](Choose) | [`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
-//! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
-//! | [`Split<P, Q>`](Split) | [`let (tx, rx) = c.split();`](Chan::split)<br>`// concurrently use tx and rx`<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
-//! | [`Loop<P>`](Loop) | (none) | [`Loop<P::Dual>`](Loop) |
-//! | [`Continue<N = Z>`](Continue) | (none) | [`Continue<N>`](Continue) |
-//! | [`Done`] | [`let (tx, rx) = c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
+//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
+//! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
+//! | [`Split<P, Q>`](Split) | Returns a pair of a [`Send`]/[`Choose`]-only and a [`Recv`]/[`Offer`]-only `tx` and `rx`, respectively (can be used concurrently):<br>[`let (tx, rx) = c.split();`](Chan::split)<br>When their types match again, given the two ends, returns a unified `c` with all capabilities:<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
+//! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
+//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
+//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
@@ -74,10 +75,9 @@ use std::{
     marker::{self, PhantomData},
     sync::Arc,
 };
-use types::tuple::HasLength;
 
 use crate::backend::*;
-use tuple::{List, Tuple};
+use tuple::{HasLength, List, Tuple};
 pub use types::*;
 
 pub mod backend;
@@ -556,7 +556,7 @@ where
         Tx::Error,
     >
     where
-        N: LessThan<unary::types::_128>,
+        N: LessThan<_128>,
         Choices::AsList: Select<N>,
         <Choices::AsList as Select<N>>::Selected: Actionable<E>,
         <<<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env as EachSession>::Dual:
@@ -570,11 +570,14 @@ where
     }
 }
 
-/// The result of [`offer`](Chan::offer), `Branches<Tx, Rx, Ps>` represents an enumeration of the possible
-/// new channel states that could result from the offering of the type-level list of protocols `Ps`.
+/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states that
+/// could result from the offering of the tuple of protocols `Choices`.
 ///
 /// To find out which protocol was selected by the other party, use [`Branches::case`], or better
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
+///
+/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
+/// [`case`](Branches::case).**
 #[derive(Debug)]
 #[must_use]
 pub struct Branches<Tx, Rx, Choices, E = ()>
