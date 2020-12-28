@@ -343,8 +343,8 @@
 //! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64>)>>;
 //! ```
 //!
-//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Continue` is `Continue`, so we know the
-//! other end of this channel will need to implement:
+//! The dual to `Loop<P>` is `Loop<P::Dual>`, and the dual to `Continue` is `Continue`, so we know
+//! the other end of this channel will need to implement:
 //!
 //! ```
 //! # use dialectic::*;
@@ -408,10 +408,10 @@
 //! ## Nested loops
 //!
 //! If the protocol contains nested loops, you can specify which nested loop to continue with  using
-//! the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop; however,
-//! `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc. The types
-//! [`_0`](unary::types::_0), [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are defined
-//! in the [`unary::types`] module.
+//! the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop;
+//! however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc.
+//! The types [`_0`](unary::types::_0), [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are
+//! defined in the [`unary::types`] module.
 //!
 //! ## Automatic looping
 //!
@@ -421,14 +421,14 @@
 //! [`Continue`]s to a session type for which a given operation is valid, that operation is valid on
 //! the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a [`Chan`] with session
 //! type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a
-//! `Chan`'s type is `Continue`, whatever operation would be valid for the session type at the start of
-//! the corresponding `Loop` is valid for that `Chan`.
+//! `Chan`'s type is `Continue`, whatever operation would be valid for the session type at the start
+//! of the corresponding `Loop` is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
 //! on a session type is. For [`Done`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`]
 //! (the final session type discussed below), the "real action" is that session type itself.
-//! However, for [`Loop`] and [`Continue`], the next action is whatever follows entering the loop(s) or
-//! recurring, respectively.
+//! However, for [`Loop`] and [`Continue`], the next action is whatever follows entering the loop(s)
+//! or recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
 //! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,

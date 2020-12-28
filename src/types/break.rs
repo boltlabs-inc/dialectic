@@ -7,15 +7,19 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Break<N: Unary = Z>(pub N);
 
+/// [`Break`] is a constructor for a session type.
 impl<N: Unary> IsSession for Break<N> {}
 
+/// All [`Break`]s are valid session types.
 impl<N: Unary> Session for Break<N> {
+    /// [`Break`] is self-dual.
     type Dual = Break<N>;
 }
 
+/// A [`Break`] is well-[`Scoped`] if it refers to a loop that it is inside of.
 impl<N: Unary, M: Unary> Scoped<M> for Break<N> where N: LessThan<M> {}
 
-/// Break from the outermost loop: end the session.
+/// When in the outermost loop, [`Break`] exits that loop and finishes the session.
 impl<P> Actionable<(P, ())> for Break<Z>
 where
     (P, ()): Environment,
@@ -31,12 +35,12 @@ impl<P, Q, Rest> Actionable<(P, (Q, Rest))> for Break<Z>
 where
     Q: Actionable<(Q, Rest)>,
     Q: Scoped<S<<Rest as Environment>::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
-    P: Scoped<S<S<<Rest as Environment>::Depth>>>
-        + Scoped<S<S<<Rest::Dual as Environment>::Depth>>>,
-    P::Dual: Scoped<S<S<<Rest as Environment>::Depth>>>
-        + Scoped<S<S<<Rest::Dual as Environment>::Depth>>>,
-    Q::Dual:
-        Scoped<S<<Rest as Environment>::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
+    P: Scoped<S<S<<Rest as Environment>::Depth>>>,
+    P: Scoped<S<S<<Rest::Dual as Environment>::Depth>>>,
+    P::Dual: Scoped<S<S<<Rest as Environment>::Depth>>>,
+    P::Dual: Scoped<S<S<<Rest::Dual as Environment>::Depth>>>,
+    Q::Dual: Scoped<S<<Rest as Environment>::Depth>>,
+    Q::Dual: Scoped<S<<Rest::Dual as Environment>::Depth>>,
     Q::Env: Environment,
     Rest: Environment,
     Rest::Dual: Environment,
@@ -59,4 +63,20 @@ where
 {
     type Action = <Break<N> as Actionable<Rest>>::Action;
     type Env = <Break<N> as Actionable<Rest>>::Env;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unary::types::*;
+    use super::*;
+    use crate::assert_all_closed_sessions;
+
+    #[test]
+    fn break_good() {
+        assert_all_closed_sessions!(
+            Loop<Break>,
+            Loop<Loop<Break<_1>>>,
+            Loop<Send<String, Break>>,
+        );
+    }
 }

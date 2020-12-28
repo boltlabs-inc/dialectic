@@ -202,10 +202,10 @@ where
 /// recursion.
 pub trait NewSession
 where
-    Self: Actionable<()>,
-    Self::Dual: Actionable<()>,
+    Self: Actionable,
+    Self::Dual: Actionable,
     <Self::Env as EachSession>::Dual: Environment,
-    <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
+    <<Self::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
@@ -228,7 +228,7 @@ where
         make: impl FnMut() -> (Tx, Rx),
     ) -> (
         Chan<Tx, Rx, Self::Action, Self::Env>,
-        Chan<Tx, Rx, <Self::Dual as Actionable<()>>::Action, <Self::Dual as Actionable<()>>::Env>,
+        Chan<Tx, Rx, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
     );
 
     /// Given two closures, each of which generates a uni-directional underlying transport channel,
@@ -256,7 +256,7 @@ where
         make1: impl FnOnce() -> (Tx1, Rx1),
     ) -> (
         Chan<Tx0, Rx1, Self::Action, Self::Env>,
-        Chan<Tx1, Rx0, <Self::Dual as Actionable<()>>::Action, <Self::Dual as Actionable<()>>::Env>,
+        Chan<Tx1, Rx0, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
     );
 
     /// Given a transmitting and receiving end of an un-session-typed connection, wrap them in a new
@@ -290,16 +290,16 @@ where
 
 impl<P> NewSession for P
 where
-    Self: Actionable<()>,
-    Self::Dual: Actionable<()>,
+    Self: Actionable,
+    Self::Dual: Actionable,
     <Self::Env as EachSession>::Dual: Environment,
-    <<Self::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
+    <<Self::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
     ) -> (
         Chan<Tx, Rx, Self::Action, Self::Env>,
-        Chan<Tx, Rx, <Self::Dual as Actionable<()>>::Action, <Self::Dual as Actionable<()>>::Env>,
+        Chan<Tx, Rx, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
     ) {
         let (tx0, rx0) = make();
         let (tx1, rx1) = make();
@@ -311,7 +311,7 @@ where
         make1: impl FnOnce() -> (Tx1, Rx1),
     ) -> (
         Chan<Tx0, Rx1, Self::Action, Self::Env>,
-        Chan<Tx1, Rx0, <Self::Dual as Actionable<()>>::Action, <Self::Dual as Actionable<()>>::Env>,
+        Chan<Tx1, Rx0, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
     ) {
         let (tx0, rx0) = make0();
         let (tx1, rx1) = make1();
