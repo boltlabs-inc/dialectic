@@ -203,36 +203,6 @@ where
     type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
 
-/// Select by index from a type level list, returning a default value if the index is out of bounds.
-///
-/// This is used internally by the [`Break`] session type.
-pub trait SelectDefault<N: Unary, Default>: sealed::SelectDefault<N, Default> {
-    /// The thing which is selected from this list by the index `N`, or the default value if the
-    /// index is out of bounds.
-    type Selected;
-
-    /// The remainder of the list after the selected thing, or `()` if the index is out of bounds.
-    type Remainder;
-}
-
-impl<N: Unary, Default> SelectDefault<N, Default> for () {
-    type Selected = Default;
-    type Remainder = ();
-}
-
-impl<Default, T, Rest> SelectDefault<Z, Default> for (T, Rest) {
-    type Selected = T;
-    type Remainder = Rest;
-}
-
-impl<N: Unary, Default, T, Rest> SelectDefault<S<N>, Default> for (T, Rest)
-where
-    Rest: SelectDefault<N, Default>,
-{
-    type Selected = Rest::Selected;
-    type Remainder = Rest::Remainder;
-}
-
 mod sealed {
     use super::*;
 
@@ -248,14 +218,6 @@ mod sealed {
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
-
-    pub trait SelectDefault<N: Unary, Default> {}
-    impl<N: Unary, Default> SelectDefault<N, Default> for () {}
-    impl<Default, T, Rest> SelectDefault<Z, Default> for (T, Rest) {}
-    impl<N: Unary, Default, T, Rest> SelectDefault<S<N>, Default> for (T, Rest) where
-        Rest: SelectDefault<N, Default>
-    {
-    }
 }
 
 mod test {
