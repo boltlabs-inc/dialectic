@@ -168,9 +168,9 @@ pub trait EachScoped<N: Unary>: EachSession {}
 impl<N: Unary> EachScoped<N> for () {}
 impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 
-/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
-/// protocols. The sealed `Select` trait describes what it means to index into a type level list of
-/// protocols.
+/// Select by index from a type level list.
+///
+/// This is used internally by the [`Choose`], [`Offer`], and [`Continue`] session types.
 ///
 /// # Examples
 ///
@@ -203,108 +203,34 @@ where
     type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
 
-/// Complete a session. The only thing to do with a [`Chan`] at its `Done` is to drop it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Done;
-
-impl Session for Done {
-    type Dual = Done;
-}
-
-impl Actionable<()> for Done {
-    type Action = Done;
-    type Env = ();
-}
-
-impl<P, Rest> Actionable<(P, Rest)> for Done
-where
-    Continue: Actionable<(P, Rest)>,
-    P: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
-    P::Dual: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
-    Rest: Environment,
-    Rest::Dual: Environment,
-    <<Continue as Actionable<(P, Rest)>>::Env as EachSession>::Dual: Environment,
-{
-    type Action = <Continue as Actionable<(P, Rest)>>::Action;
-    type Env = <Continue as Actionable<(P, Rest)>>::Env;
-}
-
-/// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
+/// Select by index from a type level list, returning a default value if the index is out of bounds.
 ///
-/// # Notes
-///
-/// A session ending with a `Recv` can be abbreviated: `Recv<String>` is shorthand for `Recv<String,
-/// Done>`.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Recv<T, P = Done>(pub PhantomData<T>, pub P);
+/// This is used internally by the [`Break`] session type.
+pub trait SelectDefault<N: Unary, Default>: sealed::SelectDefault<N, Default> {
+    /// The thing which is selected from this list by the index `N`, or the default value if the
+    /// index is out of bounds.
+    type Selected;
 
-impl<T, P: Session> Session for Recv<T, P> {
-    type Dual = Send<T, P::Dual>;
+    /// The remainder of the list after the selected thing, or `()` if the index is out of bounds.
+    type Remainder;
 }
 
-impl<E, T, P> Actionable<E> for Recv<T, P>
+impl<N: Unary, Default> SelectDefault<N, Default> for () {
+    type Selected = Default;
+    type Remainder = ();
+}
+
+impl<Default, T, Rest> SelectDefault<Z, Default> for (T, Rest) {
+    type Selected = T;
+    type Remainder = Rest;
+}
+
+impl<N: Unary, Default, T, Rest> SelectDefault<S<N>, Default> for (T, Rest)
 where
-    P: Scoped<E::Depth>,
-    E: Environment,
-    E::Dual: Environment,
+    Rest: SelectDefault<N, Default>,
 {
-    type Action = Recv<T, P>;
-    type Env = E;
-}
-
-/// Send a message of type `T` using [`Chan::send`], then continue with protocol `P`.
-///
-/// # Notes
-///
-/// A session ending with a `Send` can be abbreviated: `Send<String>` is shorthand for `Send<String,
-/// Done>`.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Send<T, P = Done>(pub PhantomData<T>, pub P);
-
-impl<T, P: Session> Session for Send<T, P> {
-    type Dual = Recv<T, P::Dual>;
-}
-
-impl<E, T, P> Actionable<E> for Send<T, P>
-where
-    P: Scoped<E::Depth>,
-    E: Environment,
-    E::Dual: Environment,
-{
-    type Action = Send<T, P>;
-    type Env = E;
-}
-
-/// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Choices`.
-///
-/// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
-/// `Choose`s within each other.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Choose<Choices>(pub Choices);
-
-impl<Choices> Session for Choose<Choices>
-where
-    Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
-{
-    type Dual = Offer<<<Choices::AsList as EachSession>::Dual as List>::AsTuple>;
-}
-
-impl<E, Choices> Actionable<E> for Choose<Choices>
-where
-    Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
-    Choices::AsList: EachScoped<E::Depth>,
-    E: Environment,
-    E::Dual: Environment,
-{
-    type Action = Choose<Choices>;
-    type Env = E;
+    type Selected = Rest::Selected;
+    type Remainder = Rest::Remainder;
 }
 
 mod sealed {
@@ -322,6 +248,14 @@ mod sealed {
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
+
+    pub trait SelectDefault<N: Unary, Default> {}
+    impl<N: Unary, Default> SelectDefault<N, Default> for () {}
+    impl<Default, T, Rest> SelectDefault<Z, Default> for (T, Rest) {}
+    impl<N: Unary, Default, T, Rest> SelectDefault<S<N>, Default> for (T, Rest) where
+        Rest: SelectDefault<N, Default>
+    {
+    }
 }
 
 mod test {
