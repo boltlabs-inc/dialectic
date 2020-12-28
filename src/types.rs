@@ -22,8 +22,8 @@ pub mod unary;
 /// # use static_assertions::assert_type_eq_all;
 /// use dialectic::types::*;
 ///
-/// type Client = Loop<Offer<(Split<Send<String, End>, Recv<usize, End>>, Recv<bool, Recur>)>>;
-/// type Server = Loop<Choose<(Split<Send<usize, End>, Recv<String, End>>, Send<bool, Recur>)>>;
+/// type Client = Loop<Offer<(Split<Send<String, Done>, Recv<usize, Done>>, Recv<bool, Recur>)>>;
+/// type Server = Loop<Choose<(Split<Send<usize, Done>, Recv<String, Done>>, Send<bool, Recur>)>>;
 ///
 /// assert_type_eq_all!(Client, <Server as Session>::Dual);
 /// ```
@@ -156,7 +156,7 @@ where
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 impl<N: Unary, M: Unary> Scoped<M> for Recur<N> where N: LessThan<M> {}
-impl<N: Unary> Scoped<N> for End {}
+impl<N: Unary> Scoped<N> for Done {}
 
 /// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
 /// choice or offering is well-[`Scoped`].
@@ -199,20 +199,20 @@ where
     type Remainder = <(P, Rest) as Select<N>>::Remainder;
 }
 
-/// Complete a session. The only thing to do with a [`Chan`] at its `End` is to drop it.
+/// Complete a session. The only thing to do with a [`Chan`] at its `Done` is to drop it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct End;
+pub struct Done;
 
-impl Session for End {
-    type Dual = End;
+impl Session for Done {
+    type Dual = Done;
 }
 
-impl<E> Actionable<E> for End
+impl<E> Actionable<E> for Done
 where
     E: Environment,
     E::Dual: Environment,
 {
-    type Action = End;
+    type Action = Done;
     type Env = E;
 }
 
@@ -221,10 +221,10 @@ where
 /// # Notes
 ///
 /// A session ending with a `Recv` can be abbreviated: `Recv<String>` is shorthand for `Recv<String,
-/// End>`.
+/// Done>`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Recv<T, P = End>(pub PhantomData<T>, pub P);
+pub struct Recv<T, P = Done>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Recv<T, P> {
     type Dual = Send<T, P::Dual>;
@@ -245,10 +245,10 @@ where
 /// # Notes
 ///
 /// A session ending with a `Send` can be abbreviated: `Send<String>` is shorthand for `Send<String,
-/// End>`.
+/// Done>`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Send<T, P = End>(pub PhantomData<T>, pub P);
+pub struct Send<T, P = Done>(pub PhantomData<T>, pub P);
 
 impl<T, P: Session> Session for Send<T, P> {
     type Dual = Recv<T, P::Dual>;
@@ -406,7 +406,7 @@ mod sealed {
     use super::*;
 
     pub trait IsSession {}
-    impl IsSession for End {}
+    impl IsSession for Done {}
     impl<T, P> IsSession for Recv<T, P> {}
     impl<T, P> IsSession for Send<T, P> {}
     impl<Choices> IsSession for Choose<Choices> {}

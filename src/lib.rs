@@ -57,14 +57,14 @@
 //!
 //! | Session Type | Channel Operation(s) | Dual Type |
 //! | :----------- | :------------------- | :-------- |
-//! | [`Send<T, P = End>`](Send) | [`let c = c.send(t: T).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
-//! | [`Recv<T, P = End>`](Recv) | [`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Send<T, P = Done>`](Send) | [`let c = c.send(t: T).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P = Done>`](Recv) | [`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
 //! | [`Choose<Choices>`](Choose) | [`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
 //! | [`Offer<Choices>`](Offer) | [`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
 //! | [`Split<P, Q>`](Split) | [`let (tx, rx) = c.split();`](Chan::split)<br>`// concurrently use tx and rx`<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | (none) | [`Loop<P::Dual>`](Loop) |
 //! | [`Recur<N = Z>`](Recur) | (none) | [`Recur<N>`](Recur) |
-//! | [`End`] | [`let (tx, rx) = c.close();`](Chan::close) | [`End`] | [`c.close()`](Chan::close) |
+//! | [`Done`] | [`let (tx, rx) = c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
@@ -221,7 +221,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = End::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = Done::channel(backend::mpsc::unbounded_channel);
     /// # }
     /// ```
     fn channel<Tx, Rx>(
@@ -245,7 +245,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = End::bichannel(
+    /// let (c1, c2) = Done::bichannel(
     ///     backend::mpsc::unbounded_channel,
     ///     || backend::mpsc::channel(1),
     /// );
@@ -279,9 +279,9 @@ where
     /// # #[tokio::main]
     /// # async fn main() {
     /// let (mut tx, mut rx) = backend::mpsc::unbounded_channel();
-    /// let c = End::wrap(&mut tx, &mut rx);  // you can wrap &mut references
+    /// let c = Done::wrap(&mut tx, &mut rx);  // you can wrap &mut references
     /// c.close();                            // whose lifetimes end when the channel is closed,
-    /// let c = End::wrap(tx, rx);            // or you can wrap owned values
+    /// let c = Done::wrap(tx, rx);            // or you can wrap owned values
     /// let (tx, rx) = c.close();             // and get them back when the channel is closed.
     /// # }
     /// ```
@@ -325,7 +325,7 @@ where
 
 impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
 where
-    P: Actionable<E, Action = End>,
+    P: Actionable<E, Action = Done>,
     E: Environment,
     E::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
@@ -338,7 +338,7 @@ where
     ///
     /// # Examples
     ///
-    /// Starting with a channel whose session type is already `End`, we can immediately close the
+    /// Starting with a channel whose session type is already `Done`, we can immediately close the
     /// channel.
     ///
     /// ```
@@ -346,13 +346,13 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = End::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = Done::channel(backend::mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.close();
     /// let (tx2, rx2) = c2.close();
     /// # }
     /// ```
     ///
-    /// However, if the channel's session type is *not* `End`, it is a type error to attempt to
+    /// However, if the channel's session type is *not* `Done`, it is a type error to attempt to
     /// close the channel and retrieve its underlying sender and receiver. The following code **will
     /// not compile**:
     ///
@@ -532,7 +532,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type OnlyTwoChoices = Choose<(End, End)>;
+    /// type OnlyTwoChoices = Choose<(Done, Done)>;
     /// let (c1, c2) = OnlyTwoChoices::channel(|| backend::mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
@@ -1012,7 +1012,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Split<End, End>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Split<Done, Done>>::channel(|| backend::mpsc::channel(1));
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
     ///
@@ -1035,7 +1035,7 @@ where
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type SplitEnds = Split<End, End>;
+    /// # type SplitEnds = Split<Done, Done>;
     /// #
     /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
     /// let (tx1, rx1) = c1.split();

@@ -13,12 +13,12 @@
 //! ```
 //! use dialectic::*;
 //!
-//! type JustSendOneString = Send<String, End>;
+//! type JustSendOneString = Send<String, Done>;
 //! ```
 //!
 //! This type specifies a very simple protocol: "send a string, then finish." The first argument to
 //! `Send` is the type sent, and the second is the rest of the protocol, which in this case is the
-//! empty protocol [`End`].
+//! empty protocol [`Done`].
 //!
 //! Every session type has a [`Dual`](crate::Session::Dual), which describes what the other end of
 //! the channel must do to follow the channel's protocol; if one end [`Send`]s, the other end must
@@ -27,17 +27,17 @@
 //! ```
 //! # use dialectic::*;
 //! # use static_assertions::assert_type_eq_all;
-//! assert_type_eq_all!(<Send<String, End> as Session>::Dual, Recv<String, End>);
+//! assert_type_eq_all!(<Send<String, Done> as Session>::Dual, Recv<String, Done>);
 //! ```
 //!
 //! Because many sessions end with either a `Send` or a `Recv`, their types can be abbreviated when
-//! the rest of the session is `End`:
+//! the rest of the session is `Done`:
 //!
 //! ```
 //! # use dialectic::*;
 //! # use static_assertions::assert_type_eq_all;
-//! assert_type_eq_all!(Send<String>, Send<String, End>);
-//! assert_type_eq_all!(Recv<String>, Recv<String, End>);
+//! assert_type_eq_all!(Send<String>, Send<String, Done>);
+//! assert_type_eq_all!(Recv<String>, Recv<String, Done>);
 //! ```
 //!
 //! Given a valid session type, we can wrap an underlying communications channel with it. Here,
@@ -61,7 +61,7 @@
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 //! ```
 //!
@@ -71,7 +71,7 @@
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 //! let _: Chan<mpsc::Sender, mpsc::Receiver, Send<String>> = c1;
 //! let _: Chan<mpsc::Sender, mpsc::Receiver, Recv<String>> = c2;
@@ -85,7 +85,7 @@
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -121,7 +121,7 @@
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! type ParityOfLength = Send<String, Recv<usize, Send<bool>>>;
@@ -176,7 +176,7 @@
 //!
 //! ```
 //! # use dialectic::*;
-//! type JustSendOneString = Send<String, End>;
+//! type JustSendOneString = Send<String, Done>;
 //! ```
 //!
 //! Trying to do any of the below things results in a compile-time type error (edited for brevity).
@@ -186,7 +186,7 @@
 //! ```compile_fail
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -206,7 +206,7 @@
 //! ```compile_fail
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -231,7 +231,7 @@
 //! ```compile_fail
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -241,11 +241,11 @@
 //! # }
 //! ```
 //!
-//! ...we get an error we saying the returned channel is now of type `Chan<_, _, End>`, and we can't
-//! send when it's the end:
+//! ...we get an error we saying the returned channel is now of type `Chan<_, _, Done>`, and we
+//! can't send when it's the end:
 //!
 //! ```text
-//! error[E0599]: no method named `send` found for struct `Chan<Sender, Receiver, End>` in the current scope
+//! error[E0599]: no method named `send` found for struct `Chan<Sender, Receiver, Done>` in the current scope
 //! ```
 //!
 //! # Branching out
@@ -276,13 +276,13 @@
 //!
 //! Suppose we want to offer a choice between two protocols: either sending a single integer
 //! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
-//! channel must indicate a choice of which protocol to follow, and we need to handle the result
-//! of either selection by enacting the protocol chosen.
+//! channel must indicate a choice of which protocol to follow, and we need to handle the result of
+//! either selection by enacting the protocol chosen.
 //!
 //! ```
 //! # use dialectic::*;
 //! # use dialectic::backend::mpsc;
-//! # type JustSendOneString = Send<String, End>;
+//! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use dialectic::constants::*;
@@ -318,7 +318,7 @@
 //! may use that channel. In each expression, the channel's type corresponds to the session type for
 //! that choice. The type of each expression in the list must be the same, which means that if we
 //! want to bind a channel name to the result of the `offer!`, each expression must step the channel
-//! forward to an identical session type (in the case above, that's `End`).
+//! forward to an identical session type (in the case above, that's `Done`).
 //!
 //! Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
 //! channel, passing it as input a constant corresponding to the index of the choice. These
@@ -425,10 +425,10 @@
 //! the corresponding `Loop` is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
-//! on a session type is. For [`End`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the
-//! final session type discussed below), the "real action" is that session type itself. However, for
-//! [`Loop`] and [`Recur`], the next action is whatever follows entering the loop(s) or recurring,
-//! respectively.
+//! on a session type is. For [`Done`], [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`]
+//! (the final session type discussed below), the "real action" is that session type itself.
+//! However, for [`Loop`] and [`Recur`], the next action is whatever follows entering the loop(s) or
+//! recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
 //! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,
