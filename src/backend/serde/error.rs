@@ -1,5 +1,8 @@
 use super::*;
 
+/// Shorthand for an [`Error`] resulting from a symmetrically serialized/encoded connection.
+pub type SymmetricalError<F, E> = Error<F, F, E, E>;
+
 /// An error during operations on a [`Sender`] or [`Receiver`], unifying [`SendError`] and
 /// [`RecvError`].
 pub enum Error<F: Serializer, G: Deserializer<D::Item>, E: Encoder<F::Output>, D: Decoder> {
