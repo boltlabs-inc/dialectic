@@ -172,7 +172,7 @@ where
     }
 }
 
-// We could allow *anything* to be sent by value, but that would create ambiguity at the callsites
+// We could allow *anything* to be sent by value, but that would create ambiguity at the call-sites
 // for `send`, and since everything is actually sent by reference, there's no reason to provide the
 // extra ability. Instead, we specifically implement send-by-value for `Choice`, because it's
 // required for all backends, and let everything else be send-by-ref only.

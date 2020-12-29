@@ -270,9 +270,9 @@
 //! );
 //! ```
 //!
-//! Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the [`Send`] and
-//! [`Recv`] session types, the [`choose`](Chan::choose) method and [`offer!`](crate::offer) macro
-//! enact the [`Choose`] and [`Offer`] session types.
+//! Just as the [`send`](CanonicalChan::send) and [`recv`](CanonicalChan::recv) methods
+//! enact the [`Send`] and [`Recv`] session types, the [`choose`](CanonicalChan::choose)
+//! method and [`offer!`](crate::offer) macro enact the [`Choose`] and [`Offer`] session types.
 //!
 //! Suppose we want to offer a choice between two protocols: either sending a single integer
 //! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
@@ -320,9 +320,9 @@
 //! want to bind a channel name to the result of the `offer!`, each expression must step the channel
 //! forward to an identical session type (in the case above, that's `Done`).
 //!
-//! Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
-//! channel, passing it as input a constant corresponding to the index of the choice. These
-//! constants are *not* Rust's built-in numeric types, but rather [unary type-level
+//! Dually, to select an offered option, you can call the [`choose`](CanonicalChan::choose)
+//! method on a channel, passing it as input a constant corresponding to the index of the choice.
+//! These constants are *not* Rust's built-in numeric types, but rather [unary type-level
 //! numbers](crate::types::unary). Dialectic supports up to 128 possible choices in an `Offer` or
 //! `Choose`, and the corresponding constants [`_0`](crate::constants::_0),
 //! [`_1`](crate::constants::_1), [`_2`](crate::constants::_2), ... [`_127`](crate::constants::_127)
@@ -437,14 +437,15 @@
 //!
 //! ## Automatic looping
 //!
-//! You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
-//! even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
-//! [`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`], [`Break`],
-//! or [`Continue`] that leads to a session type for which a given operation is valid, that
-//! operation is valid on the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a
-//! [`Chan`] with session type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the
-//! `Choose`. Similarly, if a `Chan`'s type is `Continue`, whatever operation would be valid for the
-//! session type at the start of the corresponding `Loop` is valid for that `Chan`.
+//! You may have noticed how in the example above, [`choose`](CanonicalChan::choose) can be
+//! called on `c1` even though the outermost part of `c1`'s session type `QuerySum` would seem not
+//! to begin with [`Choose`]. This is true in general: if the session type of a [`Chan`] is a
+//! [`Loop`], [`Break`], or [`Continue`] that leads to a session type for which a given operation is
+//! valid, that operation is valid on the [`Chan`]. In the instance above, calling
+//! [`choose`](CanonicalChan::choose) on a [`Chan`] with session type `Loop<Choose<...>>`
+//! works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a `Chan`'s type is
+//! `Continue`, whatever operation would be valid for the session type at the start of the
+//! corresponding `Loop` is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
 //! on a session type is. For [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the final
@@ -464,9 +465,9 @@
 //! executing certain portions of them in parallel.
 //!
 //! Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
-//! a session type of `Split<P, Q>` can be [`split`](Chan::split) into a send-only end with the
-//! session type `P` and a receive-only end with the session type `Q`, which can then be used
-//! concurrently. In the example below, the two ends of a channel **concurrently swap** a
+//! a session type of `Split<P, Q>` can be [`split`](CanonicalChan::split) into a send-only
+//! end with the session type `P` and a receive-only end with the session type `Q`, which can then
+//! be used concurrently. In the example below, the two ends of a channel **concurrently swap** a
 //! `Vec<usize>` and a `String`. If this example were run over a network and these values were
 //! large, this could represent a significant reduction in runtime.
 //!
@@ -518,7 +519,7 @@
 //!     let (string, rx) = recv_string.await.unwrap()?;
 //!
 //!     // Unsplit the ends of `c1`
-//!     let c1 = Chan::unsplit(tx, rx).unwrap();
+//!     let c1 = tx.unsplit_with(rx).unwrap();
 //!
 //!     Ok::<_, mpsc::Error>(string)
 //! });
@@ -541,7 +542,7 @@
 //! let string = t1.await??;
 //!
 //! // Unsplit the ends of `c2`
-//! let c2 = Chan::unsplit(tx, rx).unwrap();
+//! let c2 = tx.unsplit_with(rx).unwrap();
 //!
 //! assert_eq!(vec, &[1, 2, 3, 4, 5]);
 //! assert_eq!(string, "Hello!");
@@ -553,10 +554,11 @@
 //!
 //! - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
 //! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
-//! - You can [`unsplit`](Chan::unsplit) the two ends again only once their session types match each
-//!   other.
-//! - It's a runtime [`UnsplitError`] to attempt to [`unsplit`](Chan::unsplit) two [`Chan`]s which
-//!   did not originate from the same call to [`split`](Chan::split), even if their types match.
+//! - You can [`unsplit_with`](CanonicalChan::unsplit_with) the two ends again only once their
+//!   session types match each other.
+//! - It's a runtime [`UnsplitError`] to attempt to
+//!   [`unsplit_with`](CanonicalChan::unsplit_with) two [`Chan`]s which did not originate from
+//!   the same call to [`split`](CanonicalChan::split), even if their types match.
 //!
 //! # Wrapping up
 //!
@@ -572,5 +574,5 @@
 //! Thanks for following along, and enjoy!
 
 // Import the whole crate so the docs above can link appropriately.
-#[allow(unused_imports)]
+#![allow(unused_imports)]
 use crate::*;

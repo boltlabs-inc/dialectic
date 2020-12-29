@@ -3,7 +3,7 @@ use super::*;
 /// The `NewSession` extension trait gives methods to create session-typed channels from session
 /// types. These are implemented as static methods on the session type itself.
 ///
-/// # Examplees
+/// # Examples
 ///
 /// ```
 /// use dialectic::*;
@@ -85,10 +85,7 @@ where
     /// ```
     fn channel<Tx, Rx>(
         make: impl FnMut() -> (Tx, Rx),
-    ) -> (
-        Chan<Tx, Rx, Self::Action, Self::Env>,
-        Chan<Tx, Rx, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
-    );
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>);
 
     /// Given two closures, each of which generates a uni-directional underlying transport channel,
     /// create a pair of dual [`Chan`]s which communicate over the transport channels resulting from
@@ -113,10 +110,7 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (
-        Chan<Tx0, Rx1, Self::Action, Self::Env>,
-        Chan<Tx1, Rx0, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
-    );
+    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>);
 
     /// Given a transmitting and receiving end of an un-session-typed connection, wrap them in a new
     /// session-typed channel for the protocol `P.`
@@ -144,7 +138,7 @@ where
     /// let (tx, rx) = c.close();             // and get them back when the channel is closed.
     /// # }
     /// ```
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self::Action, Self::Env>;
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>;
 }
 
 impl<P> NewSession for P
@@ -156,10 +150,7 @@ where
 {
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
-    ) -> (
-        Chan<Tx, Rx, Self::Action, Self::Env>,
-        Chan<Tx, Rx, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
-    ) {
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>) {
         let (tx0, rx0) = make();
         let (tx1, rx1) = make();
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
@@ -168,16 +159,13 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (
-        Chan<Tx0, Rx1, Self::Action, Self::Env>,
-        Chan<Tx1, Rx0, <Self::Dual as Actionable>::Action, <Self::Dual as Actionable>::Env>,
-    ) {
+    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>) {
         let (tx0, rx0) = make0();
         let (tx1, rx1) = make1();
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
     }
 
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self::Action, Self::Env> {
-        unsafe { Chan::with_env(tx, rx) }
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self> {
+        unsafe { canonical::CanonicalChan::with_env(tx, rx) }
     }
 }

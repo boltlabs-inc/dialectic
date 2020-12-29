@@ -1,7 +1,8 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// Actively choose using [`Chan::choose`] between any of the protocols in the tuple `Choices`.
+/// Actively [`choose`](crate::CanonicalChan::choose) between any of the protocols in the tuple
+/// `Choices`.
 ///
 /// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
 /// `Choose`s within each other.

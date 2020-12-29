@@ -57,27 +57,34 @@
 //!
 //! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<_, _, S, _>`) | Dual Type (`S::Dual`) |
 //! | :----------- | :------------------- | :-------- |
-//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
-//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
-//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
-//! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer) | [`Choose<Choices::Dual>`](Choose) |
-//! | [`Split<P, Q>`](Split) | Returns a pair of a [`Send`]/[`Choose`]-only and a [`Recv`]/[`Offer`]-only `tx` and `rx`, respectively (can be used concurrently):<br>[`let (tx, rx) = c.split();`](Chan::split)<br>When their types match again, given the two ends, returns a unified `c` with all capabilities:<br>[`let c = Chan::unsplit(tx, rx)?;`](Chan::unsplit) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](CanonicalChan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](CanonicalChan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](CanonicalChan::choose) | [`Offer<Choices::Dual>`](Offer) |
+//! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Dual>`](Choose) |
+//! | [`Split<P, Q>`](Split) | Returns a pair of a [`Send`]/[`Choose`]-only and a [`Recv`]/[`Offer`]-only `tx` and `rx`, respectively (can be used concurrently):<br>[`let (tx, rx) = c.split();`](CanonicalChan::split)<br>When their types match again, given the two ends, returns a unified `c` with all capabilities:<br>[`let c = tx.unsplit_with(rx)?;`](CanonicalChan::unsplit_with) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
-//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
-//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](Chan::close) |
+//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
+//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](CanonicalChan::close) |
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
+#![warn(missing_docs, missing_doc_code_examples)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+#![forbid(broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+use std::sync::Arc;
 use std::{
-    convert::TryInto,
     marker::{self, PhantomData},
-    sync::Arc,
+    pin::Pin,
 };
 
 use crate::backend::*;
-use tuple::{HasLength, List, Tuple};
+use futures::Future;
+use tuple::{List, Tuple};
 pub use types::*;
 
 pub mod backend;
@@ -87,625 +94,20 @@ pub mod types;
 mod new_session;
 pub use new_session::NewSession;
 
-/// A bidirectional communications channel sending outgoing messages via the `Tx` connection and
-/// receiving incoming messages via the `Rx` connection, whose future session behavior is determined
-/// by the session type `P`.
+pub mod canonical;
+use canonical::CanonicalChan;
+
+/// A bidirectional communications channel using the session type `P` over the connections `Tx` and
+/// `Rx`.
 ///
-/// The fourth `E` parameter to a [`Chan`] is a type-level list describing the *session environment*
-/// of the channel: the stack of [`Loop`]s the channel has entered. When a [`Continue<N>`](Continue)
-/// occurs, the next session type is retrieved by selecting the `N`th element of this list.
+/// ⚠️ **Important: always write this type synonym ([`Chan`]) in type signatures, *not️
+/// [`CanonicalChan`] directly*.** This is because the [`Chan`] type synonym canonicalizes its
+/// session type argument, which means it can be used more flexibly.
 ///
-/// # Creating new `Chan`s: use [`NewSession`]
-///
-/// To construct a new [`Chan`], use one of the static methods of [`NewSession`] on the session type
-/// for which you want to create a channel. Here, we create two `Chan`s with the session type
-/// `Send<String>` and its dual `Recv<String>`, wrapping an underlying bidirectional transport built
-/// from a pair of [`tokio::sync::mpsc::channel`]s:
-///
-/// ```
-/// use dialectic::*;
-///
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Make a pair of channels:
-/// // - `c1` with the session type `Send<String>`, and
-/// // - `c2` with the dual session type `Recv<String>`
-/// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
-/// # Ok(())
-/// # }
-/// ```
-///
-/// If you already have a sender and receiver and want to wrap them in a `Chan`, use the
-/// [`wrap`](NewSession::wrap) method for a session type. This is useful, for example, if you're
-/// talking to another process over a network connection, where it's not possible to build both
-/// halves of the channel on one computer, and instead each computer will wrap one end of the
-/// connection:
-///
-/// ```
-/// # use dialectic::*;
-/// #
-/// # #[tokio::main]
-/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let (tx, rx) = backend::mpsc::channel(1);
-/// let c = <Send<String>>::wrap(tx, rx);
-/// # Ok(())
-/// # }
-/// ```
-#[derive(Debug)]
-#[must_use = "Dropping a channel before finishing its session type will result in a panic"]
-pub struct Chan<Tx, Rx, P: Actionable<E>, E: Environment = ()>
-where
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    tx: Tx,
-    rx: Rx,
-    environment: PhantomData<E>,
-    protocol: PhantomData<P>,
-}
-
-impl<Tx, Rx, P, E> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = Done, Env = ()>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    /// Close a finished session, returning the wrapped connections used during the session.
-    ///
-    /// This function does not do cleanup on the actual underlying connections; they are passed back
-    /// to the caller who may either continue to use them outside the session typing context or
-    /// clean them up as appropriate.
-    ///
-    /// # Examples
-    ///
-    /// Starting with a channel whose session type is already `Done`, we can immediately close the
-    /// channel.
-    ///
-    /// ```
-    /// use dialectic::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// let (c1, c2) = Done::channel(backend::mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.close();
-    /// let (tx2, rx2) = c2.close();
-    /// # }
-    /// ```
-    ///
-    /// However, if the channel's session type is *not* `Done`, it is a type error to attempt to
-    /// close the channel and retrieve its underlying sender and receiver. The following code **will
-    /// not compile**:
-    ///
-    /// ```compile_fail
-    /// use dialectic::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(backend::mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.close();
-    /// let (tx2, rx2) = c2.close();
-    /// # }
-    /// ```
-    ///
-    /// If you *really* want to destruct a channel before the end of its session, use
-    /// [`unwrap`](Chan::unwrap), but beware that this may cause the party on the other end of the
-    /// channel to throw errors due to your violation of the channel's protocol!
-    pub fn close(self) -> (Tx, Rx) {
-        self.unwrap()
-    }
-}
-
-impl<Tx, Rx, E, P, T, Q> Chan<Tx, Rx, P, E>
-where
-    Rx: Receive<T>,
-    T: marker::Send + 'static,
-    P: Actionable<E, Action = Recv<T, Q>>,
-    Q: Actionable<P::Env>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-    <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
-{
-    /// Receive something of type `T` on the channel, returning the pair of the received object and
-    /// the channel.
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
-    /// an error while receiving.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Recv<String>>::channel(|| backend::mpsc::channel(1));
-    /// c2.send("Hello, world!".to_string()).await?;
-    ///
-    /// let (s, c1) = c1.recv().await?;
-    /// assert_eq!(s, "Hello, world!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, Q::Action, Q::Env>), Rx::Error> {
-        let result = self.rx.recv().await?;
-        Ok((result, unsafe { self.cast() }))
-    }
-}
-
-impl<'a, Tx, Rx, E, P, T, Q> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = Send<T, Q>>,
-    Q: Actionable<P::Env>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-    <<Q::Action as Actionable<Q::Env>>::Env as EachSession>::Dual: Environment,
-{
-    /// Send something of type `T` on the channel, returning the channel.
-    ///
-    /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
-    /// [`CallingConvention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
-    /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val>(1)` or
-    /// `chan.send::<Ref>(&true)`.
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
-    /// was an error while sending.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
-    /// c1.send("Hello, world!".to_string()).await?;
-    ///
-    /// let (s, c2) = c2.recv().await?;
-    /// assert_eq!(s, "Hello, world!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send<Convention: CallingConvention>(
-        mut self,
-        message: <T as CallBy<'a, Convention>>::Type,
-    ) -> Result<Chan<Tx, Rx, Q::Action, Q::Env>, <Tx as Transmit<'a, T, Convention>>::Error>
-    where
-        Tx: Transmit<'a, T, Convention>,
-        T: CallBy<'a, Convention>,
-        <T as CallBy<'a, Convention>>::Type: marker::Send,
-    {
-        self.tx.send(message).await?;
-        Ok(unsafe { self.cast() })
-    }
-}
-
-impl<Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
-where
-    Tx: Transmit<'static, Choice<<Choices::AsList as HasLength>::Length>, Val>,
-    P: Actionable<E, Action = Choose<Choices>>,
-    Choices: Tuple,
-    Choices::AsList: HasLength,
-    <Choices::AsList as HasLength>::Length: marker::Send,
-    <Choices::AsList as EachSession>::Dual: List,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
-{
-    /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
-    /// other end of the connection, alerting the other party to this choice by sending the number
-    /// `N` over the channel.
-    ///
-    /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
-    /// supported numbers of choices (up to a maximum of 127) are available in the [`constants`]
-    /// module, each named for its corresponding decimal number prefixed with an underscore (e.g.
-    /// `_0`, or `_42`).
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
-    /// was an error while sending the choice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
-    ///
-    /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
-    ///
-    /// // Spawn a thread to offer a choice
-    /// let t1 = tokio::spawn(async move {
-    ///     offer!(c2 => {
-    ///         _0 => { c2.recv().await?; },
-    ///         _1 => { c2.send("Hello!".to_string()).await?; },
-    ///     });
-    ///     Ok::<_, backend::mpsc::Error>(())
-    /// });
-    ///
-    /// // Choose to send an integer
-    /// c1.choose(_0).await?.send(42).await?;
-    ///
-    /// // Wait for the offering thread to finish
-    /// t1.await??;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// Attempting to choose an index that's out of bounds results in a compile-time error:
-    ///
-    /// ```compile_fail
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type OnlyTwoChoices = Choose<(Done, Done)>;
-    /// let (c1, c2) = OnlyTwoChoices::channel(|| backend::mpsc::channel(1));
-    ///
-    /// // Try to choose something out of range (this doesn't typecheck)
-    /// c1.choose(_2).await?;
-    ///
-    /// # // Wait for the offering thread to finish
-    /// # t1.await??;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn choose<N: Unary>(
-        mut self,
-        _choice: N,
-    ) -> Result<
-        Chan<
-            Tx,
-            Rx,
-            <<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Action,
-            <<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env,
-        >,
-        Tx::Error,
-    >
-    where
-        N: LessThan<_128>,
-        Choices::AsList: Select<N>,
-        <Choices::AsList as Select<N>>::Selected: Actionable<E>,
-        <<<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env as EachSession>::Dual:
-            Environment,
-    {
-        let choice = (N::VALUE as u8)
-            .try_into()
-            .expect("type system prevents out of range choice in `choose`");
-        self.tx.send(choice).await?;
-        Ok(unsafe { self.cast() })
-    }
-}
-
-impl<'a, Tx, Rx, E, P, Choices> Chan<Tx, Rx, P, E>
-where
-    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
-    P: Actionable<E, Action = Offer<Choices>>,
-    Choices: Tuple,
-    Choices::AsList: HasLength,
-    <Choices::AsList as EachSession>::Dual: List,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    Choices::AsList: EachActionable<P::Env>,
-    Choices::AsList: EachScoped<<P::Env as Environment>::Depth>,
-{
-    /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
-    /// by sending a number which protocol to proceed with.
-    ///
-    /// # Notes
-    ///
-    /// **Where possible, prefer the [`offer!`](crate::offer) macro**. This has the benefit of
-    /// ensuring at compile time that no case is left unhandled; it's also more succinct.
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
-    /// an error while receiving.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
-    ///
-    /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
-    ///
-    /// // Spawn a thread to offer a choice
-    /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case() {
-    ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case() {
-    ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
-    ///             Err(rest) => rest.empty_case(),
-    ///         }
-    ///     }
-    ///     Ok::<_, backend::mpsc::Error>(())
-    /// });
-    ///
-    /// // Choose to send an integer
-    /// c1.choose(_0).await?.send(42).await?;
-    ///
-    /// // Wait for the offering thread to finish
-    /// t1.await??;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// Notice how the handling of cases by manual `match` is harder to read than the equivalent in
-    /// terms of [`offer!`](crate::offer):
-    ///
-    /// ```
-    /// # use dialectic::*;
-    /// # use dialectic::constants::*;
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
-    /// #
-    /// # let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
-    /// #
-    /// # // Spawn a thread to offer a choice
-    /// # let t1 = tokio::spawn(async move {
-    /// offer!(c2 => {
-    ///     _0 => { c2.recv().await?; },
-    ///     _1 => { c2.send("Hello!".to_string()).await?; },
-    /// });
-    /// # Ok::<_, backend::mpsc::Error>(())
-    /// # });
-    /// #
-    /// # // Choose to send an integer
-    /// # c1.choose(_0).await?.send(42).await?;
-    /// #
-    /// # // Wait for the offering thread to finish
-    /// # t1.await??;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, P::Env>, Rx::Error> {
-        let (tx, mut rx) = self.unwrap();
-        let variant = rx.recv().await?.into();
-        Ok(Branches {
-            variant,
-            tx,
-            rx,
-            protocols: PhantomData,
-            environment: PhantomData,
-        })
-    }
-}
-
-impl<Tx, Rx, E, P, Q, R> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = Split<Q, R>>,
-    Q: Actionable<P::Env>,
-    R: Actionable<P::Env>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <<<Q as Actionable<P::Env>>::Action as Actionable<<Q as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
-    <<<R as Actionable<P::Env>>::Action as Actionable<<R as Actionable<P::Env>>::Env>>::Env as EachSession>::Dual: Environment,
-{
-    /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
-    /// reunited (provided they reach a matching session type) using [`unsplit`](Chan::unsplit).
-    ///
-    /// # Examples
-    ///
-    /// In this example, both ends of a channel concurrently interact with its split send/receive
-    /// halves. If the underlying channel implementation allows for parallelism, this simultaneous
-    /// interaction can be faster than sequentially sending data back and forth.
-    ///
-    /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
-    ///
-    /// let (c1, c2) = SendAndRecv::channel(|| backend::mpsc::channel(1));
-    ///
-    /// // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
-    /// let t1 = tokio::spawn(async move {
-    ///     let (tx, rx) = c1.split();
-    ///     let send_vec = tokio::spawn(async move {
-    ///         tx.send(vec![1, 2, 3, 4, 5]).await?;
-    ///         Ok::<_, backend::mpsc::Error>(())
-    ///     });
-    ///     let recv_string = tokio::spawn(async move {
-    ///         let (string, _) = rx.recv().await?;
-    ///         Ok::<_, backend::mpsc::Error>(string)
-    ///     });
-    ///     send_vec.await.unwrap()?;
-    ///     let string = recv_string.await.unwrap()?;
-    ///     Ok::<_, backend::mpsc::Error>(string)
-    /// });
-    ///
-    /// // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
-    /// // the task above:
-    /// let (tx, rx) = c2.split();
-    /// let send_string = tokio::spawn(async move {
-    ///     tx.send("Hello!".to_string()).await?;
-    ///     Ok::<_, backend::mpsc::Error>(())
-    /// });
-    /// let recv_vec = tokio::spawn(async move {
-    ///     let (vec, _) = rx.recv().await?;
-    ///     Ok::<_, backend::mpsc::Error>(vec)
-    /// });
-    ///
-    /// // Examine the result values:
-    /// send_string.await??;
-    /// let vec = recv_vec.await??;
-    /// let string = t1.await??;
-    /// assert_eq!(vec, &[1, 2, 3, 4, 5]);
-    /// assert_eq!(string, "Hello!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn split(
-        self,
-    ) -> (
-        Chan<Tx, Unavailable<Rx>, Q::Action, Q::Env>,
-        Chan<Unavailable<Tx>, Rx, R::Action, R::Env>,
-    )
-    {
-        let (tx, rx) = self.unwrap();
-        let unavailable = Unavailable::new();
-        let tx_only = unsafe { Chan::with_env(tx, unavailable.clone()) };
-        let rx_only = unsafe { Chan::with_env(unavailable.cast(), rx) };
-        (tx_only, rx_only)
-    }
-}
-
-impl<Tx, Rx, E, P> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    /// Reunite the transmit-only and receive-only channels resulting from a call to [`split`](Chan::split)
-    /// into a single channel.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Split<Done, Done>>::channel(|| backend::mpsc::channel(1));
-    /// let (tx1, rx1) = c1.split();
-    /// let (tx2, rx2) = c2.split();
-    ///
-    /// let c1 = Chan::unsplit(tx1, rx1)?;
-    /// let c2 = Chan::unsplit(tx2, rx2)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// If the two channels given as input did not result from the same call to [`split`](Chan::split),
-    /// this function returns an [`UnsplitError`] containing the two channels, since rewiring
-    /// channels to be non-bidirectional can violate the session typing guarantee. If instead of the
-    /// above, we did the following, `unsplit` would return an error:
-    ///
-    /// ```
-    /// # use dialectic::*;
-    /// # use dialectic::constants::*;
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type SplitEnds = Split<Done, Done>;
-    /// #
-    /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
-    /// let (tx1, rx1) = c1.split();
-    /// let (tx2, rx2) = c2.split();
-    ///
-    /// assert!(Chan::unsplit(tx1, rx2).is_err()); // <-- pairing tx from c1 with rx from c2
-    /// assert!(Chan::unsplit(tx2, rx1).is_err()); // <-- pairing tx from c2 with rx from c1
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn unsplit<Q, R, F, G>(
-        tx: Chan<Tx, Unavailable<Rx>, Q, F>,
-        rx: Chan<Unavailable<Tx>, Rx, R, G>,
-    ) -> Result<Self, UnsplitError<Tx, Rx, Q, R, F, G>>
-    where
-        Q: Actionable<F, Action = P, Env = E>,
-        R: Actionable<G, Action = P, Env = E>,
-        F: Environment,
-        F::Dual: Environment,
-        G: Environment,
-        G::Dual: Environment,
-    {
-        if Arc::ptr_eq(&tx.rx.0, &rx.tx.0) {
-            Ok(unsafe { Chan::with_env(tx.unwrap().0, rx.unwrap().1) })
-        } else {
-            Err(UnsplitError { tx, rx })
-        }
-    }
-}
-
-impl<Tx, Rx, E, P> Chan<Tx, Rx, P, E>
-where
-    P: Actionable<E>,
-    E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
-    /// Cast a channel to arbitrary new session types and environment. Use with care!
-    unsafe fn cast<F, Q>(self) -> Chan<Tx, Rx, Q, F>
-    where
-        F: Environment,
-        F::Dual: Environment,
-        Q: Actionable<F>,
-        <Q::Env as EachSession>::Dual: Environment,
-    {
-        let (tx, rx) = self.unwrap();
-        Chan {
-            tx,
-            rx,
-            environment: PhantomData,
-            protocol: PhantomData,
-        }
-    }
-
-    /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
-    /// potentially before the end of the session. **Prefer [`close`](Chan::close) to this method if you
-    /// mean to unwrap a channel at the end of its session.**
-    ///
-    /// # Errors
-    ///
-    /// If this function is used before the end of a session, it may result in errors when the other
-    /// end of the channel attempts to continue the session.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::*;
-    ///
-    /// let (c1, c2) = <Send<String>>::channel(backend::mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.unwrap();
-    /// let (tx2, rx2) = c2.unwrap();
-    /// ```
-    pub fn unwrap(self) -> (Tx, Rx) {
-        let tx = self.tx;
-        let rx = self.rx;
-        (tx, rx)
-    }
-
-    /// Create a new channel with an arbitrary environment. This is equivalent to casting a new
-    /// channel to an arbitrary environment. Use with care!
-    unsafe fn with_env(tx: Tx, rx: Rx) -> Chan<Tx, Rx, P, E> {
-        Chan {
-            tx,
-            rx,
-            environment: PhantomData,
-            protocol: PhantomData,
-        }
-    }
-}
+/// **[See the documentation for `CanonicalChan` for available methods and trait
+/// implementations.](CanonicalChan)**
+pub type Chan<Tx, Rx, P, E = ()> =
+    CanonicalChan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>;
 
 /// Offer a set of different protocols, allowing the other side of the channel to choose with which
 /// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
@@ -755,7 +157,7 @@ macro_rules! offer {
         $chan:ident => { $($t:tt)* }
     ) => (
         {
-            match $crate::Chan::offer($chan).await {
+            match $crate::canonical::CanonicalChan::offer($chan).await {
                 Ok(b) => $crate::offer!{@branches b, $chan, $crate::types::unary::Z, $($t)* },
                 Err(e) => Err(e)?,
             }
@@ -793,7 +195,7 @@ macro_rules! offer {
     );
 }
 
-/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states that
+/// The result of [`offer`]CanonicalChan::offer: an enumeration of the possible new channel states that
 /// could result from the offering of the tuple of protocols `Choices`.
 ///
 /// To find out which protocol was selected by the other party, use [`Branches::case`], or better
@@ -843,7 +245,7 @@ where
         let tx = self.tx;
         let rx = self.rx;
         if variant == 0 {
-            Ok(unsafe { Chan::with_env(tx, rx) })
+            Ok(unsafe { canonical::CanonicalChan::with_env(tx, rx) })
         } else {
             Err(Branches {
                 variant: variant - 1,
@@ -872,11 +274,12 @@ where
     }
 }
 
-/// A placeholder for a missing transmit or receive end of a connection.
+/// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
-/// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
-/// respectively. This is reflected at the type level by the presence of `Unavailable` on the type
-/// of the connection which is not present for each part of the split.
+/// When using [`split`](CanonicalChan::split), the resultant two channels can only send or only
+/// receive, respectively. This is reflected at the type level by the presence of [`Unavailable`] on
+/// the type of the connection which *is not* present for each part of the split, and [`Available`]
+/// on the type of the connection which *is*.
 #[derive(Debug)]
 pub struct Unavailable<T>(Arc<()>, PhantomData<T>);
 
@@ -898,54 +301,106 @@ impl<T> Unavailable<T> {
     }
 }
 
-/// The error returned when two channels cannot be [`unsplit`](Chan::unsplit) together because they
-/// originate from different channels contains the two channels which couldn't be reunited.
-#[derive(Debug)]
-pub struct UnsplitError<Tx, Rx, P, Q, E, F>
-where
-    P: Actionable<E>,
-    Q: Actionable<F>,
-    E: Environment,
-    F: Environment,
-    E::Dual: Environment,
-    F::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
-{
-    /// The transmit-only half.
-    pub tx: Chan<Tx, Unavailable<Rx>, P, E>,
+/// An available [`Transmit`] or [`Receive`] end of a connection.
+///
+/// When using [`split`](CanonicalChan::split), the resultant two channels can only send or only
+/// receive, respectively. This is reflected at the type level by the presence of [`Available`] on
+/// the type of the connection which *is* present for each part of the split, and [`Unavailable`] on
+/// the type of the connection which *is not*.
+///
+/// Whenever `C` implements [`Transmit`] or [`Receive`], so does `Available<C>`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash, Default)]
+pub struct Available<C>(C);
 
-    /// The receive-only half.
-    pub rx: Chan<Unavailable<Tx>, Rx, Q, F>,
+impl<C> Available<C> {
+    /// Retrieve the inner `C` connection.
+    pub fn into_inner(self) -> C {
+        self.0
+    }
 }
 
-impl<Tx, Rx, P, Q, E, F> std::error::Error for UnsplitError<Tx, Rx, P, Q, E, F>
+impl<C> AsRef<C> for Available<C> {
+    fn as_ref(&self) -> &C {
+        &self.0
+    }
+}
+
+impl<C> AsMut<C> for Available<C> {
+    fn as_mut(&mut self) -> &mut C {
+        &mut self.0
+    }
+}
+
+impl<'a, T, Convention: CallingConvention, C> Transmit<'a, T, Convention> for Available<C>
+where
+    C: Transmit<'a, T, Convention>,
+    T: CallBy<'a, Convention>,
+    <T as CallBy<'a, Convention>>::Type: marker::Send,
+{
+    type Error = C::Error;
+
+    fn send<'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as CallBy<'a, Convention>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        self.0.send(message)
+    }
+}
+
+impl<T, C> Receive<T> for Available<C>
+where
+    C: Receive<T>,
+{
+    type Error = C::Error;
+
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
+    {
+        self.0.recv()
+    }
+}
+
+/// The error returned when two split channel parts cannot be
+/// [`unsplit_with`](CanonicalChan::unsplit_with) each other because they originated from
+/// different channels.
+#[derive(Debug)]
+pub struct UnsplitError<Tx, Rx, P, E>
+where
+    P: Actionable<E, Action = P, Env = E>,
+    E: Environment,
+    E::Dual: Environment,
+    <P::Env as EachSession>::Dual: Environment,
+{
+    /// The transmit-only half.
+    pub tx: CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>,
+
+    /// The receive-only half.
+    pub rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
+}
+
+impl<Tx, Rx, P, E> std::error::Error for UnsplitError<Tx, Rx, P, E>
 where
     Tx: std::fmt::Debug,
     Rx: std::fmt::Debug,
-    P: Actionable<E> + std::fmt::Debug,
-    Q: Actionable<F> + std::fmt::Debug,
+    P: Actionable<E, Action = P, Env = E> + std::fmt::Debug,
     E: Environment + std::fmt::Debug,
-    F: Environment + std::fmt::Debug,
     E::Dual: Environment,
-    F::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
 {
 }
 
-impl<Tx, Rx, P, Q, E, F> std::fmt::Display for UnsplitError<Tx, Rx, P, Q, E, F>
+impl<Tx, Rx, P, E> std::fmt::Display for UnsplitError<Tx, Rx, P, E>
 where
-    P: Actionable<E>,
-    Q: Actionable<F>,
+    P: Actionable<E, Action = P, Env = E>,
     E: Environment,
-    F: Environment,
     E::Dual: Environment,
-    F::Dual: Environment,
     <P::Env as EachSession>::Dual: Environment,
-    <Q::Env as EachSession>::Dual: Environment,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "cannot `Chan::unsplit` two unrelated channels")
+        write!(f, "cannot `Chan::unsplit_with` two unrelated channels")
     }
 }

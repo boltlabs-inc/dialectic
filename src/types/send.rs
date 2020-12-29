@@ -1,7 +1,8 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// Send a message of type `T` using [`Chan::send`], then continue with protocol `P`.
+/// Send a message of type `T` using [`send`](crate::CanonicalChan::send), then continue with
+/// protocol `P`.
 ///
 /// # Notes
 ///
