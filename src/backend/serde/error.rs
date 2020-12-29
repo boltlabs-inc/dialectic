@@ -6,7 +6,9 @@ pub type SymmetricalError<F, E> = Error<F, F, E, E>;
 /// An error during operations on a [`Sender`] or [`Receiver`], unifying [`SendError`] and
 /// [`RecvError`].
 pub enum Error<F: Serializer, G: Deserializer<D::Item>, E: Encoder<F::Output>, D: Decoder> {
+    /// An error occurred while attempting to [`send`](Transmit::send) a value.
     Send(SendError<F, E>),
+    /// An error occurred while attempting to [`recv`](Receive::recv) a value.
     Recv(RecvError<G, D>),
 }
 

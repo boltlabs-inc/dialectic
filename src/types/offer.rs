@@ -1,8 +1,7 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// Offer the choice using [`Chan::offer`] or the [`offer!`](crate::offer) macro between any of the
-/// protocols in the tuple `Choices`.
+/// Passively [`offer!`](crate::offer) a choice between any of the protocols in the tuple `Choices`.
 ///
 /// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest
 /// `Offer`s within each other.

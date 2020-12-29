@@ -2,6 +2,7 @@
 //! to a type synonym in [`crate::unary::types`].
 //!
 //! Due to a limitation in Rust, at present the maximum number which can be listed here is 128.
+#![allow(missing_docs)]
 use crate::types::unary::{types::*, S, Z};
 
 pub const _0: _0 = Z;

@@ -1,7 +1,8 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// Receive a message of type `T` using [`Chan::recv`], then continue with protocol `P`.
+/// Receive a message of type `T` using [`recv`](crate::CanonicalChan::recv), then continue with
+/// protocol `P`.
 ///
 /// # Notes
 ///
