@@ -21,7 +21,7 @@ use std::{future::Future, pin::Pin};
 
 use crate::{
     backend::{Choice, Receive, Ref, Transmit, Val},
-    Unary,
+    Chan, Unary,
 };
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
@@ -83,15 +83,15 @@ pub trait Deserializer<Input> {
 
 /// Create a [`Sender`]/[`Receiver`] pair which use the same serialization format and frame encoding
 /// in both directions.
-pub fn symmetrical<F, E, I, O, W, R>(
-    format: F,
-    encoding: E,
+pub fn symmetrical<Format, Encoding, I, O, W, R>(
+    format: Format,
+    encoding: Encoding,
     writer: W,
     reader: R,
-) -> (Sender<F, E, W>, Receiver<F, E, R>)
+) -> (Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>)
 where
-    F: Serializer<Output = O> + Deserializer<I> + Clone,
-    E: Encoder<O> + Decoder<Item = I> + Clone,
+    Format: Serializer<Output = O> + Deserializer<I> + Clone,
+    Encoding: Encoder<O> + Decoder<Item = I> + Clone,
     W: AsyncWrite,
     R: AsyncRead,
 {
@@ -100,6 +100,11 @@ where
         Receiver::new(format, encoding, reader),
     )
 }
+
+/// A [`Chan`] for the session type `P` and the environment `E`, using a symmetrical
+/// serialization/encoding and the [`AsyncWrite`]/[`AsyncRead`] pair `W`/`R` as transport.
+pub type SymmetricalChan<Format, Encoding, W, R, P, E = ()> =
+    Chan<Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>, P, E>;
 
 /// Create a [`Sender`]/[`Receiver`] pair which use the same serialization format and frame encoding
 /// in both directions, allocating an initial capacity for the read buffer on the receiver.
