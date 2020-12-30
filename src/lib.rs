@@ -331,19 +331,19 @@ impl<C> AsMut<C> for Available<C> {
     }
 }
 
-impl<'a, T, Convention: CallingConvention, C> Transmit<'a, T, Convention> for Available<C>
+impl<T, Convention: CallingConvention, C> Transmit<T, Convention> for Available<C>
 where
-    C: Transmit<'a, T, Convention>,
-    T: CallBy<'a, Convention>,
-    <T as CallBy<'a, Convention>>::Type: marker::Send,
+    C: Transmit<T, Convention>,
 {
     type Error = C::Error;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Convention>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
     where
+        T: CallBy<'a, Convention>,
+        <T as CallBy<'a, Convention>>::Type: marker::Send,
         'a: 'async_lifetime,
     {
         self.0.send(message)
