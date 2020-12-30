@@ -1,4 +1,4 @@
-#![allow(unused)]
+use futures::Future;
 use std::{
     fmt::{self, Display},
     str::FromStr,
@@ -6,10 +6,7 @@ use std::{
 use thiserror::Error;
 
 use dialectic::backend::{
-    serde::{
-        format::{length_delimited_bincode, Bincode},
-        Receiver, Sender, SymmetricalError,
-    },
+    serde::format::{length_delimited_bincode, Bincode},
     Choice, Receive, Ref, Transmit,
 };
 use dialectic::constants::*;
@@ -18,8 +15,7 @@ use dialectic::*;
 
 use serde_crate::{Deserialize, Serialize};
 use tokio::net::{
-    tcp::ReadHalf,
-    tcp::{OwnedReadHalf, OwnedWriteHalf, WriteHalf},
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpListener, TcpStream,
 };
 use tokio_util::codec::LengthDelimitedCodec;
@@ -85,7 +81,7 @@ pub type BincodeTcpChan<P, E = ()> = backend::serde::SymmetricalChan<
     E,
 >;
 
-pub fn wrap_socket<'a, P>(mut socket: TcpStream, max_length: usize) -> BincodeTcpChan<P>
+pub fn wrap_socket<'a, P>(socket: TcpStream, max_length: usize) -> BincodeTcpChan<P>
 where
     P: NewSession,
     P::Dual: Actionable,
@@ -118,20 +114,34 @@ pub fn get_port() -> Result<u16, std::io::Error> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = get_port()?;
+    listen_on::<Server, _, _>(port, 8 * 1024, &serve).await?;
+    Ok(())
+}
+
+async fn listen_on<P, F, Fut>(
+    port: u16,
+    max_length: usize,
+    interaction: &'static F,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: Fn(BincodeTcpChan<P>) -> Fut + std::marker::Sync + 'static,
+    Fut: Future<Output = Result<BincodeTcpChan<Done>, Box<dyn std::error::Error>>>
+        + std::marker::Send,
+    P: Actionable,
+    P::Dual: Actionable,
+    P::Env: Environment + std::marker::Send,
+    P::Action: std::marker::Send,
+    <P::Env as EachSession>::Dual: Environment,
+    <<P::Dual as Actionable>::Env as EachSession>::Dual: Environment,
+{
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     loop {
-        let (mut socket, addr) = listener.accept().await?;
-        eprintln!("Accepted: {}", addr);
+        let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            serve(wrap_socket::<Server>(socket, 8 * 1024))
+            let _ = interaction(wrap_socket::<P>(socket, max_length))
                 .await
-                .map(|chan| {
-                    chan.close();
-                    eprintln!("Finished: {}", addr);
-                })
-                .map_err(|err: SymmetricalError<Bincode, LengthDelimitedCodec>| {
-                    eprintln!("Error on: {}: {}", addr, err)
-                })
+                .map(|chan| chan.close())
+                .map_err(|err| eprintln!("Error on {}: {}", addr, err));
         });
     }
 }

@@ -1,7 +1,7 @@
+#![allow(unused)]
 use dialectic::backend::{Choice, Receive, Ref, Transmit, Val};
 use dialectic::constants::*;
 use dialectic::*;
-
 use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpStream;
 
@@ -25,6 +25,7 @@ where
 {
     loop {
         output.write_all(prompt.as_bytes()).await?;
+        output.flush().await?;
         match lines.next_line().await? {
             Some(line) => match parse(line.trim()) {
                 Ok(t) => break Ok(Some(t)),
@@ -71,15 +72,19 @@ where
     let chan = 'outer: loop {
         // Parse a desired operation from the user
         if let Some(operation) =
-            parse_line_loop("Operation (+ / *): ", input, output, str::parse).await?
+            parse_line_loop("Operation (+ or *): ", input, output, str::parse).await?
         {
             let mut chan_inner = chan.choose(_0).await?.send(&operation).await?;
+            output
+                .write_all("Enter numbers (press ENTER to tally):\n".as_bytes())
+                .await?;
+            output.flush().await?;
             chan = loop {
                 // Parse a desired number from the user
                 match parse_line_loop(&format!("{} ", operation), input, output, |s| {
                     let s = s.trim();
-                    if s == "" {
-                        // Empty line means finish tally
+                    if s == "" || s == "=" {
+                        // Empty line or "=" means finish tally
                         Ok(None)
                     } else if let Ok(n) = s.parse() {
                         // A number means add it to the tally
@@ -96,13 +101,19 @@ where
                     // User wants to finish this tally
                     Some(None) => {
                         let (tally, chan_inner) = chan_inner.choose(_1).await?.recv().await?;
-                        output.write_all(format!("= {}", tally).as_bytes()).await?;
+                        output
+                            .write_all(format!("= {}\n", tally).as_bytes())
+                            .await?;
+                        output.flush().await?;
                         break chan_inner;
                     }
                     // End of input, so finish this tally and quit
                     None => {
                         let (tally, chan_inner) = chan_inner.choose(_1).await?.recv().await?;
-                        output.write_all(format!("= {}", tally).as_bytes()).await?;
+                        output
+                            .write_all(format!("= {}\n", tally).as_bytes())
+                            .await?;
+                        output.flush().await?;
                         break 'outer chan_inner.choose(_1).await?;
                     }
                 }
