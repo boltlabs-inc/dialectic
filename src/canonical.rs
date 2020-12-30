@@ -253,9 +253,9 @@ where
     pub async fn send<Convention: CallingConvention>(
         mut self,
         message: <T as CallBy<'a, Convention>>::Type,
-    ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<'a, T, Convention>>::Error>
+    ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<T, Convention>>::Error>
     where
-        Tx: Transmit<'a, T, Convention>,
+        Tx: Transmit<T, Convention>,
         T: CallBy<'a, Convention>,
         <T as CallBy<'a, Convention>>::Type: marker::Send,
     {
@@ -266,7 +266,7 @@ where
 
 impl<Tx, Rx, E, Choices> CanonicalChan<Tx, Rx, Choose<Choices>, E>
 where
-    Tx: Transmit<'static, Choice<<Choices::AsList as HasLength>::Length>, Val>,
+    Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: marker::Send,

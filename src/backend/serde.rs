@@ -23,6 +23,7 @@ use crate::{
     backend::{Choice, Receive, Ref, Transmit, Val},
     Chan, Unary,
 };
+use call_by::CallBy;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde_crate::{Deserialize, Serialize};
@@ -145,7 +146,7 @@ impl<F: Serializer, E: Encoder<F::Output>, W: AsyncWrite> Sender<F, E, W> {
     }
 }
 
-impl<'a, T: 'a, F, E, W> Transmit<'a, T, Ref> for Sender<F, E, W>
+impl<T, F, E, W> Transmit<T, Ref> for Sender<F, E, W>
 where
     T: Serialize + Sync,
     F: Serializer + Unpin + Send,
@@ -156,9 +157,9 @@ where
 {
     type Error = SendError<F, E>;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: &'a T,
+        message: <T as CallBy<'a, Ref>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
@@ -181,7 +182,7 @@ where
 // for `send`, and since everything is actually sent by reference, there's no reason to provide the
 // extra ability. Instead, we specifically implement send-by-value for `Choice`, because it's
 // required for all backends, and let everything else be send-by-ref only.
-impl<'a, N: Unary + Send + 'a, F, E, W> Transmit<'a, Choice<N>, Val> for Sender<F, E, W>
+impl<N: Unary + Send + 'static, F, E, W> Transmit<Choice<N>, Val> for Sender<F, E, W>
 where
     F: Serializer + Unpin + Send,
     F::Output: Send,
@@ -191,9 +192,9 @@ where
 {
     type Error = SendError<F, E>;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: Choice<N>,
+        message: <Choice<N> as CallBy<'a, Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,

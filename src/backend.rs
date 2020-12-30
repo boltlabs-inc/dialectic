@@ -27,7 +27,7 @@ pub mod mpsc;
 #[cfg(feature = "serde")]
 pub mod serde;
 
-/// If a transport is `Transmit<'a, T, Convention>`, we can use it to [`send`](Transmit::send) a
+/// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a
 /// message of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention
 /// specified.
 ///
@@ -39,37 +39,35 @@ pub mod serde;
 ///
 /// For an example of implementing [`Transmit`], check out the source for the implementation of
 /// [`Transmit`] for [`mpsc::Sender`].
-pub trait Transmit<'a, T, Convention: CallingConvention>
-where
-    T: CallBy<'a, Convention>,
-    <T as CallBy<'a, Convention>>::Type: Send,
-{
+pub trait Transmit<T, Convention: CallingConvention> {
     /// The type of possible errors when sending.
     type Error;
 
     /// Send a message using the [`CallingConvention`] specified by the trait implementation.
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Convention>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
+        T: CallBy<'a, Convention>,
+        <T as CallBy<'a, Convention>>::Type: Send,
         'a: 'async_lifetime;
 }
 
-impl<'a, T, C, Convention> Transmit<'a, T, Convention> for &'_ mut C
+impl<T, C, Convention> Transmit<T, Convention> for &'_ mut C
 where
-    C: Transmit<'a, T, Convention>,
+    C: Transmit<T, Convention>,
     Convention: CallingConvention,
-    T: CallBy<'a, Convention>,
-    <T as CallBy<'a, Convention>>::Type: Send,
 {
     type Error = C::Error;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Convention>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
+        T: CallBy<'a, Convention>,
+        <T as CallBy<'a, Convention>>::Type: Send,
         'a: 'async_lifetime,
     {
         (**self).send(message)

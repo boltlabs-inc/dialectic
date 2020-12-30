@@ -99,12 +99,12 @@ pub enum RecvError {
     DowncastFailed(Box<dyn Any + std::marker::Send>),
 }
 
-impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for Sender<'b> {
+impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for Sender<'b> {
     type Error = SendError<T>;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: T,
+        message: <T as CallBy<'a, Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
@@ -138,12 +138,12 @@ impl<'a, T: std::marker::Send + Any> Receive<T> for Receiver<'a> {
     }
 }
 
-impl<'a, 'b, T: std::marker::Send + Any> Transmit<'a, T, Val> for UnboundedSender<'b> {
+impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for UnboundedSender<'b> {
     type Error = SendError<T>;
 
-    fn send<'async_lifetime>(
+    fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: T,
+        message: <T as CallBy<'a, Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
