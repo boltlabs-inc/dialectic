@@ -5,9 +5,12 @@ use std::{
 };
 use thiserror::Error;
 
-use dialectic::backend::serde::{
-    format::{length_delimited_bincode, Bincode},
-    Receiver, Sender, SymmetricalError,
+use dialectic::backend::{
+    serde::{
+        format::{length_delimited_bincode, Bincode},
+        Receiver, Sender, SymmetricalError,
+    },
+    Choice, Receive, Ref, Transmit,
 };
 use dialectic::constants::*;
 use dialectic::unary::types::*;
@@ -21,8 +24,9 @@ use tokio::net::{
 };
 use tokio_util::codec::LengthDelimitedCodec;
 
-pub type Server =
-    Loop<Recv<Operation, Loop<Offer<(Recv<i64>, Send<i64, Offer<(Break<_1>, Break)>>)>>>>;
+// The server's API:
+pub type Server = Loop<Offer<(Recv<Operation, Tally<i64>>, Break)>>;
+pub type Tally<T> = Loop<Offer<(Recv<T>, Send<T, Break>)>>;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde_crate")] // we only need this because we renamed serde in Cargo.toml
@@ -72,26 +76,21 @@ impl Display for Operation {
     }
 }
 
-// TODO: generalize this into the library to make a normalized Chan type synonym so things work out
-// nicely instead of weirdly clashing because of auto-ff-ing through loops and recurs?
-#[allow(type_alias_bounds)]
-pub type BincodeTcpChan<P, E = ()>
-where
-    P: Actionable<E>,
-    E: Environment,
-= Chan<
-    Sender<Bincode, LengthDelimitedCodec, OwnedWriteHalf>,
-    Receiver<Bincode, LengthDelimitedCodec, OwnedReadHalf>,
-    P::Action,
-    P::Env,
+pub type BincodeTcpChan<P, E = ()> = backend::serde::SymmetricalChan<
+    Bincode,
+    LengthDelimitedCodec,
+    OwnedWriteHalf,
+    OwnedReadHalf,
+    P,
+    E,
 >;
 
 pub fn wrap_socket<'a, P>(mut socket: TcpStream, max_length: usize) -> BincodeTcpChan<P>
 where
     P: NewSession,
-    P::Dual: Actionable<()>,
+    P::Dual: Actionable,
     <P::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable<()>>::Env as EachSession>::Dual: Environment,
+    <<P::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     let (rx, tx) = socket.into_split();
     let (tx, rx) = length_delimited_bincode(tx, rx, 4, max_length);
@@ -126,44 +125,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             serve(wrap_socket::<Server>(socket, 8 * 1024))
                 .await
-                .map(|_| eprintln!("Finished: {}", addr))
-                .map_err(|err| eprintln!("Error on: {}: {}", addr, err))
+                .map(|chan| {
+                    chan.close();
+                    eprintln!("Finished: {}", addr);
+                })
+                .map_err(|err: SymmetricalError<Bincode, LengthDelimitedCodec>| {
+                    eprintln!("Error on: {}: {}", addr, err)
+                })
         });
     }
 }
 
-async fn serve(
-    mut chan_outer: BincodeTcpChan<Server>,
-) -> Result<(), SymmetricalError<Bincode, LengthDelimitedCodec>> {
-    'outer: loop {
-        // What operation should we use?
-        let (op, mut chan_inner) = chan_outer.recv().await?;
-
-        // Reset the tally to the unit for that operation
-        let mut tally = op.unit();
-
-        // In a loop, either do...
-        chan_outer = 'inner: loop {
-            chan_inner = offer!(chan_inner => {
-                _0 => {
-                    // Receive a new item and combine it with the tally
-                    let (i, chan_inner) = chan_inner.recv().await?;
-                    tally = op.combine(tally, i);
-                    chan_inner
-                },
-                _1 => {
-                    // Report the final tally, then...
-                    let chan_inner = chan_inner.send(&tally).await?;
-                    offer!(chan_inner => {
-                        // Finish the protocol
-                        _0 => break 'outer chan_inner,
-                        // Jump back to the outer loop and try a new tally
-                        _1 => break 'inner chan_inner,
+async fn serve<Tx, Rx, Err>(mut chan: Chan<Tx, Rx, Server>) -> Result<Chan<Tx, Rx, Done>, Err>
+where
+    Rx: Receive<Operation> + Receive<i64> + Receive<Choice<_2>>,
+    Tx: Transmit<i64, Ref>,
+    Err: From<<Tx as Transmit<i64, Ref>>::Error>
+        + From<<Rx as Receive<i64>>::Error>
+        + From<<Rx as Receive<Choice<_2>>>::Error>
+        + From<<Rx as Receive<Operation>>::Error>,
+{
+    let chan = loop {
+        chan = offer!(chan => {
+            // Client wants to compute another tally
+            _0 => {
+                let (op, mut chan) = chan.recv().await?;
+                let mut tally = op.unit();
+                loop {
+                    chan = offer!(chan => {
+                        // Client wants to add another number to the tally
+                        _0 => {
+                            let (i, chan) = chan.recv().await?;
+                            tally = op.combine(tally, i);
+                            chan
+                        },
+                        // Client wants to finish this tally
+                        _1 => break chan.send(&tally).await?,
                     })
                 }
-            });
-        };
-    }
-    .close();
-    Ok(())
+            },
+            // Client wants to quit
+            _1 => break chan,
+        })
+    };
+    Ok(chan)
 }
