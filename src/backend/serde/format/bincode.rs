@@ -9,7 +9,7 @@ use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 /// To construct with default options, use `Bincode::default()`. To configure custom options, use
 /// the Bincode crate's [bincode::Options] builder, then the [`.into()`](Into::into) method to
 /// construct a [`Bincode`].
-#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "bincode")))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Bincode<O: bincode::Options = bincode::DefaultOptions>(O);
 

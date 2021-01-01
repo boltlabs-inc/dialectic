@@ -8,6 +8,11 @@
 //! [dependencies]
 //! dialectic = { version = "...", features = ["json"] }
 //! ```
+//!
+//! The currently supported formats are:
+//!
+//! - `"json"`, via the [`serde_json`] crate
+//! - `"bincode"`, via the [`bincode`](bincode_crate) crate
 
 #[cfg(feature = "bincode")]
 pub use bincode::*;

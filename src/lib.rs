@@ -195,8 +195,8 @@ macro_rules! offer {
     );
 }
 
-/// The result of [`offer`]CanonicalChan::offer: an enumeration of the possible new channel states that
-/// could result from the offering of the tuple of protocols `Choices`.
+/// The result of [`offer`](CanonicalChan::offer): an enumeration of the possible new channel states
+/// that could result from the offering of the tuple of protocols `Choices`.
 ///
 /// To find out which protocol was selected by the other party, use [`Branches::case`], or better
 /// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
