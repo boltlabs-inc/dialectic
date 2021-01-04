@@ -61,8 +61,6 @@ pub trait Session: Sized + sealed::IsSession {
 pub trait Actionable<E = ()>: Session
 where
     E: Environment,
-    E::Dual: Environment,
-    <Self::Env as EachSession>::Dual: Environment,
     Self: Scoped<E::Depth>,
 {
     /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
@@ -72,8 +70,8 @@ where
     /// `Env` of an `Action` are the same as those of that `Action`.
     type Action: Actionable<Self::Env, Action = Self::Action, Env = Self::Env>;
 
-    /// The environment resulting from stepping through one or many [`Loop`] or [`Continue`] points to
-    /// the next real channel action.
+    /// The environment resulting from stepping through one or many [`Loop`] or [`Continue`] points
+    /// to the next real channel action.
     type Env: Environment;
 }
 
@@ -106,35 +104,22 @@ where
 pub trait EachActionable<E = ()>: EachSession
 where
     E: Environment,
-    E::Dual: Environment,
 {
 }
 
-impl<E> EachActionable<E> for ()
-where
-    E: Environment,
-    E::Dual: Environment,
-{
-}
+impl<E> EachActionable<E> for () where E: Environment {}
 
 impl<E, P, Ps> EachActionable<E> for (P, Ps)
 where
     P: Actionable<E>,
     Ps: EachActionable<E>,
-    P::Dual: Actionable<E::Dual>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable<<E>::Dual>>::Env as EachSession>::Dual: Environment,
 {
 }
 
 /// A valid session environment is a type-level list of session types, each of which may refer by
 /// [`Continue`] index to any other session in the list which is *below or including* itself.
-pub trait Environment: EachSession
-where
-    Self::Dual: Environment,
-{
+pub trait Environment {
     /// The depth of a session environment is the number of loops to which a [`Continue`] could
     /// jump, i.e. the number of session types in the session environment.
     type Depth: Unary;
@@ -147,11 +132,7 @@ impl Environment for () {
 impl<P, Ps> Environment for (P, Ps)
 where
     P: Scoped<S<Ps::Depth>>,
-    P: Scoped<S<<Ps::Dual as Environment>::Depth>>,
-    P::Dual: Scoped<S<Ps::Depth>>,
-    P::Dual: Scoped<S<<Ps::Dual as Environment>::Depth>>,
     Ps: Environment,
-    Ps::Dual: Environment,
 {
     type Depth = S<Ps::Depth>;
 }
@@ -233,11 +214,7 @@ macro_rules! assert_all_closed_sessions {
             fn assert_impl_all<T>()
             where
                 T: $crate::NewSession,
-                T: $crate::Actionable,
                 T::Dual: $crate::Actionable,
-                <T::Env as $crate::EachSession>::Dual: $crate::Environment,
-                <<T::Dual as $crate::Actionable>::Env as $crate::EachSession>::Dual:
-                    $crate::Environment,
             {
             }
             assert_impl_all::<$session>();

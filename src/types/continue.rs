@@ -22,14 +22,7 @@ where
     E::Selected: Actionable<(E::Selected, E::Remainder)>,
     E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
     <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    E::Selected: Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
-    <E::Selected as Session>::Dual:
-        Scoped<S<<<E::Remainder as EachSession>::Dual as Environment>::Depth>>,
-    E::Dual: Environment,
     E::Remainder: Environment,
-    <E::Remainder as EachSession>::Dual: Environment,
-    <<E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env as EachSession>::Dual:
-        Environment,
 {
     type Action = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Action;
     type Env = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env;

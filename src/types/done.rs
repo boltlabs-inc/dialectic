@@ -11,22 +11,19 @@ impl Session for Done {
     type Dual = Done;
 }
 
+impl<N: Unary> Scoped<N> for Done {}
+
 impl Actionable<()> for Done {
     type Action = Done;
     type Env = ();
 }
 
-impl<N: Unary> Scoped<N> for Done {}
-
 /// When inside a `Loop`, `Done` repeats the innermost loop.
 impl<P, Rest> Actionable<(P, Rest)> for Done
 where
+    P: Scoped<S<<Rest as Environment>::Depth>>,
     Continue: Actionable<(P, Rest)>,
-    P: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
-    P::Dual: Scoped<S<Rest::Depth>> + Scoped<S<<Rest::Dual as Environment>::Depth>>,
     Rest: Environment,
-    Rest::Dual: Environment,
-    <<Continue as Actionable<(P, Rest)>>::Env as EachSession>::Dual: Environment,
 {
     type Action = <Continue as Actionable<(P, Rest)>>::Action;
     type Env = <Continue as Actionable<(P, Rest)>>::Env;

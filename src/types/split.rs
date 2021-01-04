@@ -23,7 +23,6 @@ where
     P: Scoped<E::Depth>,
     Q: Scoped<E::Depth>,
     E: Environment,
-    E::Dual: Environment,
 {
     type Action = Split<P, Q>;
     type Env = E;

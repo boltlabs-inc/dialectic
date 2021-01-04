@@ -34,7 +34,6 @@ where
     <Choices::AsList as EachSession>::Dual: List + EachSession,
     Choices::AsList: EachScoped<E::Depth>,
     E: Environment,
-    E::Dual: Environment,
 {
     type Action = Offer<Choices>;
     type Env = E;
