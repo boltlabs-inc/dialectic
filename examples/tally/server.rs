@@ -22,7 +22,7 @@ use tokio_util::codec::LengthDelimitedCodec;
 
 // The server's API:
 pub type Server = Loop<Offer<(Recv<Operation, Tally<i64>>, Break)>>;
-pub type Tally<T> = Loop<Offer<(Recv<T>, Send<T, Break>)>>;
+pub type Tally<T> = Loop<Offer<(Recv<T, Continue>, Send<T, Break>)>>;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde_crate")] // we only need this because we renamed serde in Cargo.toml
@@ -85,8 +85,6 @@ pub fn wrap_socket<'a, P>(socket: TcpStream, max_length: usize) -> BincodeTcpCha
 where
     P: NewSession,
     P::Dual: Actionable,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     let (rx, tx) = socket.into_split();
     let (tx, rx) = length_delimited_bincode(tx, rx, 4, max_length);
@@ -131,8 +129,6 @@ where
     P::Dual: Actionable,
     P::Env: Environment + std::marker::Send,
     P::Action: std::marker::Send,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     loop {

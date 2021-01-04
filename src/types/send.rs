@@ -24,7 +24,6 @@ impl<E, T, P> Actionable<E> for Send<T, P>
 where
     P: Scoped<E::Depth>,
     E: Environment,
-    E::Dual: Environment,
 {
     type Action = Send<T, P>;
     type Env = E;

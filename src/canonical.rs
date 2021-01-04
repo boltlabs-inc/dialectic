@@ -118,11 +118,7 @@ use tuple::{HasLength, List, Tuple};
 /// ```
 #[derive(Debug)]
 #[must_use = "Dropping a channel before finishing its session type will result in a panic"]
-pub struct CanonicalChan<Tx, Rx, P: Actionable<E, Action = P, Env = E>, E: Environment = ()>
-where
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-{
+pub struct CanonicalChan<Tx, Rx, P: Actionable<E, Action = P, Env = E>, E: Environment = ()> {
     tx: Tx,
     rx: Rx,
     environment: PhantomData<E>,
@@ -181,9 +177,6 @@ where
     T: marker::Send + 'static,
     P: Actionable<E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Receive something of type `T` on the channel, returning the pair of the received object and
     /// the channel.
@@ -218,10 +211,6 @@ impl<'a, Tx, Rx, E, T, P> CanonicalChan<Tx, Rx, Send<T, P>, E>
 where
     P: Actionable<E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Send something of type `T` on the channel, returning the channel.
     ///
@@ -272,7 +261,6 @@ where
     <Choices::AsList as HasLength>::Length: marker::Send,
     <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
-    E::Dual: Environment,
     Choices::AsList: EachScoped<E::Depth>,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -346,8 +334,6 @@ where
         N: LessThan<_128>,
         Choices::AsList: Select<N>,
         <Choices::AsList as Select<N>>::Selected: Actionable<E>,
-        <<<Choices::AsList as Select<N>>::Selected as Actionable<E>>::Env as EachSession>::Dual:
-            Environment,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -364,7 +350,6 @@ where
     Choices::AsList: HasLength,
     <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
-    E::Dual: Environment,
     Choices::AsList: EachActionable<E>,
     Choices::AsList: EachScoped<E::Depth>,
 {
@@ -460,9 +445,6 @@ where
     P: Actionable<E>,
     Q: Actionable<E>,
     E: Environment,
-    E::Dual: Environment,
-    <<<P as Actionable<E>>::Action as Actionable<<P as Actionable<E>>::Env>>::Env as EachSession>::Dual: Environment,
-    <<<Q as Actionable<E>>::Action as Actionable<<Q as Actionable<E>>::Env>>::Env as EachSession>::Dual: Environment,
 {
     /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
     /// reunited (provided they reach a matching session type) using [`unsplit_with`](CanonicalChan::unsplit_with).
@@ -525,8 +507,7 @@ where
     ) -> (
         Chan<Available<Tx>, Unavailable<Rx>, P, E>,
         Chan<Unavailable<Tx>, Available<Rx>, Q, E>,
-    )
-    {
+    ) {
         let (tx, rx) = self.unwrap();
         let unavailable = Unavailable::new();
         let tx_only = unsafe { CanonicalChan::with_env(Available(tx), unavailable.clone()) };
@@ -539,8 +520,6 @@ impl<Tx, Rx, P, E> CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>
 where
     P: Actionable<E, Action = P, Env = E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
 {
     /// Reunite the transmit-only and receive-only channels resulting from a call to
     /// [`split`](CanonicalChan::split) into a single channel.
@@ -605,16 +584,12 @@ impl<Tx, Rx, E, P> CanonicalChan<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = P, Env = E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
     unsafe fn cast<F, Q>(self) -> CanonicalChan<Tx, Rx, Q, F>
     where
         F: Environment,
-        F::Dual: Environment,
         Q: Actionable<F, Action = Q, Env = F>,
-        <Q::Env as EachSession>::Dual: Environment,
     {
         let (tx, rx) = self.unwrap();
         CanonicalChan {

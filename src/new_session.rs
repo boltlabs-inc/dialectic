@@ -63,8 +63,6 @@ pub trait NewSession
 where
     Self: Actionable,
     Self::Dual: Actionable,
-    <Self::Env as EachSession>::Dual: Environment,
-    <<Self::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
@@ -145,8 +143,6 @@ impl<P> NewSession for P
 where
     Self: Actionable,
     Self::Dual: Actionable,
-    <Self::Env as EachSession>::Dual: Environment,
-    <<Self::Dual as Actionable>::Env as EachSession>::Dual: Environment,
 {
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),

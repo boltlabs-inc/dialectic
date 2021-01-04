@@ -210,7 +210,6 @@ where
     Choices: Tuple,
     Choices::AsList: EachActionable<E>,
     E: Environment,
-    E::Dual: Environment,
 {
     variant: u8,
     tx: Tx,
@@ -226,11 +225,6 @@ where
     P: Actionable<E>,
     Ps: EachActionable<E> + List,
     E: Environment,
-    E::Dual: Environment,
-    P::Dual: Actionable<E::Dual>,
-    <P::Env as EachSession>::Dual: Environment,
-    <<P::Action as Actionable<P::Env>>::Env as EachSession>::Dual: Environment,
-    <<P::Dual as Actionable<E::Dual>>::Env as EachSession>::Dual: Environment,
 {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
@@ -258,10 +252,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
-where
-    E::Dual: Environment,
-{
+impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E> {
     /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
     /// discriminant for this set of protocol choices was out of range.
     ///
@@ -372,8 +363,6 @@ pub struct UnsplitError<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = P, Env = E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
 {
     /// The transmit-only half.
     pub tx: CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>,
@@ -388,8 +377,6 @@ where
     Rx: std::fmt::Debug,
     P: Actionable<E, Action = P, Env = E> + std::fmt::Debug,
     E: Environment + std::fmt::Debug,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
 {
 }
 
@@ -397,8 +384,6 @@ impl<Tx, Rx, P, E> std::fmt::Display for UnsplitError<Tx, Rx, P, E>
 where
     P: Actionable<E, Action = P, Env = E>,
     E: Environment,
-    E::Dual: Environment,
-    <P::Env as EachSession>::Dual: Environment,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "cannot `Chan::unsplit_with` two unrelated channels")
