@@ -24,7 +24,7 @@ where
     Rest: Environment,
 {
     type Action = Done;
-    type Env = ((Done, P), Rest);
+    type Env = ();
 }
 
 /// When inside a `Loop`, `Done` repeats the innermost loop.

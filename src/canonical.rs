@@ -10,6 +10,7 @@ use crate::backend::*;
 use crate::types::*;
 use crate::Chan;
 use crate::{Available, Branches, Unavailable, UnsplitError};
+use futures::Future;
 use tuple::{HasLength, List, Tuple};
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
@@ -577,6 +578,29 @@ where
         } else {
             Err(UnsplitError { tx: self, rx })
         }
+    }
+}
+
+impl<Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Seq<P, Q>, E>
+where
+    P: Actionable<E::MakeDone>,
+    Q: Actionable<E>,
+    E: Environment,
+{
+    /// Sequence an arbitrary session `P` before another session `Q`.
+    ///
+    /// # Examples
+    ///
+    /// In the simplest uses, this can be used to cleanly modularize a session-typed program by
+    /// splitting it up into independent subroutines. More generally, this allows for arbitrary
+    /// context-free session types, by permitting multiple [`Continue`]s to be sequenced together.
+    pub async fn seq<Res, Err, F, Fut>(self, first: F) -> Result<(Res, Chan<Tx, Rx, Q, E>), Err>
+    where
+        F: FnOnce(Chan<Tx, Rx, P, E::MakeDone>) -> Fut,
+        Fut: Future<Output = Result<(Res, Chan<Tx, Rx, Done>), Err>>,
+    {
+        let (res, chan) = first(unsafe { self.cast() }).await?;
+        Ok((res, unsafe { chan.cast() }))
     }
 }
 
