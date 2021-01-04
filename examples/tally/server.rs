@@ -21,8 +21,8 @@ use tokio::net::{
 use tokio_util::codec::LengthDelimitedCodec;
 
 // The server's API:
-pub type Server = Loop<Offer<(Recv<Operation, Tally<i64>>, Break)>>;
-pub type Tally<T> = Loop<Offer<(Recv<T, Continue>, Send<T, Break>)>>;
+pub type Server = Loop<Offer<(Recv<Operation, Seq<Tally>>, Break)>>;
+pub type Tally = Loop<Offer<(Recv<i64, Continue>, Send<i64, Break>)>>;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde_crate")] // we only need this because we renamed serde in Cargo.toml
@@ -125,7 +125,7 @@ where
     F: Fn(BincodeTcpChan<P>) -> Fut + std::marker::Sync + 'static,
     Fut: Future<Output = Result<BincodeTcpChan<Done>, Box<dyn std::error::Error>>>
         + std::marker::Send,
-    P: Actionable,
+    P: NewSession,
     P::Dual: Actionable,
     P::Env: Environment + std::marker::Send,
     P::Action: std::marker::Send,
@@ -155,24 +155,40 @@ where
         chan = offer!(chan => {
             // Client wants to compute another tally
             _0 => {
-                let (op, mut chan) = chan.recv().await?;
-                let mut tally = op.unit();
-                loop {
-                    chan = offer!(chan => {
-                        // Client wants to add another number to the tally
-                        _0 => {
-                            let (i, chan) = chan.recv().await?;
-                            tally = op.combine(tally, i);
-                            chan
-                        },
-                        // Client wants to finish this tally
-                        _1 => break chan.send(&tally).await?,
-                    })
-                }
+                let (op, chan) = chan.recv().await?;
+                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1
             },
             // Client wants to quit
             _1 => break chan,
         })
     };
     Ok(chan)
+}
+
+async fn tally<Tx, Rx, E, Err>(
+    op: &Operation,
+    mut chan: Chan<Tx, Rx, Tally, E>,
+) -> Result<((), Chan<Tx, Rx, Done>), Err>
+where
+    E: Environment,
+    Rx: Receive<i64> + Receive<Choice<_2>>,
+    Tx: Transmit<i64, Ref>,
+    Err: From<<Tx as Transmit<i64, Ref>>::Error>
+        + From<<Rx as Receive<i64>>::Error>
+        + From<<Rx as Receive<Choice<_2>>>::Error>,
+    Break: Actionable<<Tally as Actionable<E>>::Env, Action = Done, Env = ()>,
+{
+    let mut tally = op.unit();
+    loop {
+        chan = offer!(chan => {
+            // Client wants to add another number to the tally
+            _0 => {
+                let (i, chan) = chan.recv().await?;
+                tally = op.combine(tally, i);
+                chan
+            },
+            // Client wants to finish this tally
+            _1 => break Ok(((), chan.send(&tally).await?)),
+        })
+    }
 }

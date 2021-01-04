@@ -30,6 +30,7 @@ where
     type Env = ();
 }
 
+/// Break from a non-outermost loop tagged as `Done`: be done with everything.
 impl<K, P, Q, Rest> Actionable<((K, P), ((Done, Q), Rest))> for Break<Z>
 where
     Q: Scoped<S<<Rest as Environment>::Depth>>,
@@ -39,7 +40,7 @@ where
     Z: LessThan<<((K, P), ((Done, Q), Rest)) as Environment>::Depth>,
 {
     type Action = Done;
-    type Env = ((Done, Q), Rest);
+    type Env = ();
 }
 
 /// Break from a non-outermost loop: continue whatever loop we broke into.

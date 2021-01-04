@@ -6,10 +6,11 @@ use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, 
 use tokio::net::TcpStream;
 
 mod server;
-use server::{get_port, wrap_socket, Operation, Server};
+use server::{get_port, wrap_socket, Operation, Server, Tally};
 
 // The client is the dual of the server
 type Client = <Server as Session>::Dual;
+type ClientTally = <Tally as Session>::Dual;
 
 /// Loop presenting a prompt until the user enters a parseable string or the input ends, returning
 /// `Ok(None)` on end of input and `Err(_)` on other errors.
@@ -69,7 +70,7 @@ where
         + From<<Tx as Transmit<Operation, Ref>>::Error>
         + From<io::Error>,
 {
-    let chan = 'outer: loop {
+    let chan = loop {
         // Parse a desired operation from the user
         if let Some(operation) =
             parse_line_loop("Operation (+ or *): ", input, output, str::parse).await?
@@ -79,44 +80,13 @@ where
                 .write_all("Enter numbers (press ENTER to tally):\n".as_bytes())
                 .await?;
             output.flush().await?;
-            chan = loop {
-                // Parse a desired number from the user
-                match parse_line_loop(&format!("{} ", operation), input, output, |s| {
-                    let s = s.trim();
-                    if s == "" || s == "=" {
-                        // Empty line or "=" means finish tally
-                        Ok(None)
-                    } else if let Ok(n) = s.parse() {
-                        // A number means add it to the tally
-                        Ok(Some(n))
-                    } else {
-                        // Anything else is a parse error
-                        Err(())
-                    }
-                })
-                .await?
-                {
-                    // User wants to add another number to the tally
-                    Some(Some(n)) => chan_inner = chan_inner.choose(_0).await?.send(&n).await?,
-                    // User wants to finish this tally
-                    Some(None) => {
-                        let (tally, chan_inner) = chan_inner.choose(_1).await?.recv().await?;
-                        output
-                            .write_all(format!("= {}\n", tally).as_bytes())
-                            .await?;
-                        output.flush().await?;
-                        break chan_inner;
-                    }
-                    // End of input, so finish this tally and quit
-                    None => {
-                        let (tally, chan_inner) = chan_inner.choose(_1).await?.recv().await?;
-                        output
-                            .write_all(format!("= {}\n", tally).as_bytes())
-                            .await?;
-                        output.flush().await?;
-                        break 'outer chan_inner.choose(_1).await?;
-                    }
-                }
+            let (done, chan_inner) = chan_inner
+                .seq(|chan| tally::<_, _, _, _, _, Err>(&operation, input, output, chan))
+                .await?;
+            if done {
+                break chan_inner.choose(_1).await?;
+            } else {
+                chan = chan_inner;
             }
         } else {
             // End of input, so quit
@@ -124,4 +94,65 @@ where
         }
     };
     Ok(chan)
+}
+
+async fn tally<Tx, Rx, E, R, W, Err>(
+    operation: &Operation,
+    input: &mut Lines<R>,
+    output: &mut W,
+    mut chan: Chan<Tx, Rx, ClientTally, E>,
+) -> Result<(bool, Chan<Tx, Rx, Done, E>), Err>
+where
+    E: Environment,
+    Done: Actionable<E, Action = Done, Env = ()>,
+    Break: Actionable<<ClientTally as Actionable<E>>::Env, Action = Done, Env = ()>,
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+    Rx: Receive<i64>,
+    Tx: Transmit<i64, Ref> + Transmit<Choice<_2>, Val>,
+    Err: From<<Rx as Receive<i64>>::Error>
+        + From<<Tx as Transmit<i64, Ref>>::Error>
+        + From<<Tx as Transmit<Choice<_2>, Val>>::Error>
+        + From<io::Error>,
+{
+    let (done, chan) = loop {
+        // Parse a desired number from the user
+        match parse_line_loop(&format!("{} ", operation), input, output, |s| {
+            let s = s.trim();
+            if s == "" || s == "=" {
+                // Empty line or "=" means finish tally
+                Ok(None)
+            } else if let Ok(n) = s.parse() {
+                // A number means add it to the tally
+                Ok(Some(n))
+            } else {
+                // Anything else is a parse error
+                Err(())
+            }
+        })
+        .await?
+        {
+            // User wants to add another number to the tally
+            Some(Some(n)) => chan = chan.choose(_0).await?.send(&n).await?,
+            // User wants to finish this tally
+            Some(None) => {
+                let (tally, chan) = chan.choose(_1).await?.recv().await?;
+                output
+                    .write_all(format!("= {}\n", tally).as_bytes())
+                    .await?;
+                output.flush().await?;
+                break (false, chan);
+            }
+            // End of input, so finish this tally and quit
+            None => {
+                let (tally, chan) = chan.choose(_1).await?.recv().await?;
+                output
+                    .write_all(format!("= {}\n", tally).as_bytes())
+                    .await?;
+                output.flush().await?;
+                break (true, chan);
+            }
+        }
+    };
+    Ok((done, chan))
 }
