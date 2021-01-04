@@ -20,37 +20,53 @@ impl<N: Unary> Session for Break<N> {
 impl<N: Unary, M: Unary> Scoped<M> for Break<N> where N: LessThan<M> {}
 
 /// When in the outermost loop, [`Break`] exits that loop and finishes the session.
-impl<P> Actionable<(P, ())> for Break<Z>
+impl<K, P> Actionable<((K, P), ())> for Break<Z>
 where
-    P: Session,
-    (P, ()): Environment,
-    <(P, ()) as EachSession>::Dual: Environment,
-    Z: LessThan<<(P, ()) as Environment>::Depth>, // this is always true but Rust doesn't know it
+    P: Scoped<S<Z>>,
+    ((K, P), ()): Environment,
+    Z: LessThan<<((K, P), ()) as Environment>::Depth>,
 {
     type Action = Done;
     type Env = ();
 }
 
-/// Break from a non-outermost loop: continue whatever loop we broke into.
-impl<P, Q, Rest> Actionable<(P, (Q, Rest))> for Break<Z>
+impl<K, P, Q, Rest> Actionable<((K, P), ((Done, Q), Rest))> for Break<Z>
 where
-    Q: Actionable<(Q, Rest)>,
+    Q: Scoped<S<<Rest as Environment>::Depth>>,
+    ((K, P), ((Done, Q), Rest)): Environment,
+    ((Done, Q), Rest): Environment,
+    Rest: Environment,
+    Z: LessThan<<((K, P), ((Done, Q), Rest)) as Environment>::Depth>,
+{
+    type Action = Done;
+    type Env = ((Done, Q), Rest);
+}
+
+/// Break from a non-outermost loop: continue whatever loop we broke into.
+impl<K, P, Q, Rest> Actionable<((K, P), ((Continue, Q), Rest))> for Break<Z>
+where
+    Q: Actionable<((Continue, Q), Rest)>,
     P: Scoped<S<S<<Rest as Environment>::Depth>>>,
     Q: Scoped<S<<Rest as Environment>::Depth>>,
     Q::Env: Environment,
+    ((K, P), ((Continue, Q), Rest)): Environment,
+    ((Continue, Q), Rest): Environment,
     Rest: Environment,
+    Z: LessThan<<((K, P), ((Continue, Q), Rest)) as Environment>::Depth>,
 {
     type Action = Q::Action;
     type Env = Q::Env;
 }
 
 /// Inductive case: break one less level from one less loop.
-impl<N: Unary, P, Rest> Actionable<(P, Rest)> for Break<S<N>>
+impl<K, N: Unary, P, Rest> Actionable<((K, P), Rest)> for Break<S<N>>
 where
     P: Scoped<S<<Rest as Environment>::Depth>>,
     N: LessThan<Rest::Depth>,
     Break<N>: Actionable<Rest>,
+    ((K, P), Rest): Environment,
     Rest: Environment,
+    S<N>: LessThan<<((K, P), Rest) as Environment>::Depth>,
 {
     type Action = <Break<N> as Actionable<Rest>>::Action;
     type Env = <Break<N> as Actionable<Rest>>::Env;

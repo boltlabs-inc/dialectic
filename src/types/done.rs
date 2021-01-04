@@ -18,13 +18,22 @@ impl Actionable<()> for Done {
     type Env = ();
 }
 
-/// When inside a `Loop`, `Done` repeats the innermost loop.
-impl<P, Rest> Actionable<(P, Rest)> for Done
+impl<P, Rest> Actionable<((Done, P), Rest)> for Done
 where
     P: Scoped<S<<Rest as Environment>::Depth>>,
-    Continue: Actionable<(P, Rest)>,
     Rest: Environment,
 {
-    type Action = <Continue as Actionable<(P, Rest)>>::Action;
-    type Env = <Continue as Actionable<(P, Rest)>>::Env;
+    type Action = Done;
+    type Env = ((Done, P), Rest);
+}
+
+/// When inside a `Loop`, `Done` repeats the innermost loop.
+impl<P, Rest> Actionable<((Continue, P), Rest)> for Done
+where
+    P: Scoped<S<<Rest as Environment>::Depth>>,
+    Continue: Actionable<((Continue, P), Rest)>,
+    Rest: Environment,
+{
+    type Action = <Continue as Actionable<((Continue, P), Rest)>>::Action;
+    type Env = <Continue as Actionable<((Continue, P), Rest)>>::Env;
 }
