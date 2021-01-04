@@ -17,9 +17,9 @@ impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 impl<P, E> Actionable<E> for Loop<P>
 where
     E: Environment,
-    P: Actionable<(P, E)>,
+    P: Actionable<((Continue, P), E)>,
     P: Scoped<S<E::Depth>>,
 {
-    type Action = <P as Actionable<(P, E)>>::Action;
-    type Env = <P as Actionable<(P, E)>>::Env;
+    type Action = <P as Actionable<((Continue, P), E)>>::Action;
+    type Env = <P as Actionable<((Continue, P), E)>>::Env;
 }

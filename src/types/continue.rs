@@ -15,15 +15,31 @@ impl<N: Unary> Session for Continue<N> {
 
 impl<N: Unary, M: Unary> Scoped<M> for Continue<N> where N: LessThan<M> {}
 
-impl<E, N: Unary> Actionable<E> for Continue<N>
+impl<E, K, P, Rest, N: Unary> Actionable<E> for Continue<N>
 where
-    E: Select<N> + Environment,
+    E: Select<N, Selected = (K, P), Remainder = Rest> + Environment,
     Continue<N>: Scoped<E::Depth>,
-    E::Selected: Actionable<(E::Selected, E::Remainder)>,
-    E::Selected: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    <E::Selected as Session>::Dual: Scoped<S<<E::Remainder as Environment>::Depth>>,
-    E::Remainder: Environment,
+    P: Actionable<((K, P), Rest)>,
+    P: Scoped<S<<Rest as Environment>::Depth>>,
+    P::Dual: Scoped<S<Rest::Depth>>,
+    ((K, P), Rest): Environment,
+    Rest: Environment,
 {
-    type Action = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Action;
-    type Env = <E::Selected as Actionable<(E::Selected, E::Remainder)>>::Env;
+    type Action = <P as Actionable<((K, P), Rest)>>::Action;
+    type Env = <P as Actionable<((K, P), Rest)>>::Env;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assert_all_closed_sessions;
+
+    #[test]
+    fn break_good() {
+        assert_all_closed_sessions!(
+            Loop<Send<i64, Continue>>,
+            Loop<Send<i64, Loop<Continue<_1>>>>,
+            Loop<Send<String, Continue>>,
+        );
+    }
 }

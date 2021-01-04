@@ -129,7 +129,15 @@ impl Environment for () {
     type Depth = Z;
 }
 
-impl<P, Ps> Environment for (P, Ps)
+impl<P, Ps> Environment for ((Done, P), Ps)
+where
+    P: Scoped<S<Ps::Depth>>,
+    Ps: Environment,
+{
+    type Depth = S<Ps::Depth>;
+}
+
+impl<P, Ps> Environment for ((Continue, P), Ps)
 where
     P: Scoped<S<Ps::Depth>>,
     Ps: Environment,
