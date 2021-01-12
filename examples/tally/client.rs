@@ -1,7 +1,5 @@
 #![allow(unused)]
-use dialectic::backend::{Choice, Receive, Ref, Transmit, Val};
-use dialectic::constants::*;
-use dialectic::*;
+use dialectic::prelude::*;
 use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpStream;
 
@@ -83,6 +81,7 @@ where
             let (done, chan_inner) = chan_inner
                 .seq(|chan| tally::<_, _, _, _, _, Err>(&operation, input, output, chan))
                 .await?;
+            let chan_inner = chan_inner.unwrap();
             if done {
                 break chan_inner.choose(_1).await?;
             } else {

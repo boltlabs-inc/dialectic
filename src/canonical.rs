@@ -7,9 +7,9 @@ use std::{
 };
 
 use crate::backend::*;
-use crate::types::*;
+use crate::prelude::*;
 use crate::Chan;
-use crate::{Available, Branches, Unavailable, UnsplitError};
+use crate::{Available, Branches, SeqError, Unavailable, UnsplitError};
 use futures::Future;
 use tuple::{HasLength, List, Tuple};
 
@@ -30,14 +30,15 @@ use tuple::{HasLength, List, Tuple};
 /// transport built from a pair of [`tokio::sync::mpsc::channel`]s:
 ///
 /// ```
-/// use dialectic::*;
+/// use dialectic::prelude::*;
+/// use dialectic::backend::mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Make a pair of channels:
 /// // - `c1` with the session type `Send<String>`, and
 /// // - `c2` with the dual session type `Recv<String>`
-/// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
+/// let (c1, c2) = <Send<String>>::channel(|| mpsc::channel(1));
 /// # Ok(())
 /// # }
 /// ```
@@ -49,11 +50,12 @@ use tuple::{HasLength, List, Tuple};
 /// connection:
 ///
 /// ```
-/// # use dialectic::*;
+/// # use dialectic::prelude::*;
+/// # use dialectic::backend::mpsc;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let (tx, rx) = backend::mpsc::channel(1);
+/// let (tx, rx) = mpsc::channel(1);
 /// let c = <Send<String>>::wrap(tx, rx);
 /// # Ok(())
 /// # }
@@ -79,7 +81,7 @@ use tuple::{HasLength, List, Tuple};
 /// ⚠️ **The problem:** Suppose you wanted to explicitly annotate the type of a new channel:
 ///
 /// ```compile_fail
-/// # use dialectic::*;
+/// # use dialectic::prelude::*;
 /// # use dialectic::backend::mpsc;
 /// use dialectic::canonical::CanonicalChan;
 ///
@@ -110,7 +112,7 @@ use tuple::{HasLength, List, Tuple};
 /// correctly annotate a newly created channel of any session type:
 ///
 /// ```
-/// # use dialectic::*;
+/// # use dialectic::prelude::*;
 /// # use dialectic::backend::mpsc;
 /// #
 /// type P = Loop<Send<String>>;
@@ -122,8 +124,8 @@ use tuple::{HasLength, List, Tuple};
 pub struct CanonicalChan<Tx, Rx, P: Actionable<E, Action = P, Env = E>, E: Environment = ()> {
     tx: Tx,
     rx: Rx,
-    environment: PhantomData<E>,
-    protocol: PhantomData<P>,
+    session: PhantomData<(P, E)>,
+    identity: Arc<()>,
 }
 
 impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
@@ -139,11 +141,12 @@ impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
     /// channel.
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = Done::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = Done::channel(mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.close();
     /// let (tx2, rx2) = c2.close();
     /// # }
@@ -154,11 +157,12 @@ impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
     /// not compile**:
     ///
     /// ```compile_fail
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.close();
     /// let (tx2, rx2) = c2.close();
     /// # }
@@ -190,11 +194,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Recv<String>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Recv<String>>::channel(|| mpsc::channel(1));
     /// c2.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c1) = c1.recv().await?;
@@ -204,7 +209,7 @@ where
     /// ```
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, P, E>), Rx::Error> {
         let result = self.rx.recv().await?;
-        Ok((result, unsafe { self.cast() }))
+        Ok((result, self.unchecked_cast()))
     }
 }
 
@@ -228,11 +233,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Send<String>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Send<String>>::channel(|| mpsc::channel(1));
     /// c1.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
@@ -250,7 +256,7 @@ where
         <T as CallBy<'a, Convention>>::Type: marker::Send,
     {
         self.tx.send(message).await?;
-        Ok(unsafe { self.cast() })
+        Ok(self.unchecked_cast())
     }
 }
 
@@ -269,9 +275,9 @@ where
     /// `N` over the channel.
     ///
     /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
-    /// supported numbers of choices (up to a maximum of 127) are available in the [`constants`]
-    /// module, each named for its corresponding decimal number prefixed with an underscore (e.g.
-    /// `_0`, or `_42`).
+    /// supported numbers of choices (up to a maximum of 127) are available in the
+    /// [`constants`](crate::types::unary::constants) module, each named for its corresponding
+    /// decimal number prefixed with an underscore (e.g. `_0`, or `_42`).
     ///
     /// # Errors
     ///
@@ -281,14 +287,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     ///
-    /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
@@ -296,7 +302,7 @@ where
     ///         _0 => { c2.recv().await?; },
     ///         _1 => { c2.send("Hello!".to_string()).await?; },
     ///     });
-    ///     Ok::<_, backend::mpsc::Error>(())
+    ///     Ok::<_, mpsc::Error>(())
     /// });
     ///
     /// // Choose to send an integer
@@ -311,13 +317,13 @@ where
     /// Attempting to choose an index that's out of bounds results in a compile-time error:
     ///
     /// ```compile_fail
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type OnlyTwoChoices = Choose<(Done, Done)>;
-    /// let (c1, c2) = OnlyTwoChoices::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = OnlyTwoChoices::channel(|| mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
     /// c1.choose(_2).await?;
@@ -340,7 +346,7 @@ where
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
         self.tx.send(choice).await?;
-        Ok(unsafe { self.cast() })
+        Ok(self.unchecked_cast())
     }
 }
 
@@ -368,14 +374,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     ///
-    /// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
@@ -386,7 +392,7 @@ where
     ///             Err(rest) => rest.empty_case(),
     ///         }
     ///     }
-    ///     Ok::<_, backend::mpsc::Error>(())
+    ///     Ok::<_, mpsc::Error>(())
     /// });
     ///
     /// // Choose to send an integer
@@ -402,14 +408,14 @@ where
     /// terms of [`offer!`](crate::offer):
     ///
     /// ```
-    /// # use dialectic::*;
-    /// # use dialectic::constants::*;
+    /// # use dialectic::prelude::*;
+    /// # use dialectic::backend::mpsc;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
     /// #
-    /// # let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
+    /// # let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     /// #
     /// # // Spawn a thread to offer a choice
     /// # let t1 = tokio::spawn(async move {
@@ -417,7 +423,7 @@ where
     ///     _0 => { c2.recv().await?; },
     ///     _1 => { c2.send("Hello!".to_string()).await?; },
     /// });
-    /// # Ok::<_, backend::mpsc::Error>(())
+    /// # Ok::<_, mpsc::Error>(())
     /// # });
     /// #
     /// # // Choose to send an integer
@@ -457,29 +463,29 @@ where
     /// interaction can be faster than sequentially sending data back and forth.
     ///
     /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
     ///
-    /// let (c1, c2) = SendAndRecv::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
     ///
     /// // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
     /// let t1 = tokio::spawn(async move {
     ///     let (tx, rx) = c1.split();
     ///     let send_vec = tokio::spawn(async move {
     ///         tx.send(vec![1, 2, 3, 4, 5]).await?;
-    ///         Ok::<_, backend::mpsc::Error>(())
+    ///         Ok::<_, mpsc::Error>(())
     ///     });
     ///     let recv_string = tokio::spawn(async move {
     ///         let (string, _) = rx.recv().await?;
-    ///         Ok::<_, backend::mpsc::Error>(string)
+    ///         Ok::<_, mpsc::Error>(string)
     ///     });
     ///     send_vec.await.unwrap()?;
     ///     let string = recv_string.await.unwrap()?;
-    ///     Ok::<_, backend::mpsc::Error>(string)
+    ///     Ok::<_, mpsc::Error>(string)
     /// });
     ///
     /// // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
@@ -487,11 +493,11 @@ where
     /// let (tx, rx) = c2.split();
     /// let send_string = tokio::spawn(async move {
     ///     tx.send("Hello!".to_string()).await?;
-    ///     Ok::<_, backend::mpsc::Error>(())
+    ///     Ok::<_, mpsc::Error>(())
     /// });
     /// let recv_vec = tokio::spawn(async move {
     ///     let (vec, _) = rx.recv().await?;
-    ///     Ok::<_, backend::mpsc::Error>(vec)
+    ///     Ok::<_, mpsc::Error>(vec)
     /// });
     ///
     /// // Examine the result values:
@@ -509,10 +515,19 @@ where
         Chan<Available<Tx>, Unavailable<Rx>, P, E>,
         Chan<Unavailable<Tx>, Available<Rx>, Q, E>,
     ) {
-        let (tx, rx) = self.unwrap();
-        let unavailable = Unavailable::new();
-        let tx_only = unsafe { CanonicalChan::with_env(Available(tx), unavailable.clone()) };
-        let rx_only = unsafe { CanonicalChan::with_env(unavailable.cast(), Available(rx)) };
+        let tx = self.tx;
+        let rx = self.rx;
+        let identity = self.identity;
+        let tx_only = CanonicalChan::from_raw_unchecked_with_identity(
+            identity.clone(),
+            Available(tx),
+            Unavailable::new(),
+        );
+        let rx_only = CanonicalChan::from_raw_unchecked_with_identity(
+            identity,
+            Unavailable::new(),
+            Available(rx),
+        );
         (tx_only, rx_only)
     }
 }
@@ -528,12 +543,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
-    /// use dialectic::constants::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Split<Done, Done>>::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = <Split<Done, Done>>::channel(|| mpsc::channel(1));
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
     ///
@@ -551,14 +566,14 @@ where
     /// guarantee. If instead of the above, we did the following, `unsplit_with` would return an error:
     ///
     /// ```
-    /// # use dialectic::*;
-    /// # use dialectic::constants::*;
+    /// # use dialectic::prelude::*;
+    /// # use dialectic::backend::mpsc;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # type SplitEnds = Split<Done, Done>;
     /// #
-    /// let (c1, c2) = SplitEnds::channel(|| backend::mpsc::channel(1));
+    /// let (c1, c2) = SplitEnds::channel(|| mpsc::channel(1));
     /// let (tx1, rx1) = c1.split();
     /// let (tx2, rx2) = c2.split();
     ///
@@ -571,10 +586,11 @@ where
         self,
         rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
     ) -> Result<Chan<Tx, Rx, P, E>, UnsplitError<Tx, Rx, P, E>> {
-        if Arc::ptr_eq(&self.rx.0, &rx.tx.0) {
-            Ok(unsafe {
-                CanonicalChan::with_env(self.unwrap().0.into_inner(), rx.unwrap().1.into_inner())
-            })
+        if Arc::ptr_eq(&self.identity, &rx.identity) {
+            Ok(CanonicalChan::from_raw_unchecked(
+                self.unwrap().0.into_inner(),
+                rx.unwrap().1.into_inner(),
+            ))
         } else {
             Err(UnsplitError { tx: self, rx })
         }
@@ -589,18 +605,54 @@ where
 {
     /// Sequence an arbitrary session `P` before another session `Q`.
     ///
+    /// This operation takes as input an asynchronous closure that runs a channel for the session
+    /// type `P` to completion and returns either an error `Err` or some result value `T`. The
+    /// result of this (provided that no errors occurred during `P`) is a channel ready to execute
+    /// the session type `Q`.
+    ///
+    /// ⚠️ **Important:** the closure passed to [`seq`](CanonicalChan::seq) must, if it returns
+    /// successfully, always return *the same* [`Chan`] it was given, not merely one with the same
+    /// type. Doing otherwise is always a programming mistake, since if it were permissible to
+    /// return a different [`Chan`], it would be possible to violate session type safety. Returning
+    /// anything other than the precise [`Chan`] given to the closure will result in a runtime
+    /// [`SeqError`].
+    ///
+    /// # Errors
+    ///
+    /// This function returns an `Err` if the closure returns an `Err`. Additionally, the returned
+    /// channel may instead be a [`SeqError`] if the closure erroneously returned a channel which
+    /// was not the exact same channel as was given to the closure as input.
+    ///
     /// # Examples
     ///
     /// In the simplest uses, this can be used to cleanly modularize a session-typed program by
-    /// splitting it up into independent subroutines. More generally, this allows for arbitrary
-    /// context-free session types, by permitting multiple [`Continue`]s to be sequenced together.
-    pub async fn seq<Res, Err, F, Fut>(self, first: F) -> Result<(Res, Chan<Tx, Rx, Q, E>), Err>
+    /// splitting it up into independent subroutines:
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
+    ///
+    /// // TODO: Finish this example!
+    ///
+    /// ```
+    ///
+    /// More generally, this allows for arbitrary context-free session types, by permitting multiple
+    /// [`Continue`]s to be sequenced together.
+    pub async fn seq<T, Err, F, Fut>(
+        self,
+        first: F,
+    ) -> Result<(T, Result<Chan<Tx, Rx, Q, E>, SeqError>), Err>
     where
         F: FnOnce(Chan<Tx, Rx, P, E::MakeDone>) -> Fut,
-        Fut: Future<Output = Result<(Res, Chan<Tx, Rx, Done>), Err>>,
+        Fut: Future<Output = Result<(T, Chan<Tx, Rx, Done>), Err>>,
     {
-        let (res, chan) = first(unsafe { self.cast() }).await?;
-        Ok((res, unsafe { chan.cast() }))
+        let identity = self.identity.clone();
+        let (res, chan) = first(self.unchecked_cast()).await?;
+        if Arc::ptr_eq(&identity, &chan.identity) {
+            Ok((res, Ok(chan.unchecked_cast())))
+        } else {
+            Ok((res, Err(SeqError { _private: () })))
+        }
     }
 }
 
@@ -610,17 +662,19 @@ where
     E: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    unsafe fn cast<F, Q>(self) -> CanonicalChan<Tx, Rx, Q, F>
+    fn unchecked_cast<F, Q>(self) -> CanonicalChan<Tx, Rx, Q, F>
     where
         F: Environment,
         Q: Actionable<F, Action = Q, Env = F>,
     {
-        let (tx, rx) = self.unwrap();
+        let identity = self.identity;
+        let tx = self.tx;
+        let rx = self.rx;
         CanonicalChan {
             tx,
             rx,
-            environment: PhantomData,
-            protocol: PhantomData,
+            session: PhantomData,
+            identity,
         }
     }
 
@@ -638,9 +692,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
-    /// let (c1, c2) = <Send<String>>::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = <Send<String>>::channel(mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.unwrap();
     /// let (tx2, rx2) = c2.unwrap();
     /// ```
@@ -650,14 +705,27 @@ where
         (tx, rx)
     }
 
-    /// Create a new channel with an arbitrary environment. This is equivalent to casting a new
-    /// channel to an arbitrary environment. Use with care!
-    pub(crate) unsafe fn with_env(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P, E> {
+    /// Create a new channel with an arbitrary environment and session type. This is equivalent to
+    /// casting a new channel to an arbitrary environment, and doesn't guarantee the environment is
+    /// coherent with regard to the session type. Use with care!
+    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P, E> {
+        CanonicalChan::from_raw_unchecked_with_identity(Arc::new(()), tx, rx)
+    }
+
+    /// Create a new channel with an arbitrary environment and session type, with an explicitly
+    /// specified object identity pointer. This `Arc<()>` is used to track whether a channel is
+    /// *identical* to another channel. Misuse of this method can lead to violation of the session
+    /// type contract.
+    fn from_raw_unchecked_with_identity(
+        identity: Arc<()>,
+        tx: Tx,
+        rx: Rx,
+    ) -> CanonicalChan<Tx, Rx, P, E> {
         CanonicalChan {
             tx,
             rx,
-            environment: PhantomData,
-            protocol: PhantomData,
+            session: PhantomData,
+            identity,
         }
     }
 }

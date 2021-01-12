@@ -11,7 +11,7 @@
 //! Let's write our first session type:
 //!
 //! ```
-//! use dialectic::*;
+//! use dialectic::prelude::*;
 //!
 //! type JustSendOneString = Send<String, Done>;
 //! ```
@@ -25,7 +25,7 @@
 //! [`Recv`]:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use static_assertions::assert_type_eq_all;
 //! assert_type_eq_all!(<Send<String, Done> as Session>::Dual, Recv<String, Done>);
 //! ```
@@ -34,7 +34,7 @@
 //! the rest of the session is `Done`:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use static_assertions::assert_type_eq_all;
 //! assert_type_eq_all!(Send<String>, Send<String, Done>);
 //! assert_type_eq_all!(Recv<String>, Recv<String, Done>);
@@ -48,7 +48,7 @@
 //! extensible, meaning you can choose your own transport if you want.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! use dialectic::backend::mpsc;
 //! ```
 //!
@@ -59,7 +59,7 @@
 //! underlying channel type.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -69,7 +69,7 @@
 //! to the given session type, and `c2`'s type corresponds to its dual:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -83,7 +83,7 @@
 //! runtime, provided the underlying transport channel is of a compatible type.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
@@ -119,7 +119,7 @@
 //! to a new channel.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
@@ -175,7 +175,7 @@
 //! channel from above:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! type JustSendOneString = Send<String, Done>;
 //! ```
 //!
@@ -184,7 +184,7 @@
 //! If we try to send on the end of the channel that's meant to receive...
 //!
 //! ```compile_fail
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
@@ -204,7 +204,7 @@
 //! If we try to receive the wrong type of thing...
 //!
 //! ```compile_fail
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
@@ -229,7 +229,7 @@
 //! of messages. If we try to send twice in a row...
 //!
 //! ```compile_fail
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
@@ -262,7 +262,7 @@
 //! from:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use static_assertions::assert_type_eq_all;
 //! assert_type_eq_all!(
 //!     <Offer<(Send<String>, Recv<i64>)> as Session>::Dual,
@@ -270,9 +270,9 @@
 //! );
 //! ```
 //!
-//! Just as the [`send`](CanonicalChan::send) and [`recv`](CanonicalChan::recv) methods
-//! enact the [`Send`] and [`Recv`] session types, the [`choose`](CanonicalChan::choose)
-//! method and [`offer!`](crate::offer) macro enact the [`Choose`] and [`Offer`] session types.
+//! Just as the [`send`](CanonicalChan::send) and [`recv`](CanonicalChan::recv) methods enact the
+//! [`Send`] and [`Recv`] session types, the [`choose`](CanonicalChan::choose) method and
+//! [`offer!`](crate::offer) macro enact the [`Choose`] and [`Offer`] session types.
 //!
 //! Suppose we want to offer a choice between two protocols: either sending a single integer
 //! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
@@ -280,12 +280,11 @@
 //! either selection by enacting the protocol chosen.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type JustSendOneString = Send<String, Done>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use dialectic::constants::*;
 //!
 //! let (c1, c2) = <Offer<(Send<i64>, Recv<String>)>>::channel(|| mpsc::channel(1));
 //!
@@ -320,13 +319,14 @@
 //! want to bind a channel name to the result of the `offer!`, each expression must step the channel
 //! forward to an identical session type (in the case above, that's `Done`).
 //!
-//! Dually, to select an offered option, you can call the [`choose`](CanonicalChan::choose)
-//! method on a channel, passing it as input a constant corresponding to the index of the choice.
-//! These constants are *not* Rust's built-in numeric types, but rather [unary type-level
+//! Dually, to select an offered option, you can call the [`choose`](CanonicalChan::choose) method
+//! on a channel, passing it as input a constant corresponding to the index of the choice. These
+//! constants are *not* Rust's built-in numeric types, but rather [unary type-level
 //! numbers](crate::types::unary). Dialectic supports up to 128 possible choices in an `Offer` or
-//! `Choose`, and the corresponding constants [`_0`](crate::constants::_0),
-//! [`_1`](crate::constants::_1), [`_2`](crate::constants::_2), ... [`_127`](crate::constants::_127)
-//! are defined in the [`constants`](crate::constants) module.
+//! `Choose`, and the corresponding constants [`_0`](crate::types::unary::constants::_0),
+//! [`_1`](crate::types::unary::constants::_1), [`_2`](crate::types::unary::constants::_2), ...
+//! [`_127`](crate::types::unary::constants::_127) are defined in the
+//! [`constants`](crate::types::unary::constants) module.
 //!
 //! # Looping back
 //!
@@ -339,7 +339,7 @@
 //! could describe this protocol using the [`Loop`], [`Continue`], and [`Break`] types:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
 //! ```
 //!
@@ -347,7 +347,7 @@
 //! `Break` is `Break`, so we know the other end of this channel will need to implement:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use static_assertions::assert_type_eq_all;
 //! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
 //! type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64, Break>)>>;
@@ -360,7 +360,7 @@
 //! looping session type, even though the session after [`Send`] is [`Done`]:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! type SendForever = Loop<Send<i64, Done>>;
 //! ```
 //!
@@ -368,7 +368,7 @@
 //! these two types in our `QuerySum` and `ComputeSum` to omit the explicit [`Continue`]:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
 //! type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
 //! ```
@@ -380,13 +380,12 @@
 //! Recv<i64>)>` once more.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
 //! # type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
 //! # type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # use dialectic::constants::*;
 //! #
 //! let (mut c1, mut c2) = QuerySum::channel(|| mpsc::channel(1));
 //!
@@ -437,15 +436,15 @@
 //!
 //! ## Automatic looping
 //!
-//! You may have noticed how in the example above, [`choose`](CanonicalChan::choose) can be
-//! called on `c1` even though the outermost part of `c1`'s session type `QuerySum` would seem not
-//! to begin with [`Choose`]. This is true in general: if the session type of a [`Chan`] is a
-//! [`Loop`], [`Break`], or [`Continue`] that leads to a session type for which a given operation is
-//! valid, that operation is valid on the [`Chan`]. In the instance above, calling
-//! [`choose`](CanonicalChan::choose) on a [`Chan`] with session type `Loop<Choose<...>>`
-//! works, no matter how many `Loop`s enclose the `Choose`. Similarly, if a `Chan`'s type is
-//! `Continue`, whatever operation would be valid for the session type at the start of the
-//! corresponding `Loop` is valid for that `Chan`.
+//! You may have noticed how in the example above, [`choose`](CanonicalChan::choose) can be called
+//! on `c1` even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin
+//! with [`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`],
+//! [`Break`], or [`Continue`] that leads to a session type for which a given operation is valid,
+//! that operation is valid on the [`Chan`]. In the instance above, calling
+//! [`choose`](CanonicalChan::choose) on a [`Chan`] with session type `Loop<Choose<...>>` works, no
+//! matter how many `Loop`s enclose the `Choose`. Similarly, if a `Chan`'s type is `Continue`,
+//! whatever operation would be valid for the session type at the start of the corresponding `Loop`
+//! is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
 //! on a session type is. For [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the final
@@ -465,21 +464,21 @@
 //! executing certain portions of them in parallel.
 //!
 //! Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
-//! a session type of `Split<P, Q>` can be [`split`](CanonicalChan::split) into a send-only
-//! end with the session type `P` and a receive-only end with the session type `Q`, which can then
-//! be used concurrently. In the example below, the two ends of a channel **concurrently swap** a
+//! a session type of `Split<P, Q>` can be [`split`](CanonicalChan::split) into a send-only end with
+//! the session type `P` and a receive-only end with the session type `Q`, which can then be used
+//! concurrently. In the example below, the two ends of a channel **concurrently swap** a
 //! `Vec<usize>` and a `String`. If this example were run over a network and these values were
 //! large, this could represent a significant reduction in runtime.
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
 //! ```
 //!
 //! The dual of `Split<P, Q>` is `Split<Q::Dual, P::Dual>`:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use static_assertions::assert_type_eq_all;
 //! assert_type_eq_all!(
 //!     <Split<Send<Vec<usize>>, Recv<String>> as Session>::Dual,
@@ -493,9 +492,8 @@
 //! Now, let's use a channel of this session type to enact a concurrent swap:
 //!
 //! ```
-//! # use dialectic::*;
+//! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
-//! # use dialectic::constants::*;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
@@ -556,9 +554,9 @@
 //! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
 //! - You can [`unsplit_with`](CanonicalChan::unsplit_with) the two ends again only once their
 //!   session types match each other.
-//! - It's a runtime [`UnsplitError`] to attempt to
-//!   [`unsplit_with`](CanonicalChan::unsplit_with) two [`Chan`]s which did not originate from
-//!   the same call to [`split`](CanonicalChan::split), even if their types match.
+//! - It's a runtime [`UnsplitError`] to attempt to [`unsplit_with`](CanonicalChan::unsplit_with)
+//!   two [`Chan`]s which did not originate from the same call to [`split`](CanonicalChan::split),
+//!   even if their types match.
 //!
 //! # Wrapping up
 //!

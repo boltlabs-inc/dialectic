@@ -8,7 +8,7 @@ pub mod types;
 /// # Examples
 ///
 /// ```
-/// use dialectic::Z;
+/// use dialectic::prelude::Z;
 ///
 /// let zero: Z = Z;
 /// ```
@@ -20,7 +20,7 @@ pub struct Z;
 /// # Examples
 ///
 /// ```
-/// use dialectic::{S, Z};
+/// use dialectic::prelude::{S, Z};
 ///
 /// let one: S<Z> = S(Z);
 /// ```
@@ -33,8 +33,7 @@ pub struct S<N>(pub N);
 /// # Examples
 ///
 /// ```
-/// use dialectic::unary::types::*;
-/// use dialectic::Unary;
+/// use dialectic::prelude::*;
 ///
 /// assert_eq!(_0::VALUE, 0);
 /// assert_eq!(_1::VALUE, 1);
@@ -62,8 +61,7 @@ impl<N: Unary> Unary for S<N> {
 /// This compiles, because `1 < 2`:
 ///
 /// ```
-/// use dialectic::LessThan;
-/// use dialectic::unary::types::*;
+/// use dialectic::prelude::*;
 ///
 /// fn ok() where _1: LessThan<_2> {}
 /// ```
@@ -71,8 +69,7 @@ impl<N: Unary> Unary for S<N> {
 /// But this does not compile, because `2 >= 1`:
 ///
 /// ```compile_fail
-/// # use dialectic::LessThan;
-/// # use dialectic::unary::types::*;
+/// # use dialectic::prelude::*;
 /// #
 /// fn bad() where _2: LessThan<_1> {}
 /// ```
@@ -81,8 +78,7 @@ impl<N: Unary> Unary for S<N> {
 /// compile either:
 ///
 /// ```compile_fail
-/// # use dialectic::LessThan;
-/// # use dialectic::unary::types::*;
+/// # use dialectic::prelude::*;
 /// #
 /// fn bad() where _100: LessThan<_100> {}
 /// ```

@@ -1,5 +1,6 @@
 use super::sealed::IsSession;
-use super::*;
+use crate::prelude::*;
+use std::marker::PhantomData;
 
 /// Receive a message of type `T` using [`recv`](crate::CanonicalChan::recv), then continue with
 /// protocol `P`.

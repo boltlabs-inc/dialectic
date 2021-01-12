@@ -6,11 +6,12 @@ use super::*;
 /// # Examples
 ///
 /// ```
-/// use dialectic::*;
+/// use dialectic::prelude::*;
+/// use dialectic::backend::mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let (c1, c2) = <Send<String>>::channel(backend::mpsc::unbounded_channel);
+/// let (c1, c2) = <Send<String>>::channel(mpsc::unbounded_channel);
 /// // do something with these channels...
 /// #   c1.unwrap();
 /// #   c2.unwrap();
@@ -29,10 +30,11 @@ use super::*;
 ///
 /// ```compile_fail
 /// use dialectic::*;
+/// use dialectic::backend::mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let (c1, c2) = <Loop<Continue>>::channel(backend::mpsc::unbounded_channel);
+/// let (c1, c2) = <Loop<Continue>>::channel(mpsc::unbounded_channel);
 /// #   c1.unwrap();
 /// #   c2.unwrap();
 /// # }
@@ -74,11 +76,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = Done::channel(backend::mpsc::unbounded_channel);
+    /// let (c1, c2) = Done::channel(mpsc::unbounded_channel);
     /// # }
     /// ```
     fn channel<Tx, Rx>(
@@ -95,13 +98,14 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
     /// let (c1, c2) = Done::bichannel(
-    ///     backend::mpsc::unbounded_channel,
-    ///     || backend::mpsc::channel(1),
+    ///     mpsc::unbounded_channel,
+    ///     || mpsc::channel(1),
     /// );
     /// # }
     /// ```
@@ -125,11 +129,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dialectic::*;
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (mut tx, mut rx) = backend::mpsc::unbounded_channel();
+    /// let (mut tx, mut rx) = mpsc::unbounded_channel();
     /// let c = Done::wrap(&mut tx, &mut rx);  // you can wrap &mut references
     /// c.close();                            // whose lifetimes end when the channel is closed,
     /// let c = Done::wrap(tx, rx);            // or you can wrap owned values
@@ -162,6 +167,6 @@ where
     }
 
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self> {
-        unsafe { canonical::CanonicalChan::with_env(tx, rx) }
+        canonical::CanonicalChan::from_raw_unchecked(tx, rx)
     }
 }
