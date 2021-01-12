@@ -5,13 +5,8 @@ use std::{
 };
 use thiserror::Error;
 
-use dialectic::backend::{
-    serde::format::{length_delimited_bincode, Bincode},
-    Choice, Receive, Ref, Transmit,
-};
-use dialectic::constants::*;
-use dialectic::unary::types::*;
-use dialectic::*;
+use dialectic::backend::serde::format::{length_delimited_bincode, Bincode};
+use dialectic::prelude::*;
 
 use serde_crate::{Deserialize, Serialize};
 use tokio::net::{
@@ -72,7 +67,7 @@ impl Display for Operation {
     }
 }
 
-pub type BincodeTcpChan<P, E = ()> = backend::serde::SymmetricalChan<
+pub type BincodeTcpChan<P, E = ()> = dialectic::backend::serde::SymmetricalChan<
     Bincode,
     LengthDelimitedCodec,
     OwnedWriteHalf,
@@ -156,7 +151,7 @@ where
             // Client wants to compute another tally
             _0 => {
                 let (op, chan) = chan.recv().await?;
-                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1
+                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1.unwrap()
             },
             // Client wants to quit
             _1 => break chan,

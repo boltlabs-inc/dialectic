@@ -1,8 +1,8 @@
 //! The types in this module enumerate the shapes of all expressible sessions.
 
-use super::*;
+use crate::prelude::*;
 pub use unary::types::*;
-pub use unary::{constants, LessThan, Unary, S, Z};
+pub use unary::{LessThan, Unary, S, Z};
 
 pub mod tuple;
 pub mod unary;
@@ -176,8 +176,7 @@ impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 ///
 /// ```
 /// # use static_assertions::assert_type_eq_all;
-/// use dialectic::Select;
-/// use dialectic::unary::types::*;
+/// use dialectic::prelude::*;
 ///
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_0>>::Selected, _0);
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_2>>::Selected, _2);

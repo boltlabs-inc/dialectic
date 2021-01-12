@@ -2,24 +2,24 @@
 //! + Send>`, which are downcast to their true type (inferred from the session type) on the other
 //! end of the channel.
 
-use crate::*;
+use crate::backend::*;
 pub use mpsc::error::SendError;
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
-pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + std::marker::Send + 'a>>;
+pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + Send + 'a>>;
 
 /// A bounded sender for dynamically typed values. See [`tokio::sync::mpsc::Sender`].
-pub type Sender<'a> = mpsc::Sender<Box<dyn Any + std::marker::Send + 'a>>;
+pub type Sender<'a> = mpsc::Sender<Box<dyn Any + Send + 'a>>;
 
 /// An unbounded receiver for dynamically typed values. See
 /// [`tokio::sync::mpsc::UnboundedReceiver`].
-pub type UnboundedReceiver<'a> = mpsc::UnboundedReceiver<Box<dyn Any + std::marker::Send + 'a>>;
+pub type UnboundedReceiver<'a> = mpsc::UnboundedReceiver<Box<dyn Any + Send + 'a>>;
 
 /// An unbounded sender for dynamically typed values. See [`tokio::sync::mpsc::UnboundedSender`].
-pub type UnboundedSender<'a> = mpsc::UnboundedSender<Box<dyn Any + std::marker::Send + 'a>>;
+pub type UnboundedSender<'a> = mpsc::UnboundedSender<Box<dyn Any + Send + 'a>>;
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
@@ -29,8 +29,6 @@ pub type UnboundedSender<'a> = mpsc::UnboundedSender<Box<dyn Any + std::marker::
 /// # Examples
 ///
 /// ```
-/// use dialectic;
-///
 /// let (tx, rx) = dialectic::backend::mpsc::channel(1);
 /// ```
 pub fn channel<'a>(buffer: usize) -> (Sender<'a>, Receiver<'a>) {
@@ -45,8 +43,6 @@ pub fn channel<'a>(buffer: usize) -> (Sender<'a>, Receiver<'a>) {
 /// # Examples
 ///
 /// ```
-/// use dialectic;
-///
 /// let (tx, rx) = dialectic::backend::mpsc::unbounded_channel();
 /// ```
 pub fn unbounded_channel<'a>() -> (UnboundedSender<'a>, UnboundedReceiver<'a>) {
@@ -60,7 +56,7 @@ pub enum Error {
     /// Error during receive.
     Recv(RecvError),
     /// Error during send.
-    Send(Box<dyn Any + marker::Send>),
+    Send(Box<dyn Any + Send>),
 }
 
 impl std::fmt::Display for Error {
@@ -80,7 +76,7 @@ impl From<RecvError> for Error {
     }
 }
 
-impl<T: Any + marker::Send> From<SendError<T>> for Error {
+impl<T: Any + Send> From<SendError<T>> for Error {
     fn from(SendError(err): SendError<T>) -> Self {
         Error::Send(Box::new(err))
     }
@@ -96,22 +92,22 @@ pub enum RecvError {
     /// always resultant from the other end of a channel failing to follow the session type of the
     /// channel.
     #[error("received value was not of desired type")]
-    DowncastFailed(Box<dyn Any + std::marker::Send>),
+    DowncastFailed(Box<dyn Any + Send>),
 }
 
-impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for Sender<'b> {
+impl<'b, T: Send + Any> Transmit<T, Val> for Sender<'b> {
     type Error = SendError<T>;
 
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
     {
         Box::pin(async move {
             Sender::send(self, Box::new(message)).await.map_err(
-                |SendError(message): SendError<Box<dyn Any + std::marker::Send>>| {
+                |SendError(message): SendError<Box<dyn Any + Send>>| {
                     SendError(*message.downcast().unwrap())
                 },
             )
@@ -119,13 +115,12 @@ impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for Sender<'b> {
     }
 }
 
-impl<'a, T: std::marker::Send + Any> Receive<T> for Receiver<'a> {
+impl<'a, T: Send + Any> Receive<T> for Receiver<'a> {
     type Error = RecvError;
 
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async move {
             match Receiver::recv(self).await {
                 None => Err(RecvError::Closed),
@@ -138,19 +133,19 @@ impl<'a, T: std::marker::Send + Any> Receive<T> for Receiver<'a> {
     }
 }
 
-impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for UnboundedSender<'b> {
+impl<'b, T: Send + Any> Transmit<T, Val> for UnboundedSender<'b> {
     type Error = SendError<T>;
 
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
     {
         Box::pin(async move {
             UnboundedSender::send(self, Box::new(message)).map_err(
-                |SendError(message): SendError<Box<dyn Any + std::marker::Send>>| {
+                |SendError(message): SendError<Box<dyn Any + Send>>| {
                     SendError(*message.downcast().unwrap())
                 },
             )
@@ -158,13 +153,12 @@ impl<'b, T: std::marker::Send + Any> Transmit<T, Val> for UnboundedSender<'b> {
     }
 }
 
-impl<'a, T: std::marker::Send + Any> Receive<T> for UnboundedReceiver<'a> {
+impl<'a, T: Send + Any> Receive<T> for UnboundedReceiver<'a> {
     type Error = RecvError;
 
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async move {
             match UnboundedReceiver::recv(self).await {
                 None => Err(RecvError::Closed),

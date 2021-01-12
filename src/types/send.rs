@@ -1,5 +1,6 @@
 use super::sealed::IsSession;
-use super::*;
+use crate::prelude::*;
+use std::marker::PhantomData;
 
 /// Send a message of type `T` using [`send`](crate::CanonicalChan::send), then continue with
 /// protocol `P`.

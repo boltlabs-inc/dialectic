@@ -65,6 +65,7 @@
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
 //! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
+//! | [`Seq<P, Q>`](Seq) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.seq(&#124;c&#124; async move { ... }).await?;</code>](CanonicalChan::seq) | [`Seq<P::Dual, Q::Dual>`](Seq) |
 //! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](CanonicalChan::close) |
 
 #![recursion_limit = "256"]
@@ -76,7 +77,6 @@
 #![warn(unused)]
 #![forbid(broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-use std::sync::Arc;
 use std::{
     marker::{self, PhantomData},
     pin::Pin,
@@ -84,8 +84,23 @@ use std::{
 
 use crate::backend::*;
 use futures::Future;
-use tuple::{List, Tuple};
-pub use types::*;
+
+/// The prelude module for quickly getting started with Dialectic.
+///
+/// This module is designed to be imported as `use dialectic::prelude::*;`, which brings into scope
+/// all the bits and pieces you need to start writing programs with Dialectic.
+pub mod prelude {
+    use super::*;
+    pub use super::{canonical::CanonicalChan, offer, Branches, Chan, SeqError, UnsplitError};
+    pub use backend::{Choice, Receive, Transmit};
+    pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
+    pub use new_session::NewSession;
+    pub use tuple::{List, Tuple};
+    pub use types::unary::constants::*;
+    pub use types::unary::types::*;
+    pub use types::unary::{LessThan, Unary, S, Z};
+    pub use types::*;
+}
 
 pub mod backend;
 pub mod tutorial;
@@ -96,6 +111,8 @@ pub use new_session::NewSession;
 
 pub mod canonical;
 use canonical::CanonicalChan;
+
+use prelude::*;
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
 /// `Rx`.
@@ -125,14 +142,14 @@ pub type Chan<Tx, Rx, P, E = ()> =
 /// # Examples
 ///
 /// ```
-/// use dialectic::*;
-/// use dialectic::constants::*;
+/// use dialectic::prelude::*;
+/// use dialectic::backend::mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
 ///
-/// let (c1, c2) = GiveOrTake::channel(|| backend::mpsc::channel(1));
+/// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
 ///
 /// // Spawn a thread to offer a choice
 /// let t1 = tokio::spawn(async move {
@@ -140,7 +157,7 @@ pub type Chan<Tx, Rx, P, E = ()> =
 ///         _0 => { c2.recv().await?; },
 ///         _1 => { c2.send("Hello!".to_string()).await?; },
 ///     });
-///     Ok::<_, backend::mpsc::Error>(())
+///     Ok::<_, mpsc::Error>(())
 /// });
 ///
 /// // Choose to send an integer
@@ -239,7 +256,7 @@ where
         let tx = self.tx;
         let rx = self.rx;
         if variant == 0 {
-            Ok(unsafe { canonical::CanonicalChan::with_env(tx, rx) })
+            Ok(canonical::CanonicalChan::from_raw_unchecked(tx, rx))
         } else {
             Err(Branches {
                 variant: variant - 1,
@@ -272,23 +289,12 @@ impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E> {
 /// the type of the connection which *is not* present for each part of the split, and [`Available`]
 /// on the type of the connection which *is*.
 #[derive(Debug)]
-pub struct Unavailable<T>(Arc<()>, PhantomData<T>);
-
-impl<T> Clone for Unavailable<T> {
-    fn clone(&self) -> Self {
-        Unavailable(Arc::clone(&self.0), PhantomData)
-    }
-}
+pub struct Unavailable<T>(PhantomData<T>);
 
 impl<T> Unavailable<T> {
     /// Make a new `Unavailable`.
     fn new() -> Self {
-        Unavailable(Arc::new(()), PhantomData)
-    }
-
-    /// Cast an `Unavailable` to a new phantom type.
-    fn cast<S>(self) -> Unavailable<S> {
-        Unavailable(self.0, PhantomData)
+        Unavailable(PhantomData)
     }
 }
 
@@ -365,10 +371,27 @@ where
     E: Environment,
 {
     /// The transmit-only half.
-    pub tx: CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>,
+    tx: CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>,
 
     /// The receive-only half.
-    pub rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
+    rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
+}
+
+impl<Tx, Rx, P, E> UnsplitError<Tx, Rx, P, E>
+where
+    P: Actionable<E, Action = P, Env = E>,
+    E: Environment,
+{
+    /// Extract from this error the transmit-only and receive-only [`Chan`]s which could not be
+    /// [`unsplit_with`](CanonicalChan::unsplit_with) each other.
+    pub fn into_ends(
+        self,
+    ) -> (
+        Chan<Available<Tx>, Unavailable<Rx>, P, E>,
+        Chan<Unavailable<Tx>, Available<Rx>, P, E>,
+    ) {
+        (self.tx, self.rx)
+    }
 }
 
 impl<Tx, Rx, P, E> std::error::Error for UnsplitError<Tx, Rx, P, E>
@@ -387,5 +410,25 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "cannot `Chan::unsplit_with` two unrelated channels")
+    }
+}
+
+/// The error returned when the closure passed to [`seq`](CanonicalChan::seq) returns a different
+/// [`Chan`] than the one it was passed as input. This is illegal and must result in an error,
+/// because otherwise the session for the channel returned by [`seq`](CanonicalChan::seq) would be
+/// potentially invalid, since we don't know the true session type of the channel.
+#[derive(Debug, Copy, Clone)]
+pub struct SeqError {
+    _private: (),
+}
+
+impl std::error::Error for SeqError {}
+
+impl std::fmt::Display for SeqError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "a closure passed to `Chan::seq` returned a different `Chan` than its input"
+        )
     }
 }
