@@ -4,9 +4,12 @@ version = "0.2.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
 license = "MIT"
-description = "Transport-polymorphic, asynchronous, concurrent session types for Rust"
+license-file = "LICENSE"
+description = "Transport-polymorphic, asynchronous session types for Rust"
 repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
 keywords = ["session", "types", "async", "channel", "protocol"]
+categories = ["asynchronous", "concurrency"]
 
 [features]
 default = ["mpsc", "serde"]
