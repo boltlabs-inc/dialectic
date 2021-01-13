@@ -72,7 +72,7 @@
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
-#![warn(missing_docs, missing_doc_code_examples)]
+#![warn(missing_docs)]
 #![warn(missing_copy_implementations, missing_debug_implementations)]
 #![warn(unused_qualifications, unused_results)]
 #![warn(future_incompatible)]
@@ -128,12 +128,71 @@ use prelude::*;
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
 /// `Rx`.
 ///
-/// ⚠️ **Important: always write this type synonym ([`Chan`]) in type signatures, *not️
-/// [`CanonicalChan`] directly*.** This is because the [`Chan`] type synonym canonicalizes its
-/// session type argument, which means it can be used more flexibly.
-///
 /// **[See the documentation for `CanonicalChan` for available methods and trait
 /// implementations.](CanonicalChan)**
+///
+/// **Important: always write this type synonym ([`Chan`]) in type signatures, not️
+/// [`CanonicalChan`] directly.** This is because the [`Chan`] type synonym canonicalizes its
+/// session type argument, which means it can be used more flexibly. The details:
+///
+/// # Technical notes on canonicity: TL;DR: always write `Chan`
+///
+/// In Dialectic, operations are liberally available on [`Chan`]s wherever they make
+/// sense. For instance, it's valid to call [`send`](CanonicalChan::send) on a channel which was
+/// created using the session type `Loop<Send<String>>`, even though the type does not literally
+/// begin with `Send<String>`.
+///
+/// A `CanonicalChan` always has a session type which is syntactically a real action: it will never
+/// be [`Loop`], [`Continue`], or [`Break`] (or, when inside a [`Loop`], it will never be [`Done`]).
+/// Every action available on a [`CanonicalChan`] "fast-forwards" through such control operators,
+/// yielding a [`CanonicalChan`] that corresponds to the next real action available.
+///
+/// While this design means greater flexibility and concision in writing session-typed code, it can
+/// be confusing in the case where you want to explicitly write out the session type of a channel,
+/// because the automatic canonicalization can mean a [`Chan`] does not have the type
+/// you might think it does.
+///
+/// ⚠️ **The problem:** Suppose you wanted to explicitly annotate the type of a new channel:
+///
+/// ```compile_fail
+/// # use dialectic::prelude::*;
+/// # use dialectic::backend::mpsc;
+/// use dialectic::canonical::CanonicalChan;
+///
+/// type P = Loop<Send<String>>;
+/// let (c1, c2): (CanonicalChan<_, _, P, ()>, _) = P::channel(mpsc::unbounded_channel);
+/// ```
+///
+/// This fails to typecheck, returning several errors (abridged for clarity):
+///
+/// ```text
+/// error[E0271]: type mismatch resolving `<Loop<Send<String>> as Actionable>::Action == Loop<Send<String>>`
+///    = note: expected struct `Loop<Send<_>>`
+///               found struct `Send<_>`
+///
+/// error[E0271]: type mismatch resolving `<Loop<Send<String>> as Actionable>::Env == ()`
+///    = note: expected unit type `()`
+///                    found type `(Send<String>, ())`
+/// ```
+///
+/// These errors indicate that the returned [`CanonicalChan`] from `P::channel` *does not* have the
+/// session type `P` and the initial empty environment `E = ()`, as annotated. Instead, it has the
+/// session type and environment corresponding to the *inside* of the `Loop`, which are the
+/// *canonical* session type and environment for `P`.
+///
+/// 💡 **Do this instead:** When annotating the types of channels, prefer the type synonym
+/// [`Chan`], which computes the correct [`CanonicalChan`] type for a given (possibly
+/// non-canonical) session type. Using [`Chan`]instead of [`CanonicalChan`], we can
+/// correctly annotate a newly created channel of any session type:
+///
+/// ```
+/// # use dialectic::prelude::*;
+/// # use dialectic::backend::mpsc;
+/// #
+/// type P = Loop<Send<String>>;
+/// let (c1, c2): (Chan<_, _, P>, Chan<_, _, <P as Session>::Dual>) =
+///     P::channel(mpsc::unbounded_channel);
+/// ```
 pub type Chan<Tx, Rx, P, E = ()> =
     CanonicalChan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>;
 
@@ -315,15 +374,21 @@ pub enum SessionIncomplete<Tx, Rx> {
     /// Both the sending half `Tx` and the receiving half `Rx` did not complete the session
     /// correctly.
     BothHalves {
-        /// The sending half, if it was dropped before the end of the session (otherwise `None`).
+        /// The incomplete sending half: [`Unfinished`](IncompleteHalf::Unfinished) if dropped
+        /// before the end of the session, [`Unclosed`](IncompleteHalf::Unclosed) if not dropped
+        /// after the end of the session.
         tx: IncompleteHalf<Tx>,
-        /// The receiving half, if it was dropped during the session (otherwise `None`).
+        /// The incomplete receiving half: [`Unfinished`](IncompleteHalf::Unfinished) if dropped
+        /// before the end of the session, [`Unclosed`](IncompleteHalf::Unclosed) if not dropped
+        /// after the end of the session.
         rx: IncompleteHalf<Rx>,
     },
     /// Only the sending half `Tx` did not complete the session correctly, but the receiving half
     /// `Rx` did complete it correctly.
     TxHalf {
-        /// The sending half, if it was dropped before the end of the session (otherwise `None`).
+        /// The incomplete sending half: [`Unfinished`](IncompleteHalf::Unfinished) if dropped
+        /// before the end of the session, [`Unclosed`](IncompleteHalf::Unclosed) if not dropped
+        /// after the end of the session.
         tx: IncompleteHalf<Tx>,
         /// The receiving half, whose session was completed.
         #[derivative(Debug = "ignore")]
@@ -335,7 +400,9 @@ pub enum SessionIncomplete<Tx, Rx> {
         /// The sending half, whose session was completed.
         #[derivative(Debug = "ignore")]
         tx: Tx,
-        /// The receiving half, if it was dropped before the end of the session (otherwise `None`).
+        /// The incomplete receiving half: [`Unfinished`](IncompleteHalf::Unfinished) if dropped
+        /// before the end of the session, [`Unclosed`](IncompleteHalf::Unclosed) if not dropped
+        /// after the end of the session.
         rx: IncompleteHalf<Rx>,
     },
 }
