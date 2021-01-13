@@ -793,9 +793,9 @@ where
     /// ```
     ///
     /// For more on context-free session types, see "Context-Free Session Type Inference" by Luca
-    /// Padovani: <https://doi.org/10.1145/3229062>. Note that the [`seq`](CanonicalChan::seq)
-    /// operator is roughly equivalent to the `@=` operator from that paper, and the [`Seq`] type is
-    /// equivalent to the `;` type in that paper.
+    /// Padovani: <https://doi.org/10.1145/3229062>. When comparing with that paper, note that the
+    /// [`seq`](CanonicalChan::seq) operator is roughly equivalent to its `@=` operator, and the
+    /// [`Seq`] type is equivalent to `;`.
     pub async fn seq<T, Err, F, Fut>(
         mut self,
         first: F,
