@@ -111,6 +111,11 @@ where
 impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static> CanonicalChan<Tx, Rx, Done, ()> {
     /// Close a finished session, dropping the underlying connections.
     ///
+    /// If called inside a future given to [`split`](CanonicalChan::split) or
+    /// [`seq`](CanonicalChan::seq), the underlying connections are implicitly recovered for use in
+    /// subsequent actions in the session, or if called in a future given to in
+    /// [`over`](NewSession::over), are returned to the caller.
+    ///
     /// # Examples
     ///
     /// Starting with a channel whose session type is already `Done`, we can immediately close the
@@ -129,8 +134,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static> CanonicalChan<Tx, R
     /// ```
     ///
     /// However, if the channel's session type is *not* `Done`, it is a type error to attempt to
-    /// close the channel and retrieve its underlying sender and receiver. The following code **will
-    /// not compile**:
+    /// close the channel. The following code will not compile:
     ///
     /// ```compile_fail
     /// use dialectic::prelude::*;
@@ -1014,13 +1018,8 @@ where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
-    /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
-    /// discriminant for this set of protocol choices was out of range.
-    ///
-    /// This function is only callable on empty [`Branches`], which under ordinary circumstances
-    /// means it proves the unreachability of its calling location. However, if the other end of the
-    /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
-    /// will then signal an error.
+    /// Eliminate an empty [`Branches`], returning any type. Any code in which this function can be
+    /// called is unreachable, because it's impossible to construct an empty [`Branches`].
     pub fn empty_case<T>(self) -> T {
         unreachable!("empty `Branches` cannot be constructed")
     }

@@ -3,7 +3,7 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
-/// Sequence two sessions together, analogous to `;` in Rust.
+/// Sequence two sessions `P` and `Q` together using [`seq`](CanonicalChan::seq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Seq<P, Q = Done>(pub P, pub Q);
 
