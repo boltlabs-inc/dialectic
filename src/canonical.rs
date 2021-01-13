@@ -733,7 +733,7 @@ where
     ///     mut chan: mpsc::Chan<Stack<T>>,
     /// ) -> Pin<Box<dyn Future<Output = Result<(), mpsc::Error>> + marker::Send>>
     /// where
-    ///     T: marker::Send + Debug + 'static,
+    ///     T: marker::Send + 'static,
     /// {
     ///     Box::pin(async move {
     ///         loop {
@@ -759,7 +759,7 @@ where
     ///     mut iter: impl Iterator<Item = T> + marker::Send + 'static,
     /// ) -> Pin<Box<dyn Future<Output = Result<Vec<T>, mpsc::Error>> + marker::Send>>
     /// where
-    ///     T: marker::Send + Debug + 'static,
+    ///     T: marker::Send + 'static,
     /// {
     ///     Box::pin(async move {
     ///         if let Some(t) = iter.next() {

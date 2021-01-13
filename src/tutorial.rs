@@ -435,14 +435,14 @@
 //! is valid for that `Chan`.
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
-//! on a session type is. For [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the final
-//! session type discussed below), and [`Done`], the "real action" is that session type itself.
-//! However, for [`Loop`], [`Break`], and [`Continue`], the next action is whatever follows entering
-//! the loop(s) or recurring, respectively.
+//! on a session type is. For most session types, the "real action" is that session type itself.
+//! However, for only [`Loop`], [`Break`], and [`Continue`], the next action is whatever follows
+//! entering the loop(s) or recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
-//! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,
-//! because that might help you understand an error message more thoroughly in the future!
+//! most of the traits in [`types`](crate::types) aside from [`Session`]. It's good to know what
+//! it's for, though, because that might help you understand an error message more thoroughly in the
+//! future!
 //!
 //! # Splitting off
 //!
@@ -541,7 +541,112 @@
 //! - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
 //! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
 //! - It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
-//!   before the future completes.
+//!   before the future completes. This is subject to the same behavior as in
+//!   [`seq`](CanonicalChan::seq), described below. [See here for more
+//!   explanation](#errors-in-subroutines-what-not-to-do).
+//!
+//! # Sequencing and Modularity
+//!
+//! The final session type provided by Dialectic is the [`Seq`] type, which permits a more modular
+//! way of constructing session types and their implementations. At first, you will likely not need
+//! to use [`Seq`]; however, as you build larger programs, it makes it a lot easier to split them up
+//! into smaller, independent specifications and components.
+//!
+//! So, what does it do? A session type `Seq<P, Q>` means "run the session `P`, then run the session
+//! `Q`". You can think of it like the `;` in Rust, which concatenates separate statements. In
+//! smaller protocols, you don't need to use [`Seq`] to sequence operations, because all the session
+//! type primitives (with the exception of [`Split`]) take arguments indicating "what to do next":
+//! we don't need to write `Seq<Send<String>, Recv<String>>`, because `Send<String, Recv<String>>`
+//! works just as well.
+//!
+//! [`Seq`] becomes useful however when you already have a subroutine that implements *part of* a
+//! session, and you'd like to use it in a larger context. Imagine, for example, that you had
+//! already written the following:
+//!
+//! ```
+//! # use dialectic::prelude::*;
+//! # use dialectic::backend::mpsc;
+//! type Query = Send<String, Recv<String, Done>>;
+//!
+//! async fn query<E: Environment>(
+//!     question: String,
+//!     chan: mpsc::Chan<Query, E>
+//! ) -> Result<String, mpsc::Error> {
+//!     let chan = chan.send(question).await?;
+//!     let (answer, chan) = chan.recv().await?;
+//!     chan.close();
+//!     Ok(answer)
+//! }
+//! ```
+//!
+//! Then, at some later point in time, you might realize you need to implement a protocol that makes
+//! several calls to `Query` in a loop. Unfortunately, the type of `Query` ends with [`Done`], and
+//! its implementation `query` (correctly) closes the [`Chan`] at the end. Without
+//! [`seq`](CanonicalChan::seq), you would have to modify both the type `Query` and the function
+//! `query`, just to let them be called from a larger context.
+//!
+//! Instead of re-writing both the specification and the implementation, we can use [`Seq`] to
+//! integrate `query` as a subroutine in a larger protocol, without changing its type or definition.
+//! All we need to do is use the [`seq`](CanonicalChan::seq) method to call it as a subroutine on
+//! the channel.
+//!
+//! ```
+//! # use dialectic::prelude::*;
+//! # use dialectic::backend::mpsc;
+//! # type Query = Send<String, Recv<String, Done>>;
+//! #
+//! # async fn query<E: Environment>(
+//! #     question: String,
+//! #     chan: mpsc::Chan<Query, E>
+//! # ) -> Result<String, mpsc::Error> {
+//! #     let chan = chan.send(question).await?;
+//! #     let (answer, chan) = chan.recv().await?;
+//! #     chan.close();
+//! #     Ok(answer)
+//! # }
+//! #
+//! type MultiQuery = Loop<Choose<(Break, Seq<Query, Continue>)>>;
+//!
+//! async fn query_all(
+//!     mut questions: Vec<String>,
+//!     mut chan: mpsc::Chan<MultiQuery>
+//! ) -> Result<Vec<String>, mpsc::Error> {
+//!   // Result<Vec<String, mpsc::Error> {
+//!     let mut answers = Vec::with_capacity(questions.len());
+//!     for question in questions.into_iter() {
+//!         let (answer, c) =
+//!             chan.choose(_1).await?
+//!                 .seq(|c| query(question, c)).await?;  // Call `query` as a subroutine
+//!         chan = c.unwrap();
+//!         answers.push(answer);
+//!     }
+//!     chan.choose(_0).await?.close();
+//!     Ok(answers)
+//! }
+//! ```
+//!
+//! Furthermore, [`seq`](CanonicalChan::seq) can be used to implement **context free session
+//! types**, where the sub-protocol in the first half `P` of `Seq<P, Q>` uses [`Continue`] to recur
+//! back outside the [`Seq`] itself. This allows you to define recursive protocols that can be
+//! shaped like any arbitrary tree. For more details and an example, see the documentation for
+//! [`seq`](CanonicalChan::seq).
+//!
+//! ## Errors in subroutines (what not to do)
+//!
+//! In order for the [`seq`](CanonicalChan::seq) method to preserve the validity of the session type
+//! `Seq<P, Q>`, we need to make sure that the subroutine executing `P` **finishes** the session `P`
+//! by driving the channel to the `Done` session type. If we didn't check this, it would be possible
+//! to drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol.
+//! The [`seq`](CanonicalChan::seq) method solves this problem by returning a pair of the
+//! subroutines's return value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed
+//! successfully, or a [`SessionIncomplete`] error if not. It's almost always a programmer error if
+//! you get a [`SessionIncomplete`] error, so it's usually the right idea to
+//! [`unwrap`](Result::unwrap) it and proceed without further fanfare.
+//!
+//! 💡 **A useful pattern:** If you make sure to *always* call [`close`](CanonicalChan::close) on
+//! the channel before the subroutine's future returns, you can be guaranteed that such errors are
+//! impossible, because [`close`](CanonicalChan::close) can only be called when a channel's session
+//! is complete.
 //!
 //! # Wrapping up
 //!
@@ -550,13 +655,13 @@
 //! You might now want to...
 //!
 //! - Check out the documentation for **[`Chan`]**, if you haven't already?
-//! - Learn how to instantiate (or implement) a **[`backend`]** other than the
-//!   **[`mpsc`](backend::mpsc)** backend we used in the tutorial above?
+//! - Learn how to instantiate (or implement) a **[`backend`](crate::backend)** other than the
+//!   **[`mpsc`](crate::backend::mpsc)** backend we used in the tutorial above?
 //! - Jump back to the top of **[reference documentation](crate#quick-reference)**?
 //!
 //! Thanks for following along, and enjoy!
 
 // Import the whole crate so the docs above can link appropriately.
 #![allow(unused_imports)]
-use crate::*;
+use crate::prelude::*;
 use static_assertions;
