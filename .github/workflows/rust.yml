@@ -26,3 +26,5 @@ jobs:
       run: cargo build --all-features --verbose --examples
     - name: Build documentation
       run: cargo doc --all-features --verbose
+    - name: Build documentation in docs.rs mode
+      run: RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
