@@ -638,7 +638,7 @@
 //! by driving the channel to the `Done` session type. If we didn't check this, it would be possible
 //! to drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol.
 //! The [`seq`](CanonicalChan::seq) method solves this problem by returning a pair of the
-//! subroutines's return value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed
+//! subroutine's return value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed
 //! successfully, or a [`SessionIncomplete`] error if not. It's almost always a programmer error if
 //! you get a [`SessionIncomplete`] error, so it's usually the right idea to
 //! [`unwrap`](Result::unwrap) it and proceed without further fanfare.
