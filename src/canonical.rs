@@ -708,6 +708,94 @@ where
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// ## An advanced example: context-free sessions
+    ///
+    /// More generally, [`Seq`] allows for arbitrary **context-free session types**, by permitting
+    /// multiple [`Continue`]s to be sequenced together. In the following example, we define and
+    /// implement a session type for valid operations on a stack: that is, the session type
+    /// *statically* prevents programs that would attempt to pop from an empty stack. This session
+    /// type would not be expressible without [`Seq`], because it requires a point of recursion that
+    /// is not at the end of a session type.
+    ///
+    /// ```
+    /// # use dialectic::prelude::*;
+    /// # use dialectic::backend::mpsc;
+    /// use std::{marker, error::Error, fmt::Debug, future::Future, pin::Pin, any::Any};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn Error>> {
+    /// type Stack<T> =
+    ///     Loop<Offer<(Break, Recv<T, Seq<Continue, Send<T, Continue>>>)>>;
+    ///
+    /// // A server over the `mpsc` backend for the `Stack<T>` protocol
+    /// fn stack<T>(
+    ///     mut chan: mpsc::Chan<Stack<T>>,
+    /// ) -> Pin<Box<dyn Future<Output = Result<(), mpsc::Error>> + marker::Send>>
+    /// where
+    ///     T: marker::Send + Debug + 'static,
+    /// {
+    ///     Box::pin(async move {
+    ///         loop {
+    ///             chan = offer!(chan => {
+    ///                 // Client doesn't want to push a value
+    ///                 _0 => break chan.close(),
+    ///                 // Client wants to push a value
+    ///                 _1 => {
+    ///                     let (t, chan) = chan.recv().await?;       // Receive pushed value
+    ///                     let ((), chan) = chan.seq(stack).await?;  // Recursively do `Stack<T>`
+    ///                     chan.unwrap().send(t).await?              // Send back that pushed value
+    ///                 },
+    ///             })
+    ///         }
+    ///         Ok(())
+    ///     })
+    /// }
+    ///
+    /// // A client over the `mpsc` backend for the `Stack<T>` protocol, which uses the
+    /// // server's stack to reverse a given iterator
+    /// fn reverse_with_stack<T>(
+    ///     mut chan: mpsc::Chan<<Stack<T> as Session>::Dual>,
+    ///     mut iter: impl Iterator<Item = T> + marker::Send + 'static,
+    /// ) -> Pin<Box<dyn Future<Output = Result<Vec<T>, mpsc::Error>> + marker::Send>>
+    /// where
+    ///     T: marker::Send + Debug + 'static,
+    /// {
+    ///     Box::pin(async move {
+    ///         if let Some(t) = iter.next() {
+    ///             // If there is a value left in the iterator...
+    ///             let (mut reversed, chan) =
+    ///                 chan.choose(_1).await?  // Choose to push a value
+    ///                     .send(t).await?     // Push the value
+    ///                     // Recursively push the rest of the iterator
+    ///                     .seq(|chan| reverse_with_stack(chan, iter)).await?;
+    ///             let (t, chan) = chan.unwrap().recv().await?;  // Pop a value
+    ///             reversed.push(t);                             // Add it to the reversed `Vec`
+    ///             chan.choose(_0).await?.close();               // Choose to complete the session
+    ///             Ok(reversed)
+    ///         } else {
+    ///             // If there are no values left in the iterator...
+    ///             chan.choose(_0).await?.close();  // Choose to complete the session
+    ///             Ok(vec![])
+    ///         }
+    ///     })
+    /// }
+    ///
+    /// // Using the server and client above, let's reverse a list!
+    /// let (server_chan, client_chan) = <Stack<usize>>::channel(|| mpsc::channel(1));
+    /// let server_thread = tokio::spawn(stack(server_chan));
+    /// let input = vec![1, 2, 3, 4, 5].into_iter();
+    /// let result = reverse_with_stack(client_chan, input).await?;
+    /// assert_eq!(result, vec![5, 4, 3, 2, 1]);
+    /// server_thread.await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// For more on context-free session types, see "Context-Free Session Type Inference" by Luca
+    /// Padovani: <https://doi.org/10.1145/3229062>. Note that the [`seq`](CanonicalChan::seq)
+    /// operator is roughly equivalent to the `@=` operator from that paper, and the [`Seq`] type is
+    /// equivalent to the `;` type in that paper.
     pub async fn seq<T, Err, F, Fut>(
         mut self,
         first: F,
