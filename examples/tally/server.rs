@@ -16,8 +16,8 @@ use tokio::net::{
 use tokio_util::codec::LengthDelimitedCodec;
 
 // The server's API:
-pub type Server = Loop<Offer<(Recv<Operation, Seq<Tally>>, Break)>>;
-pub type Tally = Loop<Offer<(Recv<i64, Continue>, Send<i64, Break>)>>;
+pub type Server = Loop<Offer<(Recv<Operation, Seq<Tally, Continue>>, Break)>>;
+pub type Tally = Loop<Offer<(Recv<i64, Continue>, Send<i64, Done>)>>;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde_crate")] // we only need this because we renamed serde in Cargo.toml
@@ -170,7 +170,6 @@ where
     Err: From<<Tx as Transmit<i64, Ref>>::Error>
         + From<<Rx as Receive<i64>>::Error>
         + From<<Rx as Receive<Choice<_2>>>::Error>,
-    Break: Actionable<<Tally as Actionable<E>>::Env, Action = Done, Env = ()>,
 {
     let mut tally = op.unit();
     loop {

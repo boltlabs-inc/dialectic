@@ -17,18 +17,18 @@ impl<N: Unary + Any> Session for Continue<N> {
 
 impl<N: Unary + Any, M: Unary + Any> Scoped<M> for Continue<N> where N: LessThan<M> {}
 
-impl<E, K, P, Rest, N: Unary> Actionable<E> for Continue<N>
+impl<E, P, Rest, N: Unary> Actionable<E> for Continue<N>
 where
-    E: Select<N, Selected = (K, P), Remainder = Rest> + Environment,
+    E: Select<N, Selected = P, Remainder = Rest> + Environment,
     Continue<N>: Scoped<E::Depth>,
-    P: Actionable<((K, P), Rest)>,
+    P: Actionable<(P, Rest)>,
     P: Scoped<S<<Rest as Environment>::Depth>>,
     P::Dual: Scoped<S<Rest::Depth>>,
-    ((K, P), Rest): Environment,
+    (P, Rest): Environment,
     Rest: Environment,
 {
-    type Action = <P as Actionable<((K, P), Rest)>>::Action;
-    type Env = <P as Actionable<((K, P), Rest)>>::Env;
+    type Action = <P as Actionable<(P, Rest)>>::Action;
+    type Env = <P as Actionable<(P, Rest)>>::Env;
 }
 
 #[cfg(test)]
