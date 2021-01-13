@@ -61,7 +61,7 @@
 //! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](CanonicalChan::recv) | [`Send<T, P::Dual>`](Send) |
 //! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](CanonicalChan::choose) | [`Offer<Choices::Dual>`](Offer) |
 //! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Dual>`](Choose) |
-//! | [`Split<P, Q>`](Split) | Returns a pair of a [`Send`]/[`Choose`]-only and a [`Recv`]/[`Offer`]-only `tx` and `rx`, respectively (can be used concurrently):<br>[`let (tx, rx) = c.split();`](CanonicalChan::split)<br>When their types match again, given the two ends, returns a unified `c` with all capabilities:<br>[`let c = tx.unsplit_with(rx)?;`](CanonicalChan::unsplit_with) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Split<P, Q>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `Done`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](CanonicalChan::split) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
 //! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
@@ -82,6 +82,9 @@ use std::{
     pin::Pin,
 };
 
+#[macro_use]
+extern crate derivative;
+
 use crate::backend::*;
 use futures::Future;
 
@@ -90,16 +93,21 @@ use futures::Future;
 /// This module is designed to be imported as `use dialectic::prelude::*;`, which brings into scope
 /// all the bits and pieces you need to start writing programs with Dialectic.
 pub mod prelude {
-    use super::*;
-    pub use super::{canonical::CanonicalChan, offer, Branches, Chan, SeqError, UnsplitError};
-    pub use backend::{Choice, Receive, Transmit};
+    #[doc(no_inline)]
+    pub use crate::backend::{Choice, Receive, Transmit};
+    #[doc(no_inline)]
+    pub use crate::new_session::NewSession;
+    pub use crate::tuple::{List, Tuple};
+    pub use crate::types::unary::constants::*;
+    pub use crate::types::unary::types::*;
+    pub use crate::types::unary::{LessThan, Unary, S, Z};
+    pub use crate::types::*;
+    pub use crate::{
+        canonical::{Branches, CanonicalChan},
+        offer, Chan, IncompleteHalf, SessionIncomplete,
+    };
+    #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
-    pub use new_session::NewSession;
-    pub use tuple::{List, Tuple};
-    pub use types::unary::constants::*;
-    pub use types::unary::types::*;
-    pub use types::unary::{LessThan, Unary, S, Z};
-    pub use types::*;
 }
 
 pub mod backend;
@@ -110,7 +118,8 @@ mod new_session;
 pub use new_session::NewSession;
 
 pub mod canonical;
-use canonical::CanonicalChan;
+#[doc(inline)]
+pub use canonical::Branches;
 
 use prelude::*;
 
@@ -212,76 +221,6 @@ macro_rules! offer {
     );
 }
 
-/// The result of [`offer`](CanonicalChan::offer): an enumeration of the possible new channel states
-/// that could result from the offering of the tuple of protocols `Choices`.
-///
-/// To find out which protocol was selected by the other party, use [`Branches::case`], or better
-/// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
-///
-/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
-/// [`case`](Branches::case).**
-#[derive(Debug)]
-#[must_use]
-pub struct Branches<Tx, Rx, Choices, E = ()>
-where
-    Choices: Tuple,
-    Choices::AsList: EachActionable<E>,
-    E: Environment,
-{
-    variant: u8,
-    tx: Tx,
-    rx: Rx,
-    protocols: PhantomData<Choices>,
-    environment: PhantomData<E>,
-}
-
-impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
-where
-    Choices: Tuple<AsList = (P, Ps)>,
-    (P, Ps): List<AsTuple = Choices>,
-    P: Actionable<E>,
-    Ps: EachActionable<E> + List,
-    E: Environment,
-{
-    /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
-    /// channel; otherwise, return all the other possibilities.
-    #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(
-        self,
-    ) -> Result<
-        Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
-        Branches<Tx, Rx, Ps::AsTuple, E>,
-    > {
-        let variant = self.variant;
-        let tx = self.tx;
-        let rx = self.rx;
-        if variant == 0 {
-            Ok(canonical::CanonicalChan::from_raw_unchecked(tx, rx))
-        } else {
-            Err(Branches {
-                variant: variant - 1,
-                tx,
-                rx,
-                protocols: PhantomData,
-                environment: PhantomData,
-            })
-        }
-    }
-}
-
-impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E> {
-    /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
-    /// discriminant for this set of protocol choices was out of range.
-    ///
-    /// This function is only callable on empty [`Branches`], which under ordinary circumstances
-    /// means it proves the unreachability of its calling location. However, if the other end of the
-    /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
-    /// will then signal an error.
-    pub fn empty_case<T>(self) -> T {
-        unreachable!("empty `Branches` cannot be constructed")
-    }
-}
-
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
 /// When using [`split`](CanonicalChan::split), the resultant two channels can only send or only
@@ -361,74 +300,116 @@ where
     }
 }
 
-/// The error returned when two split channel parts cannot be
-/// [`unsplit_with`](CanonicalChan::unsplit_with) each other because they originated from
-/// different channels.
-#[derive(Debug)]
-pub struct UnsplitError<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
-{
-    /// The transmit-only half.
-    tx: CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>,
-
-    /// The receive-only half.
-    rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
+/// The error returned when a closure which is expected to complete a channel's session fails to
+/// finish the session of the channel it is given.
+///
+/// This error can arise either if the channel is dropped *before* its session is completed, or if
+/// it is stored somewhere and is dropped *after* the closure's future is finished. The best way to
+/// ensure this error does not occur is to call [`close`](CanonicalChan::close) on the channel,
+/// which statically ensures it is dropped exactly when the session is complete.
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
+pub enum SessionIncomplete<Tx, Rx> {
+    /// Both the sending half `Tx` and the receiving half `Rx` did not complete the session
+    /// correctly.
+    BothHalves {
+        /// The sending half, if it was dropped before the end of the session (otherwise `None`).
+        tx: IncompleteHalf<Tx>,
+        /// The receiving half, if it was dropped during the session (otherwise `None`).
+        rx: IncompleteHalf<Rx>,
+    },
+    /// Only the sending half `Tx` did not complete the session correctly, but the receiving half
+    /// `Rx` did complete it correctly.
+    TxHalf {
+        /// The sending half, if it was dropped before the end of the session (otherwise `None`).
+        tx: IncompleteHalf<Tx>,
+        /// The receiving half, whose session was completed.
+        #[derivative(Debug = "ignore")]
+        rx: Rx,
+    },
+    /// Only the receiving half `Rx` did not complete the session correctly, but the sending half
+    /// `Tx` did complete it correctly.
+    RxHalf {
+        /// The sending half, whose session was completed.
+        #[derivative(Debug = "ignore")]
+        tx: Tx,
+        /// The receiving half, if it was dropped before the end of the session (otherwise `None`).
+        rx: IncompleteHalf<Rx>,
+    },
 }
 
-impl<Tx, Rx, P, E> UnsplitError<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
-{
-    /// Extract from this error the transmit-only and receive-only [`Chan`]s which could not be
-    /// [`unsplit_with`](CanonicalChan::unsplit_with) each other.
-    pub fn into_ends(
-        self,
-    ) -> (
-        Chan<Available<Tx>, Unavailable<Rx>, P, E>,
-        Chan<Unavailable<Tx>, Available<Rx>, P, E>,
-    ) {
-        (self.tx, self.rx)
-    }
+/// A representation of what has gone wrong when a connection half `Tx` or `Rx` is incomplete.
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
+pub enum IncompleteHalf<T> {
+    /// The underlying channel was dropped before the session was `Done`.
+    Unfinished(#[derivative(Debug = "ignore")] T),
+    /// The underlying channel was not dropped or [`close`](CanonicalChan::close)d after the session
+    /// was `Done`.
+    Unclosed,
 }
 
-impl<Tx, Rx, P, E> std::error::Error for UnsplitError<Tx, Rx, P, E>
-where
-    Tx: std::fmt::Debug,
-    Rx: std::fmt::Debug,
-    P: Actionable<E, Action = P, Env = E> + std::fmt::Debug,
-    E: Environment + std::fmt::Debug,
-{
-}
+impl<T> std::error::Error for IncompleteHalf<T> {}
 
-impl<Tx, Rx, P, E> std::fmt::Display for UnsplitError<Tx, Rx, P, E>
-where
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
-{
+impl<T> std::fmt::Display for IncompleteHalf<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "cannot `Chan::unsplit_with` two unrelated channels")
-    }
-}
-
-/// The error returned when the closure passed to [`seq`](CanonicalChan::seq) returns a different
-/// [`Chan`] than the one it was passed as input. This is illegal and must result in an error,
-/// because otherwise the session for the channel returned by [`seq`](CanonicalChan::seq) would be
-/// potentially invalid, since we don't know the true session type of the channel.
-#[derive(Debug, Copy, Clone)]
-pub struct SeqError {
-    _private: (),
-}
-
-impl std::error::Error for SeqError {}
-
-impl std::fmt::Display for SeqError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "incomplete session or sub-session: channel half ")?;
         write!(
             f,
-            "a closure passed to `Chan::seq` returned a different `Chan` than its input"
+            "{}",
+            match self {
+                IncompleteHalf::Unfinished(_) => "was dropped before the session was `Done`",
+                IncompleteHalf::Unclosed => "was not closed after the session was `Done`",
+            }
         )
+    }
+}
+
+impl<Tx, Rx> SessionIncomplete<Tx, Rx> {
+    /// Extract the send and receive halves `Tx` and `Rx`, if they are present, from this
+    /// `SessionIncomplete` error.
+    pub fn into_halves(
+        self,
+    ) -> (
+        Result<Tx, IncompleteHalf<Tx>>,
+        Result<Rx, IncompleteHalf<Rx>>,
+    ) {
+        match self {
+            SessionIncomplete::BothHalves { tx, rx } => (Err(tx), Err(rx)),
+            SessionIncomplete::TxHalf { tx, rx } => (Err(tx), Ok(rx)),
+            SessionIncomplete::RxHalf { tx, rx } => (Ok(tx), Err(rx)),
+        }
+    }
+}
+
+impl<Tx, Rx> std::error::Error for SessionIncomplete<Tx, Rx> {}
+
+impl<Tx, Rx> std::fmt::Display for SessionIncomplete<Tx, Rx> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use IncompleteHalf::*;
+        write!(f, "incomplete session or sub-session: channel")?;
+        let reason = match self {
+            SessionIncomplete::BothHalves { tx, rx } => match (tx, rx) {
+                (Unclosed, Unclosed) => " was not closed after the session was `Done`",
+                (Unclosed, Unfinished(_)) => {
+                    "'s sending half was not closed after the session was `Done` \
+                    and its receiving half was dropped before the session was `Done`"
+                }
+                (Unfinished(_), Unclosed) => {
+                    "'s sending half was dropped before the session was `Done` \
+                    and its receiving half was not closed after the session was `Done`"
+                }
+                (Unfinished(_), Unfinished(_)) => " was dropped before the session was `Done`",
+            },
+            SessionIncomplete::TxHalf { tx, .. } => match tx {
+                Unfinished(_) => "'s sending half was dropped before the session was `Done`",
+                Unclosed => "'s sending half was not closed after the session was `Done`",
+            },
+            SessionIncomplete::RxHalf { rx, .. } => match rx {
+                Unfinished(_) => "'s receiving half was dropped before the session was `Done`",
+                Unclosed => "'s receiving half was not closed after the session was `Done`",
+            },
+        };
+        write!(f, "{}", reason)
     }
 }

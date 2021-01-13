@@ -1,6 +1,6 @@
 use futures::Future;
 use std::{
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     str::FromStr,
 };
 use thiserror::Error;
@@ -137,7 +137,9 @@ where
     }
 }
 
-async fn serve<Tx, Rx, Err>(mut chan: Chan<Tx, Rx, Server>) -> Result<Chan<Tx, Rx, Done>, Err>
+async fn serve<'a, Tx: std::marker::Send, Rx: std::marker::Send, Err>(
+    mut chan: Chan<Tx, Rx, Server>,
+) -> Result<Chan<Tx, Rx, Done>, Err>
 where
     Rx: Receive<Operation> + Receive<i64> + Receive<Choice<_2>>,
     Tx: Transmit<i64, Ref>,
@@ -151,7 +153,7 @@ where
             // Client wants to compute another tally
             _0 => {
                 let (op, chan) = chan.recv().await?;
-                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1.unwrap()
+                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1.expect("tally finishes session")
             },
             // Client wants to quit
             _1 => break chan,
@@ -160,14 +162,11 @@ where
     Ok(chan)
 }
 
-async fn tally<Tx, Rx, E, Err>(
-    op: &Operation,
-    mut chan: Chan<Tx, Rx, Tally, E>,
-) -> Result<((), Chan<Tx, Rx, Done>), Err>
+async fn tally<Tx, Rx, E, Err>(op: &Operation, mut chan: Chan<Tx, Rx, Tally, E>) -> Result<(), Err>
 where
     E: Environment,
-    Rx: Receive<i64> + Receive<Choice<_2>>,
-    Tx: Transmit<i64, Ref>,
+    Rx: Receive<i64> + Receive<Choice<_2>> + std::marker::Send + 'static,
+    Tx: Transmit<i64, Ref> + std::marker::Send + 'static,
     Err: From<<Tx as Transmit<i64, Ref>>::Error>
         + From<<Rx as Receive<i64>>::Error>
         + From<<Rx as Receive<Choice<_2>>>::Error>,
@@ -183,7 +182,10 @@ where
                 chan
             },
             // Client wants to finish this tally
-            _1 => break Ok(((), chan.send(&tally).await?)),
+            _1 => {
+                chan.send(&tally).await?.close();
+                break Ok(());
+            }
         })
     }
 }

@@ -30,6 +30,10 @@
 //! assert_type_eq_all!(<Send<String, Done> as Session>::Dual, Recv<String, Done>);
 //! ```
 //!
+//! (Here and elsewhere in this tutorial, we use the
+//! [`assert_type_eq_all!`](static_assertions::assert_type_eq_all) macro from the
+//! [`static_assertions`] crate to assert that Rust sees these types as equal.)
+//!
 //! Because many sessions end with either a `Send` or a `Recv`, their types can be abbreviated when
 //! the rest of the session is `Done`:
 //!
@@ -489,61 +493,62 @@
 //! Notice that `P` and `Q` switch places! This is because the left-hand `P` is always the send-only
 //! session, and the right-hand `Q` is always the receive-only session.
 //!
-//! Now, let's use a channel of this session type to enact a concurrent swap:
+//! Now, let's use a channel of this session type to enact a concurrent swap of a `String` and a
+//! `Vec<usize>`:
 //!
 //! ```
-//! # use dialectic::prelude::*;
-//! # use dialectic::backend::mpsc;
+//! use dialectic::prelude::*;
+//! use dialectic::backend::mpsc;
+//!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # type SwapVecString = Split<Send<Vec<usize>>, Recv<String>>;
-//! let (c1, c2) = SwapVecString::channel(|| mpsc::channel(1));
+//! type SendAndRecv = Split<Send<Vec<usize>>, Recv<String>>;
+//!
+//! let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
 //!
 //! // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
 //! let t1 = tokio::spawn(async move {
-//!     // Split c1 into a send-only `tx` and receive-only `rx`
-//!     let (tx, rx) = c1.split();
-//!
-//!     // Concurrently send and receive
-//!     let send_vec = tokio::spawn(async move {
-//!         let tx = tx.send(vec![1, 2, 3, 4, 5]).await?;
-//!         Ok::<_, mpsc::Error>(tx)
-//!     });
-//!     let recv_string = tokio::spawn(async move {
-//!         let (string, rx) = rx.recv().await?;
-//!         Ok::<_, mpsc::Error>((string, rx))
-//!     });
-//!     let tx = send_vec.await.unwrap()?;
-//!     let (string, rx) = recv_string.await.unwrap()?;
-//!
-//!     // Unsplit the ends of `c1`
-//!     let c1 = tx.unsplit_with(rx).unwrap();
-//!
-//!     Ok::<_, mpsc::Error>(string)
+//!     c1.split(|tx, rx| async move {
+//!         // In one thread we send the `Vec`...
+//!         let send_vec = tokio::spawn(async move {
+//!             tx.send(vec![1, 2, 3, 4, 5]).await?;
+//!             Ok::<_, mpsc::Error>(())
+//!         });
+//!         // In another thread we receive the `String`...
+//!         let recv_string = tokio::spawn(async move {
+//!             let (string, _) = rx.recv().await?;
+//!             Ok::<_, mpsc::Error>(string)
+//!         });
+//!         send_vec.await.unwrap()?;
+//!         let string = recv_string.await.unwrap()?;
+//!         Ok::<_, mpsc::Error>(string)
+//!     }).await
 //! });
 //!
 //! // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
 //! // the task above:
-//! let (tx, rx) = c2.split();
-//! let send_string = tokio::spawn(async move {
-//!     let tx = tx.send("Hello!".to_string()).await?;
-//!     Ok::<_, mpsc::Error>(tx)
-//! });
-//! let recv_vec = tokio::spawn(async move {
-//!     let (vec, rx) = rx.recv().await?;
-//!     Ok::<_, mpsc::Error>((vec, rx))
-//! });
+//! c2.split(|tx, rx| async move {
+//!     // In one thread we send the `String`...
+//!     let send_string = tokio::spawn(async move {
+//!         tx.send("Hello!".to_string()).await?;
+//!         Ok::<_, mpsc::Error>(())
+//!     });
+//!     // In another thread we receive the `Vec`...
+//!     let recv_vec = tokio::spawn(async move {
+//!         let (vec, _) = rx.recv().await?;
+//!         Ok::<_, mpsc::Error>(vec)
+//!     });
 //!
-//! // Wait for the threads to finish
-//! let tx = send_string.await??;
-//! let (vec, rx) = recv_vec.await??;
-//! let string = t1.await??;
+//!     // Examine the result values:
+//!     send_string.await??;
+//!     let vec = recv_vec.await??;
+//!     let string = t1.await??.0;
+//!     assert_eq!(vec, &[1, 2, 3, 4, 5]);
+//!     assert_eq!(string, "Hello!");
 //!
-//! // Unsplit the ends of `c2`
-//! let c2 = tx.unsplit_with(rx).unwrap();
-//!
-//! assert_eq!(vec, &[1, 2, 3, 4, 5]);
-//! assert_eq!(string, "Hello!");
+//!     Ok::<_, Box<dyn std::error::Error>>(())
+//! }).await?;
+//! #
 //! # Ok(())
 //! # }
 //! ```
@@ -552,11 +557,8 @@
 //!
 //! - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
 //! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
-//! - You can [`unsplit_with`](CanonicalChan::unsplit_with) the two ends again only once their
-//!   session types match each other.
-//! - It's a runtime [`UnsplitError`] to attempt to [`unsplit_with`](CanonicalChan::unsplit_with)
-//!   two [`Chan`]s which did not originate from the same call to [`split`](CanonicalChan::split),
-//!   even if their types match.
+//! - It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
+//!   before the future completes.
 //!
 //! # Wrapping up
 //!
@@ -574,3 +576,4 @@
 // Import the whole crate so the docs above can link appropriately.
 #![allow(unused_imports)]
 use crate::*;
+use static_assertions;

@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use super::sealed::IsSession;
 use super::*;
 
@@ -7,13 +9,13 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Continue<N: Unary = Z>(pub N);
 
-impl<N: Unary> IsSession for Continue<N> {}
+impl<N: Unary + Any> IsSession for Continue<N> {}
 
-impl<N: Unary> Session for Continue<N> {
+impl<N: Unary + Any> Session for Continue<N> {
     type Dual = Continue<N>;
 }
 
-impl<N: Unary, M: Unary> Scoped<M> for Continue<N> where N: LessThan<M> {}
+impl<N: Unary + Any, M: Unary + Any> Scoped<M> for Continue<N> where N: LessThan<M> {}
 
 impl<E, K, P, Rest, N: Unary> Actionable<E> for Continue<N>
 where

@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use super::sealed::IsSession;
 use super::*;
 
@@ -5,7 +7,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Seq<P, Q = Done>(pub P, pub Q);
 
-impl<P, Q> IsSession for Seq<P, Q> {}
+impl<P: Any, Q: Any> IsSession for Seq<P, Q> {}
 
 impl<P: Session, Q: Session> Session for Seq<P, Q> {
     type Dual = Seq<P::Dual, Q::Dual>;
