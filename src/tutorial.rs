@@ -664,4 +664,3 @@
 // Import the whole crate so the docs above can link appropriately.
 #![allow(unused_imports)]
 use crate::prelude::*;
-use static_assertions;
