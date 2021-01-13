@@ -54,26 +54,6 @@ pub trait Transmit<T, Convention: CallingConvention> {
         'a: 'async_lifetime;
 }
 
-impl<T, C, Convention> Transmit<T, Convention> for &'_ mut C
-where
-    C: Transmit<T, Convention>,
-    Convention: CallingConvention,
-{
-    type Error = C::Error;
-
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        message: <T as CallBy<'a, Convention>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
-    where
-        T: CallBy<'a, Convention>,
-        <T as CallBy<'a, Convention>>::Type: Send,
-        'a: 'async_lifetime,
-    {
-        (**self).send(message)
-    }
-}
-
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
 ///
 /// In order to support the [`Chan::offer`](crate::CanonicalChan::offer) method, all backends must
@@ -92,14 +72,4 @@ pub trait Receive<T> {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
-}
-
-impl<T: 'static, C: Receive<T> + Send> Receive<T> for &'_ mut C {
-    type Error = C::Error;
-
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
-        (**self).recv()
-    }
 }

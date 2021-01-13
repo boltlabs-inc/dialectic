@@ -6,7 +6,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Loop<P>(pub P);
 
-impl<P> IsSession for Loop<P> {}
+impl<P: IsSession> IsSession for Loop<P> {}
 
 impl<P: Session> Session for Loop<P> {
     type Dual = Loop<P::Dual>;

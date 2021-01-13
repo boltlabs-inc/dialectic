@@ -1,15 +1,21 @@
 //! The [`CanonicalChan`] type is defined here. Typically, you don't need to import this module, and
 //! should use the [`Chan`](super::Chan) type synonym instead.
 use std::{
+    any::TypeId,
     convert::TryInto,
     marker::{self, PhantomData},
-    sync::Arc,
+    mem,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
 };
 
-use crate::backend::*;
+use pin_project::pin_project;
+
 use crate::prelude::*;
 use crate::Chan;
-use crate::{Available, Branches, SeqError, Unavailable, UnsplitError};
+use crate::{backend::*, IncompleteHalf, SessionIncomplete};
+use crate::{Available, Unavailable};
 use futures::Future;
 use tuple::{HasLength, List, Tuple};
 
@@ -119,21 +125,50 @@ use tuple::{HasLength, List, Tuple};
 /// let (c1, c2): (Chan<_, _, P>, Chan<_, _, <P as Session>::Dual>) =
 ///     P::channel(mpsc::unbounded_channel);
 /// ```
-#[derive(Debug)]
-#[must_use = "Dropping a channel before finishing its session type will result in a panic"]
-pub struct CanonicalChan<Tx, Rx, P: Actionable<E, Action = P, Env = E>, E: Environment = ()> {
-    tx: Tx,
-    rx: Rx,
+#[derive(Derivative)]
+#[derivative(Debug)]
+#[must_use]
+pub struct CanonicalChan<
+    Tx: std::marker::Send + 'static,
+    Rx: std::marker::Send + 'static,
+    P: Actionable<E, Action = P, Env = E>,
+    E: Environment = (),
+> {
+    tx: Option<Tx>,
+    rx: Option<Rx>,
+    #[derivative(Debug = "ignore")]
+    drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>>,
+    #[derivative(Debug = "ignore")]
+    drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
+    #[derivative(Debug = "ignore")]
     session: PhantomData<(P, E)>,
-    identity: Arc<()>,
 }
 
-impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
-    /// Close a finished session, returning the wrapped connections used during the session.
-    ///
-    /// This function does not do cleanup on the actual underlying connections; they are passed back
-    /// to the caller who may either continue to use them outside the session typing context or
-    /// clean them up as appropriate.
+impl<Tx, Rx, P, E> Drop for CanonicalChan<Tx, Rx, P, E>
+where
+    Tx: std::marker::Send + 'static,
+    Rx: std::marker::Send + 'static,
+    P: Actionable<E, Action = P, Env = E>,
+    E: Environment,
+{
+    fn drop(&mut self) {
+        let done =
+            TypeId::of::<P>() == TypeId::of::<Done>() && TypeId::of::<E>() == TypeId::of::<()>();
+        let tx = self.tx.take();
+        let rx = self.rx.take();
+        let drop_tx = self.drop_tx.take();
+        let drop_rx = self.drop_rx.take();
+        if let (Some(drop_tx), Some(tx)) = (drop_tx, tx) {
+            drop_tx(done, tx);
+        }
+        if let (Some(drop_rx), Some(rx)) = (drop_rx, rx) {
+            drop_rx(done, rx);
+        }
+    }
+}
+
+impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static> CanonicalChan<Tx, Rx, Done, ()> {
+    /// Close a finished session, dropping the underlying connections.
     ///
     /// # Examples
     ///
@@ -147,8 +182,8 @@ impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let (c1, c2) = Done::channel(mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.close();
-    /// let (tx2, rx2) = c2.close();
+    /// c1.close();
+    /// c2.close();
     /// # }
     /// ```
     ///
@@ -163,22 +198,23 @@ impl<Tx, Rx> CanonicalChan<Tx, Rx, Done, ()> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.close();
-    /// let (tx2, rx2) = c2.close();
+    /// c1.close();
+    /// c2.close();
     /// # }
     /// ```
     ///
     /// If you *really* want to destruct a channel before the end of its session, use
-    /// [`unwrap`](CanonicalChan::unwrap), but beware that this may cause the party on the other end of the
-    /// channel to throw errors due to your violation of the channel's protocol!
-    pub fn close(self) -> (Tx, Rx) {
-        self.unwrap()
+    /// [`unwrap`](CanonicalChan::unwrap), but beware that this may cause the party on the other end
+    /// of the channel to throw errors due to your violation of the channel's protocol!
+    pub fn close(self) {
+        drop(self)
     }
 }
 
-impl<Tx, Rx, E, T, P> CanonicalChan<Tx, Rx, Recv<T, P>, E>
+impl<'a, Tx, Rx, E, T, P> CanonicalChan<Tx, Rx, Recv<T, P>, E>
 where
-    Rx: Receive<T>,
+    Tx: marker::Send + 'static,
+    Rx: Receive<T> + marker::Send + 'static,
     T: marker::Send + 'static,
     P: Actionable<E>,
     E: Environment,
@@ -208,13 +244,15 @@ where
     /// # }
     /// ```
     pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, P, E>), Rx::Error> {
-        let result = self.rx.recv().await?;
+        let result = self.rx.as_mut().unwrap().recv().await?;
         Ok((result, self.unchecked_cast()))
     }
 }
 
-impl<'a, Tx, Rx, E, T, P> CanonicalChan<Tx, Rx, Send<T, P>, E>
+impl<'a, Tx, Rx, E, T: 'static, P> CanonicalChan<Tx, Rx, Send<T, P>, E>
 where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
     P: Actionable<E>,
     E: Environment,
 {
@@ -246,23 +284,24 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send<Convention: CallingConvention>(
+    pub async fn send<'b, Convention: CallingConvention>(
         mut self,
-        message: <T as CallBy<'a, Convention>>::Type,
+        message: <T as CallBy<'b, Convention>>::Type,
     ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<T, Convention>>::Error>
     where
         Tx: Transmit<T, Convention>,
-        T: CallBy<'a, Convention>,
-        <T as CallBy<'a, Convention>>::Type: marker::Send,
+        T: CallBy<'b, Convention>,
+        <T as CallBy<'b, Convention>>::Type: marker::Send,
     {
-        self.tx.send(message).await?;
+        self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
     }
 }
 
-impl<Tx, Rx, E, Choices> CanonicalChan<Tx, Rx, Choose<Choices>, E>
+impl<Tx, Rx, E, Choices: 'static> CanonicalChan<Tx, Rx, Choose<Choices>, E>
 where
-    Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
+    Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val> + marker::Send + 'static,
+    Rx: marker::Send + 'static,
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: marker::Send,
@@ -345,20 +384,22 @@ where
         let choice = (N::VALUE as u8)
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        self.tx.send(choice).await?;
+        self.tx.as_mut().unwrap().send(choice).await?;
         Ok(self.unchecked_cast())
     }
 }
 
-impl<'a, Tx, Rx, E, Choices> CanonicalChan<Tx, Rx, Offer<Choices>, E>
+impl<'a, Tx, Rx, E, Choices: 'static> CanonicalChan<Tx, Rx, Offer<Choices>, E>
 where
-    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
+    Tx: marker::Send + 'static,
+    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>> + marker::Send + 'static,
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as EachSession>::Dual: List,
     E: Environment,
     Choices::AsList: EachActionable<E>,
     Choices::AsList: EachScoped<E::Depth>,
+    _0: LessThan<<Choices::AsList as HasLength>::Length>,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// by sending a number which protocol to proceed with.
@@ -434,27 +475,44 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(self) -> Result<Branches<Tx, Rx, Choices, E>, Rx::Error> {
-        let (tx, mut rx) = self.unwrap();
-        let variant = rx.recv().await?.into();
+    pub async fn offer(mut self) -> Result<Branches<Tx, Rx, Choices, E>, Rx::Error> {
+        let tx = self.tx.take();
+        let mut rx = self.rx.take();
+        let drop_tx = self.drop_tx.take();
+        let drop_rx = self.drop_rx.take();
+        let variant = rx.as_mut().unwrap().recv().await?.into();
         Ok(Branches {
             variant,
             tx,
             rx,
+            drop_tx,
+            drop_rx,
             protocols: PhantomData,
             environment: PhantomData,
         })
     }
 }
 
-impl<Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Split<P, Q>, E>
+impl<'a, Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Split<P, Q>, E>
 where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
     P: Actionable<E>,
     Q: Actionable<E>,
     E: Environment,
 {
-    /// Split a channel into transmit-only and receive-only ends which may be used concurrently and
-    /// reunited (provided they reach a matching session type) using [`unsplit_with`](CanonicalChan::unsplit_with).
+    /// Split a channel into transmit-only and receive-only ends and manipulate them, potentially
+    /// concurrently, in the given closure.
+    ///
+    /// To use the channel as a reunited whole after it has been split, combine this operation with
+    /// [`seq`](CanonicalChan::seq) to sequence further operations after it.
+    ///
+    /// # Errors
+    ///
+    /// The closure must *finish* the session for both the send-only and receive-only ends of the
+    /// channel and drop or [`close`](CanonicalChan::close) each end *before* the future completes.
+    /// If either end is dropped before finishing its session, or is not closed after finishing its
+    /// session, a [`SessionIncomplete`] error will be returned instead of a finished channel.
     ///
     /// # Examples
     ///
@@ -474,131 +532,133 @@ where
     ///
     /// // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
     /// let t1 = tokio::spawn(async move {
-    ///     let (tx, rx) = c1.split();
-    ///     let send_vec = tokio::spawn(async move {
-    ///         tx.send(vec![1, 2, 3, 4, 5]).await?;
-    ///         Ok::<_, mpsc::Error>(())
-    ///     });
-    ///     let recv_string = tokio::spawn(async move {
-    ///         let (string, _) = rx.recv().await?;
+    ///     c1.split(|tx, rx| async move {
+    ///         let send_vec = tokio::spawn(async move {
+    ///             tx.send(vec![1, 2, 3, 4, 5]).await?;
+    ///             Ok::<_, mpsc::Error>(())
+    ///         });
+    ///         let recv_string = tokio::spawn(async move {
+    ///             let (string, _) = rx.recv().await?;
+    ///             Ok::<_, mpsc::Error>(string)
+    ///         });
+    ///         send_vec.await.unwrap()?;
+    ///         let string = recv_string.await.unwrap()?;
     ///         Ok::<_, mpsc::Error>(string)
-    ///     });
-    ///     send_vec.await.unwrap()?;
-    ///     let string = recv_string.await.unwrap()?;
-    ///     Ok::<_, mpsc::Error>(string)
+    ///     }).await
     /// });
     ///
     /// // Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
     /// // the task above:
-    /// let (tx, rx) = c2.split();
-    /// let send_string = tokio::spawn(async move {
-    ///     tx.send("Hello!".to_string()).await?;
-    ///     Ok::<_, mpsc::Error>(())
-    /// });
-    /// let recv_vec = tokio::spawn(async move {
-    ///     let (vec, _) = rx.recv().await?;
-    ///     Ok::<_, mpsc::Error>(vec)
-    /// });
+    /// c2.split(|tx, rx| async move {
+    ///     let send_string = tokio::spawn(async move {
+    ///         tx.send("Hello!".to_string()).await?;
+    ///         Ok::<_, mpsc::Error>(())
+    ///     });
+    ///     let recv_vec = tokio::spawn(async move {
+    ///         let (vec, _) = rx.recv().await?;
+    ///         Ok::<_, mpsc::Error>(vec)
+    ///     });
     ///
-    /// // Examine the result values:
-    /// send_string.await??;
-    /// let vec = recv_vec.await??;
-    /// let string = t1.await??;
-    /// assert_eq!(vec, &[1, 2, 3, 4, 5]);
-    /// assert_eq!(string, "Hello!");
+    ///     // Examine the result values:
+    ///     send_string.await??;
+    ///     let vec = recv_vec.await??;
+    ///     let string = t1.await??.0;
+    ///     assert_eq!(vec, &[1, 2, 3, 4, 5]);
+    ///     assert_eq!(string, "Hello!");
+    ///
+    ///     Ok::<_, Box<dyn std::error::Error>>(())
+    /// }).await?;
+    /// #
     /// # Ok(())
     /// # }
     /// ```
-    pub fn split(
-        self,
-    ) -> (
-        Chan<Available<Tx>, Unavailable<Rx>, P, E>,
-        Chan<Unavailable<Tx>, Available<Rx>, Q, E>,
-    ) {
-        let tx = self.tx;
-        let rx = self.rx;
-        let identity = self.identity;
-        let tx_only = CanonicalChan::from_raw_unchecked_with_identity(
-            identity.clone(),
+    pub async fn split<T, Err, F, Fut>(
+        mut self,
+        with_parts: F,
+    ) -> Result<(T, Result<Chan<Tx, Rx, Done>, SessionIncomplete<Tx, Rx>>), Err>
+    where
+        F: FnOnce(
+            Chan<Available<Tx>, Unavailable<Rx>, P, E>,
+            Chan<Unavailable<Tx>, Available<Rx>, Q, E>,
+        ) -> Fut,
+        Fut: Future<Output = Result<T, Err>>,
+    {
+        use IncompleteHalf::*;
+        use SessionIncomplete::*;
+
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
+        let drop_tx = self.drop_tx.take().unwrap();
+        let drop_rx = self.drop_rx.take().unwrap();
+        let ((result, maybe_rx), maybe_tx) = over::<P, E, _, _, _, _, _, _>(
             Available(tx),
             Unavailable::new(),
-        );
-        let rx_only = CanonicalChan::from_raw_unchecked_with_identity(
-            identity,
-            Unavailable::new(),
-            Available(rx),
-        );
-        (tx_only, rx_only)
+            |tx_only| async move {
+                over::<Q, E, _, _, _, _, _, _>(
+                    Unavailable::new(),
+                    Available(rx),
+                    |rx_only| async move { with_parts(tx_only, rx_only).await },
+                )
+                .await
+            },
+        )
+        .await?;
+        // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
+        // Available/Unavailable and maximize possible returned things (it's fine to drop the
+        // Unavailable end of something if for some reason you split twice)
+        let maybe_tx_rx: Result<(Tx, Rx), SessionIncomplete<Tx, Rx>> = match (
+            maybe_tx
+                .map(|(tx, _)| Ok(tx))
+                .unwrap_or_else(|incomplete| incomplete.into_halves().0),
+            maybe_rx
+                .map(|(_, rx)| Ok(rx))
+                .unwrap_or_else(|incomplete| incomplete.into_halves().1),
+        ) {
+            (Ok(Available(tx)), Ok(Available(rx))) => Ok((tx, rx)),
+            (Ok(Available(tx)), Err(Unclosed)) => Err(RxHalf { tx, rx: Unclosed }),
+            (Err(Unclosed), Ok(Available(rx))) => Err(TxHalf { tx: Unclosed, rx }),
+            (Ok(Available(tx)), Err(Unfinished(Available(rx)))) => Err(RxHalf {
+                tx,
+                rx: Unfinished(rx),
+            }),
+            (Err(Unfinished(Available(tx))), Ok(Available(rx))) => Err(TxHalf {
+                tx: Unfinished(tx),
+                rx,
+            }),
+            (Err(Unfinished(Available(tx))), Err(Unclosed)) => Err(BothHalves {
+                tx: Unfinished(tx),
+                rx: Unclosed,
+            }),
+            (Err(Unclosed), Err(Unfinished(Available(rx)))) => Err(BothHalves {
+                tx: Unclosed,
+                rx: Unfinished(rx),
+            }),
+            (Err(Unclosed), Err(Unclosed)) => Err(BothHalves {
+                tx: Unclosed,
+                rx: Unclosed,
+            }),
+            (Err(Unfinished(Available(tx))), Err(Unfinished(Available(rx)))) => Err(BothHalves {
+                tx: Unfinished(tx),
+                rx: Unfinished(rx),
+            }),
+        };
+        Ok((
+            result,
+            maybe_tx_rx.map(|(tx, rx)| CanonicalChan {
+                tx: Some(tx),
+                rx: Some(rx),
+                drop_tx: Some(drop_tx),
+                drop_rx: Some(drop_rx),
+                session: PhantomData,
+            }),
+        ))
     }
 }
 
-impl<Tx, Rx, P, E> CanonicalChan<Available<Tx>, Unavailable<Rx>, P, E>
+impl<'a, Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Seq<P, Q>, E>
 where
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
-{
-    /// Reunite the transmit-only and receive-only channels resulting from a call to
-    /// [`split`](CanonicalChan::split) into a single channel.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Split<Done, Done>>::channel(|| mpsc::channel(1));
-    /// let (tx1, rx1) = c1.split();
-    /// let (tx2, rx2) = c2.split();
-    ///
-    /// let c1 = tx1.unsplit_with(rx1)?;
-    /// let c2 = tx2.unsplit_with(rx2)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// If the two channels given as input did not result from the same call to
-    /// [`split`](CanonicalChan::split), this function returns an [`UnsplitError`] containing the two
-    /// channels, since rewiring channels to be non-bidirectional can violate the session typing
-    /// guarantee. If instead of the above, we did the following, `unsplit_with` would return an error:
-    ///
-    /// ```
-    /// # use dialectic::prelude::*;
-    /// # use dialectic::backend::mpsc;
-    /// #
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type SplitEnds = Split<Done, Done>;
-    /// #
-    /// let (c1, c2) = SplitEnds::channel(|| mpsc::channel(1));
-    /// let (tx1, rx1) = c1.split();
-    /// let (tx2, rx2) = c2.split();
-    ///
-    /// assert!(tx1.unsplit_with(rx2).is_err()); // <-- pairing tx from c1 with rx from c2
-    /// assert!(tx2.unsplit_with(rx1).is_err()); // <-- pairing tx from c2 with rx from c1
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn unsplit_with(
-        self,
-        rx: CanonicalChan<Unavailable<Tx>, Available<Rx>, P, E>,
-    ) -> Result<Chan<Tx, Rx, P, E>, UnsplitError<Tx, Rx, P, E>> {
-        if Arc::ptr_eq(&self.identity, &rx.identity) {
-            Ok(CanonicalChan::from_raw_unchecked(
-                self.unwrap().0.into_inner(),
-                rx.unwrap().1.into_inner(),
-            ))
-        } else {
-            Err(UnsplitError { tx: self, rx })
-        }
-    }
-}
-
-impl<Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Seq<P, Q>, E>
-where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
     P: Actionable<E::MakeDone>,
     Q: Actionable<E>,
     E: Environment,
@@ -610,79 +670,94 @@ where
     /// result of this (provided that no errors occurred during `P`) is a channel ready to execute
     /// the session type `Q`.
     ///
-    /// ⚠️ **Important:** the closure passed to [`seq`](CanonicalChan::seq) must, if it returns
-    /// successfully, always return *the same* [`Chan`] it was given, not merely one with the same
-    /// type. Doing otherwise is always a programming mistake, since if it were permissible to
-    /// return a different [`Chan`], it would be possible to violate session type safety. Returning
-    /// anything other than the precise [`Chan`] given to the closure will result in a runtime
-    /// [`SeqError`].
-    ///
     /// # Errors
     ///
-    /// This function returns an `Err` if the closure returns an `Err`. Additionally, the returned
-    /// channel may instead be a [`SeqError`] if the closure erroneously returned a channel which
-    /// was not the exact same channel as was given to the closure as input.
+    /// The closure must *finish* the session `P` on the channel given to it and *drop* the finished
+    /// channel before the future returns. If the channel is dropped before completing `P` or is not
+    /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
+    /// channel for `Q`. The best way to ensure this error does not occur is to call
+    /// [`close`](CanonicalChan::close) on the channel before returning from the future, because
+    /// this statically checks that the session is complete and drops the channel.
+    ///
+    /// Additionally, this function returns an `Err` if the closure returns an `Err`.
     ///
     /// # Examples
     ///
-    /// In the simplest uses, this can be used to cleanly modularize a session-typed program by
-    /// splitting it up into independent subroutines:
+    /// This can be used to cleanly modularize a session-typed program by splitting it up into
+    /// independent subroutines:
     ///
     /// ```
     /// use dialectic::prelude::*;
     /// use dialectic::backend::mpsc;
     ///
-    /// // TODO: Finish this example!
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Seq<Send<String>, Send<String>>>::channel(mpsc::unbounded_channel);
     ///
+    /// let ((), c1_result) = c1.seq(|c| async move {
+    ///     let c = c.send("Hello!".to_string()).await?;
+    ///     // Because we're done with this subroutine, we can "close" the channel here, but it
+    ///     // will remain open to the calling context so it can run the rest of the session:
+    ///     c.close();
+    ///     Ok::<_, mpsc::Error>(())
+    /// }).await?;
+    /// let c1 = c1_result?;
+    ///
+    /// let c1 = c1.send("World!".to_string()).await?;
+    /// c1.close();
+    /// # Ok(())
+    /// # }
     /// ```
-    ///
-    /// More generally, this allows for arbitrary context-free session types, by permitting multiple
-    /// [`Continue`]s to be sequenced together.
     pub async fn seq<T, Err, F, Fut>(
-        self,
+        mut self,
         first: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Q, E>, SeqError>), Err>
+    ) -> Result<(T, Result<Chan<Tx, Rx, Q, E>, SessionIncomplete<Tx, Rx>>), Err>
     where
         F: FnOnce(Chan<Tx, Rx, P, E::MakeDone>) -> Fut,
-        Fut: Future<Output = Result<(T, Chan<Tx, Rx, Done>), Err>>,
+        Fut: Future<Output = Result<T, Err>>,
     {
-        let identity = self.identity.clone();
-        let (res, chan) = first(self.unchecked_cast()).await?;
-        if Arc::ptr_eq(&identity, &chan.identity) {
-            Ok((res, Ok(chan.unchecked_cast())))
-        } else {
-            Ok((res, Err(SeqError { _private: () })))
-        }
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
+        let drop_tx = self.drop_tx.take().unwrap();
+        let drop_rx = self.drop_rx.take().unwrap();
+        let (result, maybe_chan) = over::<P, E::MakeDone, _, _, _, _, _, _>(tx, rx, first).await?;
+        Ok((
+            result,
+            maybe_chan.map(|(tx, rx)| CanonicalChan {
+                tx: Some(tx),
+                rx: Some(rx),
+                drop_tx: Some(drop_tx),
+                drop_rx: Some(drop_rx),
+                session: PhantomData,
+            }),
+        ))
     }
 }
 
-impl<Tx, Rx, E, P> CanonicalChan<Tx, Rx, P, E>
+impl<'a, Tx: 'a, Rx: 'a, E, P> CanonicalChan<Tx, Rx, P, E>
 where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
     P: Actionable<E, Action = P, Env = E>,
     E: Environment,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<F, Q>(self) -> CanonicalChan<Tx, Rx, Q, F>
+    fn unchecked_cast<F, Q>(mut self) -> CanonicalChan<Tx, Rx, Q, F>
     where
         F: Environment,
         Q: Actionable<F, Action = Q, Env = F>,
     {
-        let identity = self.identity;
-        let tx = self.tx;
-        let rx = self.rx;
         CanonicalChan {
-            tx,
-            rx,
+            tx: self.tx.take(),
+            rx: self.rx.take(),
+            drop_tx: self.drop_tx.take(),
+            drop_rx: self.drop_rx.take(),
             session: PhantomData,
-            identity,
         }
     }
 
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
     /// potentially before the end of the session.
-    ///
-    /// **Prefer [`close`](CanonicalChan::close) to this method if you mean to unwrap a channel at
-    /// the end of its session.**
     ///
     /// # Errors
     ///
@@ -699,9 +774,9 @@ where
     /// let (tx1, rx1) = c1.unwrap();
     /// let (tx2, rx2) = c2.unwrap();
     /// ```
-    pub fn unwrap(self) -> (Tx, Rx) {
-        let tx = self.tx;
-        let rx = self.rx;
+    pub fn unwrap(mut self) -> (Tx, Rx) {
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
         (tx, rx)
     }
 
@@ -709,23 +784,215 @@ where
     /// casting a new channel to an arbitrary environment, and doesn't guarantee the environment is
     /// coherent with regard to the session type. Use with care!
     pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P, E> {
-        CanonicalChan::from_raw_unchecked_with_identity(Arc::new(()), tx, rx)
-    }
-
-    /// Create a new channel with an arbitrary environment and session type, with an explicitly
-    /// specified object identity pointer. This `Arc<()>` is used to track whether a channel is
-    /// *identical* to another channel. Misuse of this method can lead to violation of the session
-    /// type contract.
-    fn from_raw_unchecked_with_identity(
-        identity: Arc<()>,
-        tx: Tx,
-        rx: Rx,
-    ) -> CanonicalChan<Tx, Rx, P, E> {
         CanonicalChan {
-            tx,
-            rx,
+            tx: Some(tx),
+            rx: Some(rx),
+            drop_tx: Some(Box::new(|_, _| {})),
+            drop_rx: Some(Box::new(|_, _| {})),
             session: PhantomData,
-            identity,
         }
+    }
+}
+
+/// The implementation of `NewSession::over`, generalized to any environment (unlike the public
+/// `over` function which only works in the empty environment). This is not safe to export because
+/// nonsense environments could be specified.
+pub(crate) fn over<P, E, Tx, Rx, T, Err, F, Fut>(
+    tx: Tx,
+    rx: Rx,
+    with_chan: F,
+) -> Over<Tx, Rx, T, Err, Fut>
+where
+    P: Actionable<E>,
+    E: Environment,
+    Tx: std::marker::Send + 'static,
+    Rx: std::marker::Send + 'static,
+    F: FnOnce(Chan<Tx, Rx, P, E>) -> Fut,
+    Fut: Future<Output = Result<T, Err>>,
+{
+    use IncompleteHalf::*;
+    let dropped_tx = Arc::new(Mutex::new(Err(Unclosed)));
+    let dropped_rx = Arc::new(Mutex::new(Err(Unclosed)));
+    let reclaimed_tx = dropped_tx.clone();
+    let reclaimed_rx = dropped_rx.clone();
+    let drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>> =
+        Some(Box::new(move |done, tx| {
+            *dropped_tx.lock().unwrap() = if done { Ok(tx) } else { Err(Unfinished(tx)) };
+        }));
+    let drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>> =
+        Some(Box::new(move |done, rx| {
+            *dropped_rx.lock().unwrap() = if done { Ok(rx) } else { Err(Unfinished(rx)) };
+        }));
+    let chan = CanonicalChan {
+        tx: Some(tx),
+        rx: Some(rx),
+        drop_tx,
+        drop_rx,
+        session: PhantomData,
+    };
+    Over {
+        future: with_chan(chan),
+        reclaimed_tx,
+        reclaimed_rx,
+    }
+}
+
+impl<Tx, Rx, T, E, Fut> Future for Over<Tx, Rx, T, E, Fut>
+where
+    Fut: Future<Output = Result<T, E>>,
+{
+    type Output = Result<(T, Result<(Tx, Rx), SessionIncomplete<Tx, Rx>>), E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        use IncompleteHalf::*;
+        use SessionIncomplete::*;
+
+        let reclaimed_tx = self.reclaimed_tx.clone();
+        let reclaimed_rx = self.reclaimed_rx.clone();
+
+        self.project().future.poll(cx).map(|result| {
+            let chan = match (
+                mem::replace(&mut *reclaimed_tx.lock().unwrap(), Err(Unclosed)),
+                mem::replace(&mut *reclaimed_rx.lock().unwrap(), Err(Unclosed)),
+            ) {
+                (Ok(tx), Ok(rx)) => Ok((tx, rx)),
+                (Err(tx), Ok(rx)) => Err(TxHalf { tx, rx }),
+                (Ok(tx), Err(rx)) => Err(RxHalf { tx, rx }),
+                (Err(tx), Err(rx)) => Err(BothHalves { tx, rx }),
+            };
+            result.map(|result| (result, chan))
+        })
+    }
+}
+
+/// The future returned by [`NewSession::over`] (see its documentation for details).
+#[pin_project]
+#[derive(Debug)]
+pub struct Over<Tx, Rx, T, E, Fut>
+where
+    Fut: Future<Output = Result<T, E>>,
+{
+    reclaimed_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
+    reclaimed_rx: Arc<Mutex<Result<Rx, IncompleteHalf<Rx>>>>,
+    #[pin]
+    future: Fut,
+}
+
+/// The result of [`offer`](CanonicalChan::offer): an enumeration of the possible new channel states
+/// that could result from the offering of the tuple of protocols `Choices`.
+///
+/// To find out which protocol was selected by the other party, use [`Branches::case`], or better
+/// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
+///
+/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
+/// [`case`](Branches::case).**
+#[derive(Derivative)]
+#[derivative(Debug)]
+#[must_use]
+pub struct Branches<Tx, Rx, Choices, E = ()>
+where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+    Choices: Tuple + 'static,
+    Choices::AsList: EachActionable<E>,
+    E: Environment,
+{
+    variant: u8,
+    tx: Option<Tx>,
+    rx: Option<Rx>,
+    #[derivative(Debug = "ignore")]
+    drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>>,
+    #[derivative(Debug = "ignore")]
+    drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
+    #[derivative(Debug = "ignore")]
+    protocols: PhantomData<Choices>,
+    #[derivative(Debug = "ignore")]
+    environment: PhantomData<E>,
+}
+
+impl<Tx, Rx, Choices, E> Drop for Branches<Tx, Rx, Choices, E>
+where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+    Choices: Tuple + 'static,
+    Choices::AsList: EachActionable<E>,
+    E: Environment,
+{
+    fn drop(&mut self) {
+        // A `Branches` is never an end-state for a channel, so we always say it wasn't done
+        let done = false;
+        let tx = self.tx.take();
+        let rx = self.rx.take();
+        let drop_tx = self.drop_tx.take();
+        let drop_rx = self.drop_rx.take();
+        if let (Some(drop_tx), Some(tx)) = (drop_tx, tx) {
+            drop_tx(done, tx);
+        }
+        if let (Some(drop_rx), Some(rx)) = (drop_rx, rx) {
+            drop_rx(done, rx);
+        }
+    }
+}
+
+impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
+where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+    Choices: Tuple<AsList = (P, Ps)>,
+    (P, Ps): List<AsTuple = Choices>,
+    P: Actionable<E>,
+    Ps: EachActionable<E> + List,
+    E: Environment,
+{
+    /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
+    /// channel; otherwise, return all the other possibilities.
+    #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
+    pub fn case(
+        mut self,
+    ) -> Result<
+        Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
+        Branches<Tx, Rx, Ps::AsTuple, E>,
+    > {
+        let variant = self.variant;
+        let tx = self.tx.take();
+        let rx = self.rx.take();
+        let drop_tx = self.drop_tx.take();
+        let drop_rx = self.drop_rx.take();
+        if variant == 0 {
+            Ok(CanonicalChan {
+                tx,
+                rx,
+                drop_tx,
+                drop_rx,
+                session: PhantomData,
+            })
+        } else {
+            Err(Branches {
+                variant: variant - 1,
+                tx,
+                rx,
+                drop_tx,
+                drop_rx,
+                protocols: PhantomData,
+                environment: PhantomData,
+            })
+        }
+    }
+}
+
+impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
+where
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+{
+    /// Attempt to eliminate an empty [`Branches`], returning an error if the originating
+    /// discriminant for this set of protocol choices was out of range.
+    ///
+    /// This function is only callable on empty [`Branches`], which under ordinary circumstances
+    /// means it proves the unreachability of its calling location. However, if the other end of the
+    /// channel breaks protocol, an empty [`Branches`] can in fact be constructed, and this function
+    /// will then signal an error.
+    pub fn empty_case<T>(self) -> T {
+        unreachable!("empty `Branches` cannot be constructed")
     }
 }

@@ -60,8 +60,12 @@ async fn interact<Tx, Rx, R, W, Err>(
 where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
-    Rx: Receive<i64>,
-    Tx: Transmit<i64, Ref> + Transmit<Operation, Ref> + Transmit<Choice<_2>, Val>,
+    Rx: Receive<i64> + std::marker::Send + 'static,
+    Tx: Transmit<i64, Ref>
+        + Transmit<Operation, Ref>
+        + Transmit<Choice<_2>, Val>
+        + std::marker::Send
+        + 'static,
     Err: From<<Rx as Receive<i64>>::Error>
         + From<<Tx as Transmit<i64, Ref>>::Error>
         + From<<Tx as Transmit<Choice<_2>, Val>>::Error>
@@ -100,15 +104,15 @@ async fn tally<Tx, Rx, E, R, W, Err>(
     input: &mut Lines<R>,
     output: &mut W,
     mut chan: Chan<Tx, Rx, ClientTally, E>,
-) -> Result<(bool, Chan<Tx, Rx, Done, E>), Err>
+) -> Result<bool, Err>
 where
     E: Environment,
     Done: Actionable<E, Action = Done, Env = ()>,
     Break: Actionable<<ClientTally as Actionable<E>>::Env, Action = Done, Env = ()>,
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
-    Rx: Receive<i64>,
-    Tx: Transmit<i64, Ref> + Transmit<Choice<_2>, Val>,
+    Rx: Receive<i64> + std::marker::Send + 'static,
+    Tx: Transmit<i64, Ref> + Transmit<Choice<_2>, Val> + std::marker::Send + 'static,
     Err: From<<Rx as Receive<i64>>::Error>
         + From<<Tx as Transmit<i64, Ref>>::Error>
         + From<<Tx as Transmit<Choice<_2>, Val>>::Error>
@@ -153,5 +157,6 @@ where
             }
         }
     };
-    Ok((done, chan))
+    chan.close();
+    Ok(done)
 }

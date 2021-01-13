@@ -1,5 +1,7 @@
 //! The types in this module enumerate the shapes of all expressible sessions.
 
+use std::any::Any;
+
 use crate::prelude::*;
 pub use unary::types::*;
 pub use unary::{LessThan, Unary, S, Z};
@@ -121,7 +123,7 @@ where
 
 /// A valid session environment is a type-level list of session types, each of which may refer by
 /// [`Continue`] index to any other session in the list which is *below or including* itself.
-pub trait Environment {
+pub trait Environment: Any {
     /// The depth of a session environment is the number of loops to which a [`Continue`] could
     /// jump, i.e. the number of session types in the session environment.
     type Depth: Unary;
@@ -203,10 +205,12 @@ where
 }
 
 mod sealed {
+    use std::any::Any;
+
     use super::*;
 
     /// Seal the [`Session`] trait so only types defined in this crate can be session types.
-    pub trait IsSession {}
+    pub trait IsSession: Any {}
 
     /// Seal the [`EachSession`] trait so it can't be extended in weird ways.
     pub trait EachSession {}

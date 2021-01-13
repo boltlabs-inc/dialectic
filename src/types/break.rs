@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use super::sealed::IsSession;
 use super::*;
 
@@ -8,22 +10,22 @@ use super::*;
 pub struct Break<N: Unary = Z>(pub N);
 
 /// [`Break`] is a constructor for a session type.
-impl<N: Unary> IsSession for Break<N> {}
+impl<N: Unary + Any> IsSession for Break<N> {}
 
 /// All [`Break`]s are valid session types.
-impl<N: Unary> Session for Break<N> {
+impl<N: Unary + Any> Session for Break<N> {
     /// [`Break`] is self-dual.
     type Dual = Break<N>;
 }
 
 /// A [`Break`] is well-[`Scoped`] if it refers to a loop that it is inside of.
-impl<N: Unary, M: Unary> Scoped<M> for Break<N> where N: LessThan<M> {}
+impl<N: Unary + Any, M: Unary + Any> Scoped<M> for Break<N> where N: LessThan<M> {}
 
 /// When in the outermost loop, [`Break`] exits that loop and finishes the session.
 impl<K, P> Actionable<((K, P), ())> for Break<Z>
 where
     P: Scoped<S<Z>>,
-    ((K, P), ()): Environment,
+    ((K, P), ()): Environment + 'static,
     Z: LessThan<<((K, P), ()) as Environment>::Depth>,
 {
     type Action = Done;
@@ -34,7 +36,7 @@ where
 impl<K, P, Q, Rest> Actionable<((K, P), ((Done, Q), Rest))> for Break<Z>
 where
     Q: Scoped<S<<Rest as Environment>::Depth>>,
-    ((K, P), ((Done, Q), Rest)): Environment,
+    ((K, P), ((Done, Q), Rest)): Environment + 'static,
     ((Done, Q), Rest): Environment,
     Rest: Environment,
     Z: LessThan<<((K, P), ((Done, Q), Rest)) as Environment>::Depth>,
@@ -50,7 +52,7 @@ where
     P: Scoped<S<S<<Rest as Environment>::Depth>>>,
     Q: Scoped<S<<Rest as Environment>::Depth>>,
     Q::Env: Environment,
-    ((K, P), ((Continue, Q), Rest)): Environment,
+    ((K, P), ((Continue, Q), Rest)): Environment + 'static,
     ((Continue, Q), Rest): Environment,
     Rest: Environment,
     Z: LessThan<<((K, P), ((Continue, Q), Rest)) as Environment>::Depth>,
@@ -65,7 +67,7 @@ where
     P: Scoped<S<<Rest as Environment>::Depth>>,
     N: LessThan<Rest::Depth>,
     Break<N>: Actionable<Rest>,
-    ((K, P), Rest): Environment,
+    ((K, P), Rest): Environment + 'static,
     Rest: Environment,
     S<N>: LessThan<<((K, P), Rest) as Environment>::Depth>,
 {

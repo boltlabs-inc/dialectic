@@ -1,13 +1,14 @@
+use std::any::Any;
+
 use super::sealed::IsSession;
 use super::*;
 
 /// Split the connection into send-only and receive-only halves using
-/// [`split`](crate::CanonicalChan::split). These can subsequently be rejoined using
-/// [`unsplit_with`](crate::CanonicalChan::unsplit_with).
+/// [`split`](crate::CanonicalChan::split).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Split<P, Q>(pub P, pub Q);
 
-impl<P, Q> IsSession for Split<P, Q> {}
+impl<P: Any, Q: Any> IsSession for Split<P, Q> {}
 
 impl<P: Session, Q: Session> Session for Split<P, Q> {
     /// Note how the dual flips the position of `P` and `Q`, because `P::Dual` is a receiving

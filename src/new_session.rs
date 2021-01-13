@@ -1,3 +1,5 @@
+pub use crate::canonical::Over;
+
 use super::*;
 
 /// The `NewSession` extension trait gives methods to create session-typed channels from session
@@ -86,7 +88,10 @@ where
     /// ```
     fn channel<Tx, Rx>(
         make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>);
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>)
+    where
+        Tx: marker::Send + 'static,
+        Rx: marker::Send + 'static;
 
     /// Given two closures, each of which generates a uni-directional underlying transport channel,
     /// create a pair of dual [`Chan`]s which communicate over the transport channels resulting from
@@ -112,19 +117,18 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>);
+    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>)
+    where
+        Tx0: marker::Send + 'static,
+        Rx0: marker::Send + 'static,
+        Tx1: marker::Send + 'static,
+        Rx1: marker::Send + 'static;
 
     /// Given a transmitting and receiving end of an un-session-typed connection, wrap them in a new
     /// session-typed channel for the protocol `P.`
     ///
     /// It is expected that the other ends of these connections will be wrapped in a channel with
     /// the [`Dual`](crate::Session::Dual) session type.
-    ///
-    /// # Notes
-    ///
-    /// Because `&mut Tx` and `&mut Rx` are [`Transmit`] and [`Receive`] if `Tx` and `Rx` are
-    /// [`Transmit`] and `Receive` respectively, a [`Chan`] does not need to own its connections; a
-    /// mutable reference or an owned type work equally well as inputs to `wrap`.
     ///
     /// # Examples
     ///
@@ -134,14 +138,105 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (mut tx, mut rx) = mpsc::unbounded_channel();
-    /// let c = Done::wrap(&mut tx, &mut rx);  // you can wrap &mut references
-    /// c.close();                            // whose lifetimes end when the channel is closed,
-    /// let c = Done::wrap(tx, rx);            // or you can wrap owned values
-    /// let (tx, rx) = c.close();             // and get them back when the channel is closed.
+    /// let (tx, rx) = mpsc::unbounded_channel();
+    /// let c = Done::wrap(tx, rx);
+    /// c.close();
     /// # }
     /// ```
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>;
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>
+    where
+        Tx: marker::Send + 'static,
+        Rx: marker::Send + 'static;
+
+    /// Given a closure which runs the session on a channel from start to completion, run that
+    /// session on the given pair of sending and receiving connections.
+    ///
+    /// # Errors
+    ///
+    /// The closure must *finish* the session `P` on the channel given to it and *drop* the finished
+    /// channel before the future returns. If the channel is dropped before completing `P` or is not
+    /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
+    /// channel for `Q`. The best way to ensure this error does not occur is to call
+    /// [`close`](CanonicalChan::close) on the channel before returning from the future, because
+    /// this statically checks that the session is complete and drops the channel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (tx, rx) = mpsc::unbounded_channel();
+    /// let (output, ends) = Done::over(tx, rx, |chan| async move {
+    ///     chan.close();
+    ///     Ok::<_, mpsc::Error>("Hello!".to_string())
+    /// }).await?;
+    ///
+    /// assert_eq!(output, "Hello!");
+    /// let (tx, rx) = ends?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// As noted above, an error is thrown when the channel is dropped too early:
+    ///
+    /// ```
+    /// # use dialectic::prelude::*;
+    /// # use dialectic::backend::mpsc;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use SessionIncomplete::BothHalves;
+    /// use IncompleteHalf::Unfinished;
+    ///
+    /// let (tx, rx) = mpsc::unbounded_channel();
+    /// let (_, ends) = <Send<String>>::over(tx, rx, |chan| async move {
+    ///     Ok::<_, mpsc::Error>(())
+    /// }).await?;
+    ///
+    /// assert!(matches!(ends, Err(BothHalves { tx: Unfinished(_), rx: Unfinished(_) })));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// And likewise, an error is thrown when the channel is not dropped by the end of the future:
+    ///
+    /// ```
+    /// # use dialectic::prelude::*;
+    /// # use dialectic::backend::mpsc;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use std::sync::{Arc, Mutex};
+    ///
+    /// use SessionIncomplete::BothHalves;
+    /// use IncompleteHalf::Unclosed;
+    ///
+    /// // We'll put the `Chan` here so it outlives the closure. **Don't do this!**
+    /// let hold_on_to_chan = Arc::new(Mutex::new(None));
+    /// let hold = hold_on_to_chan.clone();
+    ///
+    /// let (tx, rx) = mpsc::unbounded_channel();
+    /// let (_, ends) = <Send<String>>::over(tx, rx, |chan| async move {
+    ///     *hold.lock().unwrap() = Some(chan);
+    ///     Ok::<_, mpsc::Error>(())
+    /// }).await?;
+    ///
+    /// assert!(matches!(ends, Err(BothHalves { tx: Unclosed, rx: Unclosed })));
+    ///
+    /// // Make sure the `Chan` outlives the closure. **Don't do this!**
+    /// drop(hold_on_to_chan);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
+    where
+        Tx: std::marker::Send + 'static,
+        Rx: std::marker::Send + 'static,
+        F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
+        Fut: Future<Output = Result<T, Err>>;
 }
 
 impl<P> NewSession for P
@@ -151,7 +246,11 @@ where
 {
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>) {
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>)
+    where
+        Tx: marker::Send + 'static,
+        Rx: marker::Send + 'static,
+    {
         let (tx0, rx0) = make();
         let (tx1, rx1) = make();
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
@@ -160,13 +259,33 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>) {
+    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>)
+    where
+        Tx0: marker::Send + 'static,
+        Rx0: marker::Send + 'static,
+        Tx1: marker::Send + 'static,
+        Rx1: marker::Send + 'static,
+    {
         let (tx0, rx0) = make0();
         let (tx1, rx1) = make1();
         (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
     }
 
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self> {
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>
+    where
+        Tx: marker::Send + 'static,
+        Rx: marker::Send + 'static,
+    {
         canonical::CanonicalChan::from_raw_unchecked(tx, rx)
+    }
+
+    fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
+    where
+        Tx: std::marker::Send + 'static,
+        Rx: std::marker::Send + 'static,
+        F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
+        Fut: Future<Output = Result<T, Err>>,
+    {
+        crate::canonical::over::<Self, (), _, _, _, _, _, _>(tx, rx, with_chan)
     }
 }
