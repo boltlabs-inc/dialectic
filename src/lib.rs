@@ -22,6 +22,8 @@
 //! - gracefully handles runtime protocol violations, introducing **no panics**; and
 //! - allows for **full duplex concurrent communication**, if specified in its type, while
 //!   preserving all the same session-type safety guarantees.
+//! - allows the expression of **context free sessions**, a more general form of session that than
+//!   most other session typing libraries.
 //!
 //! Together, these make Dialectic ideal for writing networked services that need to ensure **high
 //! levels of availability** and **complex protocol correctness properties** in the real world,
