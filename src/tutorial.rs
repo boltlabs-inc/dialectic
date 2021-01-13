@@ -347,6 +347,9 @@
 //! type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
 //! ```
 //!
+//! **Notice:** We have to *explicitly* use [`Continue`] to reiterate the [`Loop`]: even inside a
+//! [`Loop`], [`Done`] means that the session is over.
+//!
 //! The dual to `Loop<P>` is `Loop<P::Dual>`, the dual to `Continue` is `Continue`, and the dual to
 //! `Break` is `Break`, so we know the other end of this channel will need to implement:
 //!
@@ -358,25 +361,6 @@
 //! assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
 //! ```
 //!
-//! **Note:** **[`Break`] is the only way to exit a [`Loop`]**. Just like in Rust, when you reach
-//! the end of a [`Loop`], control implicitly jumps again to its head. When inside a [`Loop`], the
-//! [`Done`] session type is equivalent to the [`Continue`] session type, so this is an infinitely
-//! looping session type, even though the session after [`Send`] is [`Done`]:
-//!
-//! ```
-//! # use dialectic::prelude::*;
-//! type SendForever = Loop<Send<i64, Done>>;
-//! ```
-//!
-//! Because [`Send`] and [`Recv`] have [`Done`] as a default second parameter, we can abbreviate
-//! these two types in our `QuerySum` and `ComputeSum` to omit the explicit [`Continue`]:
-//!
-//! ```
-//! # use dialectic::prelude::*;
-//! type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
-//! type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
-//! ```
-//!
 //! We can implement this protocol by following the session types. When the session type of a
 //! [`Chan`] hits a [`Continue`] point, it jumps back to the type of the [`Loop`] to which that
 //! [`Continue`] refers. In this case, for example, immediately after the querying task sends an
@@ -386,8 +370,8 @@
 //! ```
 //! # use dialectic::prelude::*;
 //! # use dialectic::backend::mpsc;
-//! # type QuerySum = Loop<Choose<(Send<i64>, Recv<i64, Break>)>>;
-//! # type ComputeSum = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
+//! # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Break>)>>;
+//! # type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64, Break>)>>;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #
@@ -452,10 +436,9 @@
 //!
 //! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
 //! on a session type is. For [`Send`], [`Recv`], [`Offer`], [`Choose`], and [`Split`] (the final
-//! session type discussed below), and [`Done`] when it occurs *outside* a `Loop`, the "real action"
-//! is that session type itself. However, for [`Loop`], [`Break`], [`Continue`], and [`Done`] when
-//! it occurs *inside* a loop, the next action is whatever follows entering the loop(s) or
-//! recurring, respectively.
+//! session type discussed below), and [`Done`], the "real action" is that session type itself.
+//! However, for [`Loop`], [`Break`], and [`Continue`], the next action is whatever follows entering
+//! the loop(s) or recurring, respectively.
 //!
 //! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
 //! most of the traits in [`types`] aside from [`Session`]. It's good to know what it's for, though,

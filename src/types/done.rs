@@ -13,27 +13,7 @@ impl Session for Done {
 
 impl<N: Unary> Scoped<N> for Done {}
 
-impl Actionable<()> for Done {
+impl<E: Environment> Actionable<E> for Done {
     type Action = Done;
     type Env = ();
-}
-
-impl<P, Rest> Actionable<((Done, P), Rest)> for Done
-where
-    P: Scoped<S<<Rest as Environment>::Depth>>,
-    Rest: Environment,
-{
-    type Action = Done;
-    type Env = ();
-}
-
-/// When inside a `Loop`, `Done` repeats the innermost loop.
-impl<P, Rest> Actionable<((Continue, P), Rest)> for Done
-where
-    P: Scoped<S<<Rest as Environment>::Depth>>,
-    Continue: Actionable<((Continue, P), Rest)>,
-    Rest: Environment,
-{
-    type Action = <Continue as Actionable<((Continue, P), Rest)>>::Action;
-    type Env = <Continue as Actionable<((Continue, P), Rest)>>::Env;
 }

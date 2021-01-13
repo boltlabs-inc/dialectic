@@ -127,34 +127,18 @@ pub trait Environment: Any {
     /// The depth of a session environment is the number of loops to which a [`Continue`] could
     /// jump, i.e. the number of session types in the session environment.
     type Depth: Unary;
-
-    /// The same environment, headed with `Done` rather than `Continue` if inside a [`Loop`]. This
-    /// allows [`Done`] to step to the second session in [`Seq`], even if [`Seq`] occurs inside a
-    /// [`Loop`].
-    type MakeDone: Environment<Depth = Self::Depth, MakeDone = Self::MakeDone>;
 }
 
 impl Environment for () {
     type Depth = Z;
-    type MakeDone = Self;
 }
 
-impl<P, Rest> Environment for ((Done, P), Rest)
+impl<P, Rest> Environment for (P, Rest)
 where
     P: Scoped<S<Rest::Depth>>,
     Rest: Environment,
 {
     type Depth = S<Rest::Depth>;
-    type MakeDone = Self;
-}
-
-impl<P, Rest> Environment for ((Continue, P), Rest)
-where
-    P: Scoped<S<Rest::Depth>>,
-    Rest: Environment,
-{
-    type Depth = S<Rest::Depth>;
-    type MakeDone = ((Done, P), Rest);
 }
 
 /// A session type is *scoped* for a given environment depth `N` if it [`Continue`]s no more than

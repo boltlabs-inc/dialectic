@@ -659,7 +659,7 @@ impl<'a, Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Seq<P, Q>, E>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    P: Actionable<E::MakeDone>,
+    P: Actionable<E>,
     Q: Actionable<E>,
     E: Environment,
 {
@@ -713,14 +713,14 @@ where
         first: F,
     ) -> Result<(T, Result<Chan<Tx, Rx, Q, E>, SessionIncomplete<Tx, Rx>>), Err>
     where
-        F: FnOnce(Chan<Tx, Rx, P, E::MakeDone>) -> Fut,
+        F: FnOnce(Chan<Tx, Rx, P, E>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
         let tx = self.tx.take().unwrap();
         let rx = self.rx.take().unwrap();
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
-        let (result, maybe_chan) = over::<P, E::MakeDone, _, _, _, _, _, _>(tx, rx, first).await?;
+        let (result, maybe_chan) = over::<P, E, _, _, _, _, _, _>(tx, rx, first).await?;
         Ok((
             result,
             maybe_chan.map(|(tx, rx)| CanonicalChan {

@@ -107,8 +107,6 @@ async fn tally<Tx, Rx, E, R, W, Err>(
 ) -> Result<bool, Err>
 where
     E: Environment,
-    Done: Actionable<E, Action = Done, Env = ()>,
-    Break: Actionable<<ClientTally as Actionable<E>>::Env, Action = Done, Env = ()>,
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
     Rx: Receive<i64> + std::marker::Send + 'static,
