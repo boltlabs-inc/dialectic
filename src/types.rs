@@ -68,14 +68,14 @@ where
     Self: Scoped<E::Depth>,
 {
     /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
-    /// This steps through [`Loop`] and [`Continue`] transparently.
+    /// This steps through [`Loop`], [`Break`], and [`Continue`] transparently.
     ///
     /// The constraints on this associated type ensure that it is idemopotent: the `Action` and
     /// `Env` of an `Action` are the same as those of that `Action`.
     type Action: Actionable<Self::Env, Action = Self::Action, Env = Self::Env>;
 
-    /// The environment resulting from stepping through one or many [`Loop`] or [`Continue`] points
-    /// to the next real channel action.
+    /// The environment resulting from stepping through one or many [`Loop`], [`Break`], or
+    /// [`Continue`] points to the next real channel action.
     type Env: Environment;
 }
 

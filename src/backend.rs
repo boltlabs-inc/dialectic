@@ -27,12 +27,11 @@ pub mod mpsc;
 #[cfg(feature = "serde")]
 pub mod serde;
 
-/// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a
-/// message of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention
-/// specified.
+/// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a message
+/// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 ///
-/// In order to support the [`Chan::choose`](crate::CanonicalChan::choose) method, all backends
-/// must implement `Transmit<'static, Choice<N>, Val>` for all `N`. For more information, see
+/// In order to support the [`Chan::choose`](crate::CanonicalChan::choose) method, all backends must
+/// implement `Transmit<Choice<N>, Val>` for all `N`. For more information, see
 /// [`Choice`](crate::Choice).
 ///
 /// # Examples

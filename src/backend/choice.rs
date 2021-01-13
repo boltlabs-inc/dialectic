@@ -9,7 +9,7 @@ use thiserror::Error;
 /// type level number `N`.
 ///
 /// Unless you are implementing a [`backend`](crate::backend), you do not need to interact with
-/// `Choice`s directly. However, all backends must implement [`Transmit<'static, Choice<N>,
+/// `Choice`s directly. However, all backends must implement [`Transmit<Choice<N>,
 /// Val>`](crate::backend::Transmit) and [`Receive<Choice<N>>`](crate::backend::Receive) for all `N`
 /// in order to support the [`Choose`](crate::Choose) and [`Offer`](crate::Offer) constructs.
 ///
@@ -43,7 +43,7 @@ use thiserror::Error;
 /// # use dialectic::types::unary::types::*;
 /// #
 /// let attempted_three: Result<Choice<_3>, _> = 3_u8.try_into();
-/// let attempted_four: Result<Choice<_4>, _> = 4_u8.try_into();
+/// let attempted_four: Result<Choice<_3>, _> = 4_u8.try_into();
 ///
 /// assert!(attempted_three.is_err());
 /// assert!(attempted_four.is_err());
