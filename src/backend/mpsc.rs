@@ -8,6 +8,15 @@ use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+/// Shorthand for a [`Chan`](crate::Chan) using a bounded [`mpsc`](crate::backend::mpsc) [`Sender`]
+/// and [`Receiver`].
+pub type Chan<'a, P, E = ()> = crate::Chan<Sender<'a>, Receiver<'a>, P, E>;
+
+/// Shorthand for a [`Chan`](crate::Chan) using an unbounded [`mpsc`](crate::backend::mpsc)
+/// [`UnboundedSender`] and [`UnboundedReceiver`].
+pub type UnboundedChan<'a, P, E = ()> =
+    crate::Chan<UnboundedSender<'a>, UnboundedReceiver<'a>, P, E>;
+
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
 pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + Send + 'a>>;
 
