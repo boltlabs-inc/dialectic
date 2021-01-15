@@ -118,8 +118,7 @@ async fn listen_on<P, F, Fut>(
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     F: Fn(BincodeTcpChan<P>) -> Fut + std::marker::Sync + 'static,
-    Fut: Future<Output = Result<BincodeTcpChan<Done>, Box<dyn std::error::Error>>>
-        + std::marker::Send,
+    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>> + std::marker::Send,
     P: NewSession,
     P::Dual: Actionable,
     P::Env: Environment + std::marker::Send,
@@ -131,7 +130,6 @@ where
         tokio::spawn(async move {
             let _ = interaction(wrap_socket::<P>(socket, max_length))
                 .await
-                .map(|chan| chan.close())
                 .map_err(|err| eprintln!("Error on {}: {}", addr, err));
         });
     }
@@ -139,7 +137,7 @@ where
 
 async fn serve<'a, Tx: std::marker::Send, Rx: std::marker::Send, Err>(
     mut chan: Chan<Tx, Rx, Server>,
-) -> Result<Chan<Tx, Rx, Done>, Err>
+) -> Result<(), Err>
 where
     Rx: Receive<Operation> + Receive<i64> + Receive<Choice<_2>>,
     Tx: Transmit<i64, Ref>,
@@ -148,7 +146,7 @@ where
         + From<<Rx as Receive<Choice<_2>>>::Error>
         + From<<Rx as Receive<Operation>>::Error>,
 {
-    let chan = loop {
+    loop {
         chan = offer!(chan => {
             // Client wants to compute another tally
             _0 => {
@@ -156,10 +154,10 @@ where
                 chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1.expect("tally finishes session")
             },
             // Client wants to quit
-            _1 => break chan,
+            _1 => break chan.close(),
         })
-    };
-    Ok(chan)
+    }
+    Ok(())
 }
 
 async fn tally<Tx, Rx, E, Err>(op: &Operation, mut chan: Chan<Tx, Rx, Tally, E>) -> Result<(), Err>
