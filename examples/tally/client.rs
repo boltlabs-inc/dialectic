@@ -7,8 +7,8 @@ mod server;
 use server::{get_port, wrap_socket, Operation, Server, Tally};
 
 // The client is the dual of the server
-type Client = <Server as Session>::Dual;
-type ClientTally = <Tally as Session>::Dual;
+type Client = <Server as HasDual>::Dual;
+type ClientTally = <Tally as HasDual>::Dual;
 
 /// Loop presenting a prompt until the user enters a parseable string or the input ends, returning
 /// `Ok(None)` on end of input and `Err(_)` on other errors.
@@ -83,7 +83,7 @@ where
                 .await?;
             output.flush().await?;
             let (done, chan_inner) = chan_inner
-                .seq(|chan| tally::<_, _, _, _, _, Err>(&operation, input, output, chan))
+                .seq(|chan| tally::<_, _, _, _, Err>(&operation, input, output, chan))
                 .await?;
             let chan_inner = chan_inner.unwrap();
             if done {
@@ -99,14 +99,13 @@ where
     Ok(chan)
 }
 
-async fn tally<Tx, Rx, E, R, W, Err>(
+async fn tally<Tx, Rx, R, W, Err>(
     operation: &Operation,
     input: &mut Lines<R>,
     output: &mut W,
-    mut chan: Chan<Tx, Rx, ClientTally, E>,
+    mut chan: Chan<Tx, Rx, ClientTally>,
 ) -> Result<bool, Err>
 where
-    E: Environment,
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
     Rx: Receive<i64> + std::marker::Send + 'static,

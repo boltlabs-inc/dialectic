@@ -41,7 +41,7 @@ pub struct S<N>(pub N);
 /// // ...
 /// assert_eq!(_127::VALUE, 127);
 /// ```
-pub trait Unary: sealed::Sealed {
+pub trait Unary: sealed::Unary {
     /// The runtime value of this type-level number, as a `usize`.
     const VALUE: usize;
 }
@@ -82,19 +82,63 @@ impl<N: Unary> Unary for S<N> {
 /// #
 /// fn bad() where _100: LessThan<_100> {}
 /// ```
-pub trait LessThan<N: sealed::Sealed>
+pub trait LessThan<N: sealed::Unary>
 where
-    Self: sealed::Sealed,
+    Self: sealed::Unary,
 {
 }
 
-impl<N: sealed::Sealed> LessThan<S<N>> for Z {}
+impl<N: sealed::Unary> LessThan<S<N>> for Z {}
 
-impl<N: sealed::Sealed, M: LessThan<N>> LessThan<S<N>> for S<M> {}
+impl<N: sealed::Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
+
+/// Compare two unary numbers and branch on their comparison, at the type level.
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use static_assertions::assert_type_eq_all;
+///
+/// assert_type_eq_all!(<(_0, _1) as Compare<u8, u16, u32>>::Result, u8);
+/// assert_type_eq_all!(<(_1, _1) as Compare<u8, u16, u32>>::Result, u16);
+/// assert_type_eq_all!(<(_2, _1) as Compare<u8, u16, u32>>::Result, u32);
+/// ```
+pub trait Compare<IfLess, IfEqual, IfGreater>: sealed::Compare {
+    /// The result of the comparison: either `T` if `Self == N` or `E` if `Self != N`.
+    type Result;
+}
+
+impl<N: sealed::Unary, M: sealed::Unary, IfLess, IfEqual, IfGreater>
+    Compare<IfLess, IfEqual, IfGreater> for (S<N>, S<M>)
+where
+    (N, M): Compare<IfLess, IfEqual, IfGreater>,
+{
+    type Result = <(N, M) as Compare<IfLess, IfEqual, IfGreater>>::Result;
+}
+
+impl<IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> for (Z, Z) {
+    type Result = IfEqual;
+}
+
+impl<N: sealed::Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater>
+    for (S<N>, Z)
+{
+    type Result = IfGreater;
+}
+
+impl<N: sealed::Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater>
+    for (Z, S<N>)
+{
+    type Result = IfLess;
+}
 
 mod sealed {
     use super::*;
-    pub trait Sealed {}
-    impl Sealed for Z {}
-    impl<N: Sealed> Sealed for S<N> {}
+    pub trait Unary: 'static {}
+    impl Unary for Z {}
+    impl<N: Unary> Unary for S<N> {}
+
+    pub trait Compare {}
+    impl<N: Unary, M: Unary> Compare for (N, M) {}
 }

@@ -72,8 +72,7 @@ use tuple::{HasLength, List, Tuple};
 pub struct CanonicalChan<
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment = (),
+    S: Scoped + Actionable + HasDual,
 > {
     tx: Option<Tx>,
     rx: Option<Rx>,
@@ -82,19 +81,17 @@ pub struct CanonicalChan<
     #[derivative(Debug = "ignore")]
     drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
     #[derivative(Debug = "ignore")]
-    session: PhantomData<(P, E)>,
+    session: PhantomData<S>,
 }
 
-impl<Tx, Rx, P, E> Drop for CanonicalChan<Tx, Rx, P, E>
+impl<Tx, Rx, S> Drop for CanonicalChan<Tx, Rx, S>
 where
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
+    S: Scoped + Actionable + HasDual,
 {
     fn drop(&mut self) {
-        let done =
-            TypeId::of::<P>() == TypeId::of::<Done>() && TypeId::of::<E>() == TypeId::of::<()>();
+        let done = TypeId::of::<S::Action>() == TypeId::of::<Done>();
         let tx = self.tx.take();
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.take();
@@ -108,7 +105,10 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static> CanonicalChan<Tx, Rx, Done, ()> {
+impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: HasDual> CanonicalChan<Tx, Rx, S>
+where
+    S: Scoped + Actionable<Action = Done>,
+{
     /// Close a finished session, dropping the underlying connections.
     ///
     /// If called inside a future given to [`split`](CanonicalChan::split) or
@@ -156,13 +156,13 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static> CanonicalChan<Tx, R
     }
 }
 
-impl<'a, Tx, Rx, E, T, P> CanonicalChan<Tx, Rx, Recv<T, P>, E>
+impl<'a, Tx, Rx, T, S, P> CanonicalChan<Tx, Rx, S>
 where
     Tx: marker::Send + 'static,
     Rx: Receive<T> + marker::Send + 'static,
     T: marker::Send + 'static,
-    P: Actionable<E>,
-    E: Environment,
+    S: Scoped + HasDual + Actionable<Action = Recv<T, P>>,
+    P: Scoped + Actionable + HasDual,
 {
     /// Receive something of type `T` on the channel, returning the pair of the received object and
     /// the channel.
@@ -188,18 +188,18 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, P, E>), Rx::Error> {
+    pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, P>), Rx::Error> {
         let result = self.rx.as_mut().unwrap().recv().await?;
         Ok((result, self.unchecked_cast()))
     }
 }
 
-impl<'a, Tx, Rx, E, T: 'static, P> CanonicalChan<Tx, Rx, Send<T, P>, E>
+impl<'a, Tx, Rx, T: 'static, S, P> CanonicalChan<Tx, Rx, S>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    P: Actionable<E>,
-    E: Environment,
+    S: Scoped + HasDual + Actionable<Action = Send<T, P>>,
+    P: Scoped + Actionable + HasDual,
 {
     /// Send something of type `T` on the channel, returning the channel.
     ///
@@ -232,7 +232,7 @@ where
     pub async fn send<'b, Convention: CallingConvention>(
         mut self,
         message: <T as CallBy<'b, Convention>>::Type,
-    ) -> Result<Chan<Tx, Rx, P, E>, <Tx as Transmit<T, Convention>>::Error>
+    ) -> Result<Chan<Tx, Rx, P>, <Tx as Transmit<T, Convention>>::Error>
     where
         Tx: Transmit<T, Convention>,
         T: CallBy<'b, Convention>,
@@ -243,16 +243,15 @@ where
     }
 }
 
-impl<Tx, Rx, E, Choices: 'static> CanonicalChan<Tx, Rx, Choose<Choices>, E>
+impl<Tx, Rx, Choices: 'static, S> CanonicalChan<Tx, Rx, S>
 where
     Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val> + marker::Send + 'static,
     Rx: marker::Send + 'static,
+    S: Scoped + HasDual + Actionable<Action = Choose<Choices>>,
     Choices: Tuple,
-    Choices::AsList: HasLength,
+    Choices::AsList: HasLength + EachHasDual + EachScoped,
     <Choices::AsList as HasLength>::Length: marker::Send,
-    <Choices::AsList as EachSession>::Dual: List,
-    E: Environment,
-    Choices::AsList: EachScoped<E::Depth>,
+    <Choices::AsList as EachHasDual>::Duals: List,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
     /// other end of the connection, alerting the other party to this choice by sending the number
@@ -320,11 +319,11 @@ where
     pub async fn choose<N: Unary>(
         mut self,
         _choice: N,
-    ) -> Result<Chan<Tx, Rx, <Choices::AsList as Select<N>>::Selected, E>, Tx::Error>
+    ) -> Result<Chan<Tx, Rx, <Choices::AsList as Select<N>>::Selected>, Tx::Error>
     where
         N: LessThan<_128>,
         Choices::AsList: Select<N>,
-        <Choices::AsList as Select<N>>::Selected: Actionable<E>,
+        <Choices::AsList as Select<N>>::Selected: Scoped + Actionable + HasDual,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -334,16 +333,15 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E, Choices: 'static> CanonicalChan<Tx, Rx, Offer<Choices>, E>
+impl<'a, Tx, Rx, Choices: 'static, S> CanonicalChan<Tx, Rx, S>
 where
     Tx: marker::Send + 'static,
     Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>> + marker::Send + 'static,
+    S: Scoped + HasDual + Actionable<Action = Offer<Choices>>,
     Choices: Tuple,
-    Choices::AsList: HasLength,
-    <Choices::AsList as EachSession>::Dual: List,
-    E: Environment,
-    Choices::AsList: EachActionable<E>,
-    Choices::AsList: EachScoped<E::Depth>,
+    Choices::AsList: HasLength + EachScoped,
+    <Choices::AsList as EachHasDual>::Duals: List,
+    Choices::AsList: EachHasDual,
     _0: LessThan<<Choices::AsList as HasLength>::Length>,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
@@ -420,7 +418,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(mut self) -> Result<Branches<Tx, Rx, Choices, E>, Rx::Error> {
+    pub async fn offer(mut self) -> Result<Branches<Tx, Rx, Choices>, Rx::Error> {
         let tx = self.tx.take();
         let mut rx = self.rx.take();
         let drop_tx = self.drop_tx.take();
@@ -438,13 +436,13 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Split<P, Q>, E>
+impl<'a, Tx, Rx, S, P, Q> CanonicalChan<Tx, Rx, S>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    P: Actionable<E>,
-    Q: Actionable<E>,
-    E: Environment,
+    S: Scoped + HasDual + Actionable<Action = Split<P, Q>>,
+    P: Scoped + Actionable + HasDual,
+    Q: Scoped + Actionable + HasDual,
 {
     /// Split a channel into transmit-only and receive-only ends and manipulate them, potentially
     /// concurrently, in the given closure.
@@ -523,8 +521,8 @@ where
     ) -> Result<(T, Result<Chan<Tx, Rx, Done>, SessionIncomplete<Tx, Rx>>), Err>
     where
         F: FnOnce(
-            Chan<Available<Tx>, Unavailable<Rx>, P, E>,
-            Chan<Unavailable<Tx>, Available<Rx>, Q, E>,
+            Chan<Available<Tx>, Unavailable<Rx>, P>,
+            Chan<Unavailable<Tx>, Available<Rx>, Q>,
         ) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
@@ -535,19 +533,16 @@ where
         let rx = self.rx.take().unwrap();
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
-        let ((result, maybe_rx), maybe_tx) = over::<P, E, _, _, _, _, _, _>(
-            Available(tx),
-            Unavailable::new(),
-            |tx_only| async move {
-                over::<Q, E, _, _, _, _, _, _>(
+        let ((result, maybe_rx), maybe_tx) =
+            over::<P, _, _, _, _, _, _>(Available(tx), Unavailable::new(), |tx_only| async move {
+                over::<Q, _, _, _, _, _, _>(
                     Unavailable::new(),
                     Available(rx),
                     |rx_only| async move { with_parts(tx_only, rx_only).await },
                 )
                 .await
-            },
-        )
-        .await?;
+            })
+            .await?;
         // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
         // Available/Unavailable and maximize possible returned things (it's fine to drop the
         // Unavailable end of something if for some reason you split twice)
@@ -600,13 +595,13 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E, P, Q> CanonicalChan<Tx, Rx, Seq<P, Q>, E>
+impl<'a, Tx, Rx, S, P, Q> CanonicalChan<Tx, Rx, S>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    P: Actionable<E>,
-    Q: Actionable<E>,
-    E: Environment,
+    S: Scoped + HasDual + Actionable<Action = Seq<P, Q>>,
+    P: Scoped + Actionable + HasDual,
+    Q: Scoped + Actionable + HasDual,
 {
     /// Sequence an arbitrary session `P` before another session `Q`.
     ///
@@ -744,16 +739,16 @@ where
     pub async fn seq<T, Err, F, Fut>(
         mut self,
         first: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Q, E>, SessionIncomplete<Tx, Rx>>), Err>
+    ) -> Result<(T, Result<Chan<Tx, Rx, Q>, SessionIncomplete<Tx, Rx>>), Err>
     where
-        F: FnOnce(Chan<Tx, Rx, P, E>) -> Fut,
+        F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
         let tx = self.tx.take().unwrap();
         let rx = self.rx.take().unwrap();
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
-        let (result, maybe_chan) = over::<P, E, _, _, _, _, _, _>(tx, rx, first).await?;
+        let (result, maybe_chan) = over::<P, _, _, _, _, _, _>(tx, rx, first).await?;
         Ok((
             result,
             maybe_chan.map(|(tx, rx)| CanonicalChan {
@@ -767,18 +762,16 @@ where
     }
 }
 
-impl<'a, Tx: 'a, Rx: 'a, E, P> CanonicalChan<Tx, Rx, P, E>
+impl<'a, Tx: 'a, Rx: 'a, P> CanonicalChan<Tx, Rx, P>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    P: Actionable<E, Action = P, Env = E>,
-    E: Environment,
+    P: Scoped + Actionable + HasDual,
 {
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<F, Q>(mut self) -> CanonicalChan<Tx, Rx, Q, F>
+    fn unchecked_cast<Q>(mut self) -> CanonicalChan<Tx, Rx, Q>
     where
-        F: Environment,
-        Q: Actionable<F, Action = Q, Env = F>,
+        Q: Scoped + Actionable + HasDual,
     {
         CanonicalChan {
             tx: self.tx.take(),
@@ -816,7 +809,7 @@ where
     /// Create a new channel with an arbitrary environment and session type. This is equivalent to
     /// casting a new channel to an arbitrary environment, and doesn't guarantee the environment is
     /// coherent with regard to the session type. Use with care!
-    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P, E> {
+    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P> {
         CanonicalChan {
             tx: Some(tx),
             rx: Some(rx),
@@ -830,17 +823,16 @@ where
 /// The implementation of `NewSession::over`, generalized to any environment (unlike the public
 /// `over` function which only works in the empty environment). This is not safe to export because
 /// nonsense environments could be specified.
-pub(crate) fn over<P, E, Tx, Rx, T, Err, F, Fut>(
+pub(crate) fn over<P, Tx, Rx, T, Err, F, Fut>(
     tx: Tx,
     rx: Rx,
     with_chan: F,
 ) -> Over<Tx, Rx, T, Err, Fut>
 where
-    P: Actionable<E>,
-    E: Environment,
+    P: Scoped + Actionable + HasDual,
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
-    F: FnOnce(Chan<Tx, Rx, P, E>) -> Fut,
+    F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
     Fut: Future<Output = Result<T, Err>>,
 {
     use IncompleteHalf::*;
@@ -927,8 +919,7 @@ where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
-    Choices::AsList: EachActionable<E>,
-    E: Environment,
+    Choices::AsList: EachScoped + EachHasDual,
 {
     variant: u8,
     tx: Option<Tx>,
@@ -948,8 +939,7 @@ where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
-    Choices::AsList: EachActionable<E>,
-    E: Environment,
+    Choices::AsList: EachScoped + EachHasDual,
 {
     fn drop(&mut self) {
         // A `Branches` is never an end-state for a channel, so we always say it wasn't done
@@ -973,19 +963,13 @@ where
     Rx: marker::Send + 'static,
     Choices: Tuple<AsList = (P, Ps)>,
     (P, Ps): List<AsTuple = Choices>,
-    P: Actionable<E>,
-    Ps: EachActionable<E> + List,
-    E: Environment,
+    P: Scoped + Actionable + HasDual,
+    Ps: EachScoped + EachHasDual + List,
 {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
     #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(
-        mut self,
-    ) -> Result<
-        Chan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>,
-        Branches<Tx, Rx, Ps::AsTuple, E>,
-    > {
+    pub fn case(mut self) -> Result<Chan<Tx, Rx, P>, Branches<Tx, Rx, Ps::AsTuple>> {
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
@@ -1013,7 +997,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx, E: Environment> Branches<Tx, Rx, (), E>
+impl<'a, Tx, Rx> Branches<Tx, Rx, ()>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,

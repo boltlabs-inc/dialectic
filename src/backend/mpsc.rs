@@ -10,12 +10,11 @@ use tokio::sync::mpsc;
 
 /// Shorthand for a [`Chan`](crate::Chan) using a bounded [`mpsc`](crate::backend::mpsc) [`Sender`]
 /// and [`Receiver`].
-pub type Chan<P, E = ()> = crate::Chan<Sender<'static>, Receiver<'static>, P, E>;
+pub type Chan<P> = crate::Chan<Sender<'static>, Receiver<'static>, P>;
 
 /// Shorthand for a [`Chan`](crate::Chan) using an unbounded [`mpsc`](crate::backend::mpsc)
 /// [`UnboundedSender`] and [`UnboundedReceiver`].
-pub type UnboundedChan<'a, P, E = ()> =
-    crate::Chan<UnboundedSender<'a>, UnboundedReceiver<'a>, P, E>;
+pub type UnboundedChan<'a, P> = crate::Chan<UnboundedSender<'a>, UnboundedReceiver<'a>, P>;
 
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
 pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + Send + 'a>>;

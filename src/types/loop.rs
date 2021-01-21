@@ -8,18 +8,27 @@ pub struct Loop<P>(pub P);
 
 impl<P: IsSession> IsSession for Loop<P> {}
 
-impl<P: Session> Session for Loop<P> {
-    type Dual = Loop<P::Dual>;
+impl<P> HasDual for Loop<P>
+where
+    P: HasDual,
+{
+    type Dual = Loop<<P as HasDual>::Dual>;
 }
 
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 
-impl<P, E> Actionable<E> for Loop<P>
+impl<P> Actionable for Loop<P>
 where
-    E: Environment,
-    P: Actionable<(P, E)>,
-    P: Scoped<S<E::Depth>>,
+    P: Subst<Loop<P>, Z, Continue>,
+    P::Substituted: Actionable,
 {
-    type Action = <P as Actionable<(P, E)>>::Action;
-    type Env = <P as Actionable<(P, E)>>::Env;
+    type Action = <P::Substituted as Actionable>::Action;
+}
+
+impl<P, Q, Mode, N: Unary> Subst<Q, N, Mode> for Loop<P>
+where
+    P: Subst<Q, S<N>, Continue>,
+    <P as Subst<Q, S<N>, Continue>>::Substituted: HasDual,
+{
+    type Substituted = Loop<<P as Subst<Q, S<N>, Continue>>::Substituted>;
 }

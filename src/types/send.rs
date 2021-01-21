@@ -15,17 +15,16 @@ pub struct Send<T, P = Done>(pub PhantomData<T>, pub P);
 
 impl<T: Any, P: Any> IsSession for Send<T, P> {}
 
-impl<T: Any, P: Session> Session for Send<T, P> {
+impl<T: Any, P: HasDual> HasDual for Send<T, P> {
     type Dual = Recv<T, P::Dual>;
 }
 
-impl<N: Unary, T: Any, P: Scoped<N>> Scoped<N> for Send<T, P> {}
+impl<T, P> Actionable for Send<T, P> {
+    type Action = Self;
+}
 
-impl<E, T: Any, P> Actionable<E> for Send<T, P>
-where
-    P: Scoped<E::Depth>,
-    E: Environment,
-{
-    type Action = Send<T, P>;
-    type Env = E;
+impl<T, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}
+
+impl<N: Unary, Mode, T: 'static, P: Subst<Q, N, Mode>, Q> Subst<Q, N, Mode> for Send<T, P> {
+    type Substituted = Send<T, P::Substituted>;
 }

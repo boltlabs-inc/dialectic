@@ -63,10 +63,10 @@ use super::*;
 /// What the compiler is trying to tell you is that the session type as specified does not
 /// correspond to a valid sequence of actions on the channel, because it contains unproductive
 /// recursion.
-pub trait NewSession
+pub trait Session
 where
-    Self: Actionable,
-    Self::Dual: Actionable,
+    Self: Scoped + Actionable + HasDual,
+    Self::Dual: Scoped + Actionable + HasDual,
 {
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
@@ -239,10 +239,10 @@ where
         Fut: Future<Output = Result<T, Err>>;
 }
 
-impl<P> NewSession for P
+impl<P> Session for P
 where
-    Self: Actionable,
-    Self::Dual: Actionable,
+    Self: Scoped + Actionable + HasDual,
+    Self::Dual: Scoped + Actionable + HasDual,
 {
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
@@ -286,6 +286,6 @@ where
         F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
-        crate::canonical::over::<Self, (), _, _, _, _, _, _>(tx, rx, with_chan)
+        crate::canonical::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
     }
 }

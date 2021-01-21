@@ -568,9 +568,9 @@
 //! # use dialectic::backend::mpsc;
 //! type Query = Send<String, Recv<String, Done>>;
 //!
-//! async fn query<E: Environment>(
+//! async fn query(
 //!     question: String,
-//!     chan: mpsc::Chan<Query, E>
+//!     chan: mpsc::Chan<Query>
 //! ) -> Result<String, mpsc::Error> {
 //!     let chan = chan.send(question).await?;
 //!     let (answer, chan) = chan.recv().await?;
@@ -595,9 +595,9 @@
 //! # use dialectic::backend::mpsc;
 //! # type Query = Send<String, Recv<String, Done>>;
 //! #
-//! # async fn query<E: Environment>(
+//! # async fn query(
 //! #     question: String,
-//! #     chan: mpsc::Chan<Query, E>
+//! #     chan: mpsc::Chan<Query>
 //! # ) -> Result<String, mpsc::Error> {
 //! #     let chan = chan.send(question).await?;
 //! #     let (answer, chan) = chan.recv().await?;

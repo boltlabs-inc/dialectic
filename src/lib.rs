@@ -98,11 +98,11 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::backend::{Choice, Receive, Transmit};
     #[doc(no_inline)]
-    pub use crate::new_session::NewSession;
+    pub use crate::new_session::Session;
     pub use crate::tuple::{List, Tuple};
     pub use crate::types::unary::constants::*;
     pub use crate::types::unary::types::*;
-    pub use crate::types::unary::{LessThan, Unary, S, Z};
+    pub use crate::types::unary::{Compare, LessThan, Unary, S, Z};
     pub use crate::types::*;
     pub use crate::{
         canonical::{Branches, CanonicalChan},
@@ -117,7 +117,7 @@ pub mod tutorial;
 pub mod types;
 
 mod new_session;
-pub use new_session::NewSession;
+pub use new_session::Session;
 
 pub mod canonical;
 #[doc(inline)]
@@ -193,8 +193,7 @@ use prelude::*;
 /// let (c1, c2): (Chan<_, _, P>, Chan<_, _, <P as Session>::Dual>) =
 ///     P::channel(mpsc::unbounded_channel);
 /// ```
-pub type Chan<Tx, Rx, P, E = ()> =
-    CanonicalChan<Tx, Rx, <P as Actionable<E>>::Action, <P as Actionable<E>>::Env>;
+pub type Chan<Tx, Rx, P> = CanonicalChan<Tx, Rx, P>;
 
 /// Offer a set of different protocols, allowing the other side of the channel to choose with which
 /// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
