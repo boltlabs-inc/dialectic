@@ -9,18 +9,20 @@ pub struct Seq<P, Q = Done>(pub P, pub Q);
 
 impl<P: Any, Q: Any> IsSession for Seq<P, Q> {}
 
-impl<P: Session, Q: Session> Session for Seq<P, Q> {
+impl<P: HasDual, Q: HasDual> HasDual for Seq<P, Q> {
     type Dual = Seq<P::Dual, Q::Dual>;
 }
 
-impl<P: Scoped<N>, Q: Scoped<N>, N: Unary> Scoped<N> for Seq<P, Q> {}
+impl<P, Q> Actionable for Seq<P, Q> {
+    type Action = Self;
+}
 
-impl<E, P, Q> Actionable<E> for Seq<P, Q>
-where
-    P: Scoped<E::Depth>,
-    Q: Scoped<E::Depth>,
-    E: Environment,
+impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Seq<P, Q> {}
+
+/// Importantly, we require that `P: Subst<R, N, Done>`, which means [`Done`] doesn't implicitly
+/// loop at the outermost level of the first part of a [`Seq`].
+impl<N: Unary, Mode, P: Subst<R, N, Done>, Q: Subst<R, N, Mode>, R> Subst<R, N, Mode>
+    for Seq<P, Q>
 {
-    type Action = Seq<P, Q>;
-    type Env = E;
+    type Substituted = Seq<P::Substituted, Q::Substituted>;
 }

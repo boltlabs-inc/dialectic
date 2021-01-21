@@ -14,30 +14,29 @@ pub struct Choose<Choices>(pub Choices);
 
 impl<Choices: Any> IsSession for Choose<Choices> {}
 
-impl<Choices: Any> Session for Choose<Choices>
+impl<Choices: Any> HasDual for Choose<Choices>
 where
     Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
+    Choices::AsList: EachHasDual,
+    <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
 {
-    type Dual = Offer<<<Choices::AsList as EachSession>::Dual as List>::AsTuple>;
+    type Dual = Offer<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
 }
 
-impl<N: Unary, Choices: Tuple + Any> Scoped<N> for Choose<Choices>
-where
-    Choices::AsList: EachScoped<N>,
-    <Choices::AsList as EachSession>::Dual: List,
-{
+impl<Choices> Actionable for Choose<Choices> {
+    type Action = Self;
 }
 
-impl<E, Choices: Any> Actionable<E> for Choose<Choices>
+impl<N: Unary, Choices: Tuple> Scoped<N> for Choose<Choices> where Choices::AsList: EachScoped<N> {}
+
+impl<N: Unary, Mode, P, Choices> Subst<P, N, Mode> for Choose<Choices>
 where
-    Choices: Tuple,
-    Choices::AsList: EachSession,
-    <Choices::AsList as EachSession>::Dual: List + EachSession,
-    Choices::AsList: EachScoped<E::Depth>,
-    E: Environment,
+    Choices: Tuple + 'static,
+    Choices::AsList: EachHasDual + EachSubst<P, N, Mode>,
+    <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
+    <Choices::AsList as EachSubst<P, N, Mode>>::Substituted: List + EachHasDual,
+    <<Choices::AsList as EachSubst<P, N, Mode>>::Substituted as EachHasDual>::Duals: List,
 {
-    type Action = Choose<Choices>;
-    type Env = E;
+    type Substituted =
+        Choose<<<Choices::AsList as EachSubst<P, N, Mode>>::Substituted as List>::AsTuple>;
 }

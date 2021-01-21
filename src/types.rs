@@ -1,7 +1,5 @@
 //! The types in this module enumerate the shapes of all expressible sessions.
 
-use std::any::Any;
-
 use crate::prelude::*;
 pub use unary::types::*;
 pub use unary::{LessThan, Unary, S, Z};
@@ -33,11 +31,8 @@ pub use send::*;
 pub use seq::*;
 pub use split::*;
 
-/// A session type describes the sequence of operations performed by one end of a bidirectional
-/// [`Chan`].
-///
-/// Each session type has a [`Session::Dual`], the type of the corresponding client on the other
-/// side of the channel. The sealed trait `Session` enumerates these types, and provides the dual of
+/// Each session type has a [`HasDual::Dual`], the type of the corresponding client on the other
+/// side of the channel. The sealed trait `HasDual` enumerates these types, and provides the dual of
 /// each.
 ///
 /// # Examples
@@ -52,107 +47,106 @@ pub use split::*;
 /// type Client = Loop<Offer<(Split<Send<String, Done>, Recv<usize, Done>>, Recv<bool, Continue>)>>;
 /// type Server = Loop<Choose<(Split<Send<usize, Done>, Recv<String, Done>>, Send<bool, Continue>)>>;
 ///
-/// assert_type_eq_all!(Client, <Server as Session>::Dual);
+/// assert_type_eq_all!(Client, <Server as HasDual>::Dual);
 /// ```
-pub trait Session: Sized + sealed::IsSession {
+pub trait HasDual: Sized + 'static {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
-    type Dual: Session<Dual = Self>;
+    type Dual: HasDual<Dual = Self>;
 }
 
-/// The [`Actionable`] trait infers the next action necessary on a channel, automatically stepping
-/// through [`Loop`]s and [`Continue`]sion points.
-pub trait Actionable<E = ()>: Session
-where
-    E: Environment,
-    Self: Scoped<E::Depth>,
-{
+/// Each session type has a canonical [`Actionable::Action`], the session type which corresponds to
+/// the next thing to do on the channel. For most types, this is the same as `Self`, but for control
+/// constructs like [`Loop`], this corresponds to the inside of the [`Loop`].
+pub trait Actionable {
     /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
     /// This steps through [`Loop`], [`Break`], and [`Continue`] transparently.
     ///
     /// The constraints on this associated type ensure that it is idemopotent: the `Action` and
-    /// `Env` of an `Action` are the same as those of that `Action`.
-    type Action: Actionable<Self::Env, Action = Self::Action, Env = Self::Env>;
-
-    /// The environment resulting from stepping through one or many [`Loop`], [`Break`], or
-    /// [`Continue`] points to the next real channel action.
-    type Env: Environment;
+    /// of an `Action` is the same as that `Action`.
+    type Action: Actionable<Action = Self::Action>;
 }
+
+/// A session type is [`Scoped`] if none of its [`Continue`]s or [`Break`]s refer to outside of the
+/// [`Loop`]s which they are within.
+pub trait Scoped<N: Unary = Z> {}
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
-/// protocols. The sealed [`EachSession`] trait ensures that every protocol in a type level list of
-/// protocols [`Session`].
-pub trait EachSession: Sized + sealed::EachSession
-where
-    Self::Dual: EachSession<Dual = Self>,
-{
-    /// The point-wise [`Session::Dual`] of a type-level list of session types.
-    type Dual;
-}
-
-impl EachSession for () {
-    type Dual = ();
-}
-
-impl<P, Ps> EachSession for (P, Ps)
-where
-    P: Session,
-    Ps: EachSession,
-{
-    type Dual = (P::Dual, Ps::Dual);
-}
-
-/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
-/// protocols. The sealed [`EachSession`] trait ensures that every protocol in a type level list of
-/// protocols is [`Actionable`].
-pub trait EachActionable<E = ()>: EachSession
-where
-    E: Environment,
-{
-}
-
-impl<E> EachActionable<E> for () where E: Environment {}
-
-impl<E, P, Ps> EachActionable<E> for (P, Ps)
-where
-    P: Actionable<E>,
-    Ps: EachActionable<E>,
-    E: Environment,
-{
-}
-
-/// A valid session environment is a type-level list of session types, each of which may refer by
-/// [`Continue`] index to any other session in the list which is *below or including* itself.
-pub trait Environment: Any {
-    /// The depth of a session environment is the number of loops to which a [`Continue`] could
-    /// jump, i.e. the number of session types in the session environment.
-    type Depth: Unary;
-}
-
-impl Environment for () {
-    type Depth = Z;
-}
-
-impl<P, Rest> Environment for (P, Rest)
-where
-    P: Scoped<S<Rest::Depth>>,
-    Rest: Environment,
-{
-    type Depth = S<Rest::Depth>;
-}
-
-/// A session type is *scoped* for a given environment depth `N` if it [`Continue`]s no more than
-/// `N` [`Loop`] levels above itself.
-///
-/// A session type is `Scoped<Z>` (which can be abbreviated `Scoped`) if it does not [`Continue`] to
-/// any loop above itself, i.e. all `Continue<N>` refer to a loop which they themselves are within.
-pub trait Scoped<N: Unary = Z>: Session {}
-
-/// In the [`Choose`] and [`Offer`] session types, `EachScoped<N>` is used to assert that every
-/// choice or offering is [`Scoped`].
-pub trait EachScoped<N: Unary = Z>: EachSession {}
+/// protocols. The sealed [`EachScoped`] trait ensures that every protocol in a type level list of
+/// protocols is [`Scoped`].
+pub trait EachScoped<N: Unary = Z> {}
 impl<N: Unary> EachScoped<N> for () {}
 impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
+
+/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
+/// protocols. The sealed [`EachHasDual`] trait ensures that every protocol in a type level list of
+/// protocols [`HasDual`].
+pub trait EachHasDual: Sized + 'static
+where
+    Self::Duals: EachHasDual<Duals = Self>,
+{
+    /// The point-wise [`Session::Dual`] of a type-level list of session types.
+    type Duals;
+}
+
+impl EachHasDual for () {
+    type Duals = ();
+}
+
+impl<P, Ps> EachHasDual for (P, Ps)
+where
+    P: HasDual,
+    Ps: EachHasDual,
+{
+    type Duals = (P::Dual, Ps::Duals);
+}
+
+// TODO: Make `Done` subst to `Done` inside `Seq`
+
+/// Substitute `P` for every reference to `N` in the given session type.
+///
+/// The three places substitution occurs, in `Subst<P, N>`:
+///
+/// - [`Continue<M>`]: when `N == M`, this becomes `P` (i.e. a [`Loop`] is unrolled by one step)
+/// - [`Break<Z>`]: when `N == _0`, this becomes [`Done`] (i.e. this is a [`Break`] out of an
+///   outermost [`Loop`])
+/// - [`Break<S<M>>`]: when `N == S<M>`, this becomes `P` (i.e. this is a [`Break`] out of a
+///   non-outermost [`Loop`])
+/// - [`Break<S<M>>`]: when `N != S<M>`, this becomes `Break<M>` (i.e. this will eventually step to
+///   [`Done`] when `N == _0`)
+/// - [`Done`]: when `N == _0` (i.e. [`Done`] is like [`Continue`] when inside a [`Loop`])
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use static_assertions::assert_type_eq_all;
+///
+/// assert_type_eq_all!(
+///     <Send<i64, Offer<(Break, Continue, Loop<Break<_1>>)>> as Subst<Recv<()>>>::Substituted,
+///     Send<i64, Offer<(Done, Recv<()>, Loop<Break<_0>>)>>,
+/// );
+/// ```
+pub trait Subst<P, N: Unary = Z, Mode = Continue>: sealed::IsSession {
+    /// The result of the substitution.
+    type Substituted: 'static;
+}
+
+pub trait EachSubst<P, N: Unary = Z, Mode = Continue>: sealed::EachSession {
+    type Substituted: 'static;
+}
+
+impl<N: Unary, Q, Mode> EachSubst<Q, N, Mode> for () {
+    type Substituted = ();
+}
+
+impl<N: Unary, Q, Mode, P, Ps> EachSubst<Q, N, Mode> for (P, Ps)
+where
+    P: Subst<Q, N, Mode>,
+    Ps: EachSubst<Q, N, Mode>,
+{
+    type Substituted = (P::Substituted, Ps::Substituted);
+}
 
 /// Select by index from a type level list.
 ///
@@ -218,8 +212,8 @@ macro_rules! assert_all_closed_sessions {
         const _: fn() = || {
             fn assert_impl_all<T>()
             where
-                T: $crate::NewSession,
-                T::Dual: $crate::Actionable,
+                T: $crate::HasDual + $crate::Actionable,
+                T::Dual: $crate::HasDual + $crate::Actionable,
             {
             }
             assert_impl_all::<$session>();

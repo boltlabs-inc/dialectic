@@ -1,7 +1,7 @@
 use std::any::Any;
 
-use super::sealed::IsSession;
 use super::*;
+use super::{sealed::IsSession, unary::Compare};
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at [`Z`].
@@ -11,24 +11,18 @@ pub struct Continue<N: Unary = Z>(pub N);
 
 impl<N: Unary + Any> IsSession for Continue<N> {}
 
-impl<N: Unary + Any> Session for Continue<N> {
+impl<N: Unary + Any> HasDual for Continue<N> {
     type Dual = Continue<N>;
 }
 
-impl<N: Unary + Any, M: Unary + Any> Scoped<M> for Continue<N> where N: LessThan<M> {}
+impl<N: Unary, M: Unary> Scoped<N> for Continue<M> where M: LessThan<N> {}
 
-impl<E, P, Rest, N: Unary> Actionable<E> for Continue<N>
+impl<P, Mode, N: Unary, M: Unary> Subst<P, N, Mode> for Continue<M>
 where
-    E: Select<N, Selected = P, Remainder = Rest> + Environment,
-    Continue<N>: Scoped<E::Depth>,
-    P: Actionable<(P, Rest)>,
-    P: Scoped<S<<Rest as Environment>::Depth>>,
-    P::Dual: Scoped<S<Rest::Depth>>,
-    (P, Rest): Environment,
-    Rest: Environment,
+    (N, M): Compare<Continue<M>, P, Continue<M>>,
+    <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result: 'static,
 {
-    type Action = <P as Actionable<(P, Rest)>>::Action;
-    type Env = <P as Actionable<(P, Rest)>>::Env;
+    type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
 }
 
 #[cfg(test)]

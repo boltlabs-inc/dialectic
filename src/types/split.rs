@@ -10,21 +10,21 @@ pub struct Split<P, Q>(pub P, pub Q);
 
 impl<P: Any, Q: Any> IsSession for Split<P, Q> {}
 
-impl<P: Session, Q: Session> Session for Split<P, Q> {
+impl<P: HasDual, Q: HasDual> HasDual for Split<P, Q> {
     /// Note how the dual flips the position of `P` and `Q`, because `P::Dual` is a receiving
     /// session, and therefore belongs on the right of the split, and `Q::Dual` is a sending
     /// session, and therefore belongs on the left of the split.
     type Dual = Split<Q::Dual, P::Dual>;
 }
 
+impl<P, Q> Actionable for Split<P, Q> {
+    type Action = Self;
+}
+
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 
-impl<E, P, Q> Actionable<E> for Split<P, Q>
-where
-    P: Scoped<E::Depth>,
-    Q: Scoped<E::Depth>,
-    E: Environment,
+impl<N: Unary, Mode, P: Subst<R, N, Mode>, Q: Subst<R, N, Mode>, R> Subst<R, N, Mode>
+    for Split<P, Q>
 {
-    type Action = Split<P, Q>;
-    type Env = E;
+    type Substituted = Split<P::Substituted, Q::Substituted>;
 }

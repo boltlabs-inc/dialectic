@@ -16,8 +16,8 @@ use tokio::net::{
 use tokio_util::codec::LengthDelimitedCodec;
 
 // The server's API:
-pub type Server = Loop<Offer<(Recv<Operation, Seq<Tally, Continue>>, Break)>>;
-pub type Tally = Loop<Offer<(Recv<i64, Continue>, Send<i64, Done>)>>;
+pub type Server = Loop<Offer<(Recv<Operation, Seq<Tally>>, Break)>>;
+pub type Tally = Loop<Offer<(Recv<i64>, Send<i64, Break>)>>;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(crate = "serde_crate")] // we only need this because we renamed serde in Cargo.toml
@@ -67,19 +67,18 @@ impl Display for Operation {
     }
 }
 
-pub type BincodeTcpChan<P, E = ()> = dialectic::backend::serde::SymmetricalChan<
+pub type BincodeTcpChan<P> = dialectic::backend::serde::SymmetricalChan<
     Bincode,
     LengthDelimitedCodec,
     OwnedWriteHalf,
     OwnedReadHalf,
     P,
-    E,
 >;
 
-pub fn wrap_socket<'a, P>(socket: TcpStream, max_length: usize) -> BincodeTcpChan<P>
+pub fn wrap_socket<P>(socket: TcpStream, max_length: usize) -> BincodeTcpChan<P>
 where
-    P: NewSession,
-    P::Dual: Actionable,
+    P: Session,
+    P::Dual: Session,
 {
     let (rx, tx) = socket.into_split();
     let (tx, rx) = length_delimited_bincode(tx, rx, 4, max_length);
@@ -107,28 +106,26 @@ pub fn get_port() -> Result<u16, std::io::Error> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = get_port()?;
-    listen_on::<Server, _, _>(port, 8 * 1024, &serve).await?;
+    listen_on::<Server, _>(port, 8 * 1024, serve).await?;
     Ok(())
 }
 
-async fn listen_on<P, F, Fut>(
+async fn listen_on<P, Fut>(
     port: u16,
     max_length: usize,
-    interaction: &'static F,
+    interaction: fn(BincodeTcpChan<P>) -> Fut,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    F: Fn(BincodeTcpChan<P>) -> Fut + std::marker::Sync + 'static,
-    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>> + std::marker::Send,
-    P: NewSession,
-    P::Dual: Actionable,
-    P::Env: Environment + std::marker::Send,
-    P::Action: std::marker::Send,
+    Fut: Future<Output = Result<(), Box<dyn std::error::Error>>> + std::marker::Send + 'static,
+    P: std::marker::Send + Session,
+    P::Dual: Session,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     loop {
         let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            let _ = interaction(wrap_socket::<P>(socket, max_length))
+            let wrapped = wrap_socket(socket, max_length);
+            let _ = interaction(wrapped)
                 .await
                 .map_err(|err| eprintln!("Error on {}: {}", addr, err));
         });
@@ -151,7 +148,7 @@ where
             // Client wants to compute another tally
             _0 => {
                 let (op, chan) = chan.recv().await?;
-                chan.seq(|chan| tally::<_, _, _, Err>(&op, chan)).await?.1.expect("tally finishes session")
+                chan.seq(|chan| tally::<_, _, Err>(&op, chan)).await?.1.expect("tally finishes session")
             },
             // Client wants to quit
             _1 => break chan.close(),
@@ -160,9 +157,8 @@ where
     Ok(())
 }
 
-async fn tally<Tx, Rx, E, Err>(op: &Operation, mut chan: Chan<Tx, Rx, Tally, E>) -> Result<(), Err>
+async fn tally<Tx, Rx, Err>(op: &Operation, mut chan: Chan<Tx, Rx, Tally>) -> Result<(), Err>
 where
-    E: Environment,
     Rx: Receive<i64> + Receive<Choice<_2>> + std::marker::Send + 'static,
     Tx: Transmit<i64, Ref> + std::marker::Send + 'static,
     Err: From<<Tx as Transmit<i64, Ref>>::Error>
