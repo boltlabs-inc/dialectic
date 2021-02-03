@@ -41,7 +41,7 @@ pub struct S<N>(pub N);
 /// // ...
 /// assert_eq!(_127::VALUE, 127);
 /// ```
-pub trait Unary: sealed::Unary {
+pub trait Unary: sealed::Unary + Sized + Sync + Send + 'static {
     /// The runtime value of this type-level number, as a `usize`.
     const VALUE: usize;
 }

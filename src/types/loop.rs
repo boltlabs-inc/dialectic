@@ -12,7 +12,7 @@ impl<P> HasDual for Loop<P>
 where
     P: HasDual,
 {
-    type Dual = Loop<<P as HasDual>::Dual>;
+    type DualSession = Loop<<P as HasDual>::DualSession>;
 }
 
 impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
@@ -22,7 +22,7 @@ where
     P: Subst<Loop<P>, Z, Continue>,
     P::Substituted: Actionable,
 {
-    type Action = <P::Substituted as Actionable>::Action;
+    type NextAction = <P::Substituted as Actionable>::NextAction;
 }
 
 impl<P, Q, Mode, N: Unary> Subst<Q, N, Mode> for Loop<P>

@@ -1,11 +1,7 @@
 //! The types in this module enumerate the shapes of all expressible sessions.
 
 use crate::prelude::*;
-pub use unary::types::*;
-pub use unary::{LessThan, Unary, S, Z};
-
-pub mod tuple;
-pub mod unary;
+use crate::unary::{LessThan, Unary, S, Z};
 
 // Each construct in the session types language lives in its own module, along with the
 // implementation of its various typing rules.
@@ -31,9 +27,12 @@ pub use send::*;
 pub use seq::*;
 pub use split::*;
 
-/// Each session type has a [`HasDual::Dual`], the type of the corresponding client on the other
-/// side of the channel. The sealed trait `HasDual` enumerates these types, and provides the dual of
-/// each.
+/// Each session type has a [`HasDual::DualSession`], the type of the corresponding client on the
+/// other side of the channel. The sealed trait `HasDual` enumerates these types, and provides the
+/// dual of each.
+///
+/// In general, you should prefer the [`Session`] trait to the [`HasDual`] trait, since [`Session`]
+/// also ensures that a given type is a valid session type and provides other functionality.
 ///
 /// # Examples
 ///
@@ -47,24 +46,24 @@ pub use split::*;
 /// type Client = Loop<Offer<(Split<Send<String, Done>, Recv<usize, Done>>, Recv<bool, Continue>)>>;
 /// type Server = Loop<Choose<(Split<Send<usize, Done>, Recv<String, Done>>, Send<bool, Continue>)>>;
 ///
-/// assert_type_eq_all!(Client, <Server as HasDual>::Dual);
+/// assert_type_eq_all!(Client, <Server as HasDual>::DualSession);
 /// ```
 pub trait HasDual: Sized + 'static {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
-    type Dual: HasDual<Dual = Self>;
+    type DualSession: HasDual<DualSession = Self>;
 }
 
-/// Each session type has a canonical [`Actionable::Action`], the session type which corresponds to
-/// the next thing to do on the channel. For most types, this is the same as `Self`, but for control
-/// constructs like [`Loop`], this corresponds to the inside of the [`Loop`].
+/// Each session type has a canonical [`Actionable::NextAction`], the session type which corresponds
+/// to the next thing to do on the channel. For most types, this is the same as `Self`, but for
+/// control constructs like [`Loop`], this corresponds to the inside of the [`Loop`].
 pub trait Actionable {
-    /// The next actual channel action: [`Send`], [`Recv`], [`Offer`], [`Choose`], or [`Split`].
-    /// This steps through [`Loop`], [`Break`], and [`Continue`] transparently.
+    /// The next actual channel action, which must be one of [`Send`], [`Recv`], [`Offer`],
+    /// [`Choose`], [`Split`], [`Seq`], or [`Done`].
     ///
-    /// The constraints on this associated type ensure that it is idemopotent: the `Action` and
-    /// of an `Action` is the same as that `Action`.
-    type Action: Actionable<Action = Self::Action>;
+    /// The constraints on this associated type ensure that it is idemopotent: the `Action` and of
+    /// an `Action` is the same as that `Action`.
+    type NextAction: Actionable<NextAction = Self::NextAction>;
 }
 
 /// A session type is [`Scoped`] if none of its [`Continue`]s or [`Break`]s refer to outside of the
@@ -85,7 +84,7 @@ pub trait EachHasDual: Sized + 'static
 where
     Self::Duals: EachHasDual<Duals = Self>,
 {
-    /// The point-wise [`Session::Dual`] of a type-level list of session types.
+    /// The point-wise [`HasDual::DualSession`] of a type-level list of session types.
     type Duals;
 }
 
@@ -98,10 +97,8 @@ where
     P: HasDual,
     Ps: EachHasDual,
 {
-    type Duals = (P::Dual, Ps::Duals);
+    type Duals = (P::DualSession, Ps::Duals);
 }
-
-// TODO: Make `Done` subst to `Done` inside `Seq`
 
 /// Substitute `P` for every reference to `N` in the given session type.
 ///
@@ -114,13 +111,14 @@ where
 ///   non-outermost [`Loop`])
 /// - [`Break<S<M>>`]: when `N != S<M>`, this becomes `Break<M>` (i.e. this will eventually step to
 ///   [`Done`] when `N == _0`)
-/// - [`Done`]: when `N == _0` (i.e. [`Done`] is like [`Continue`] when inside a [`Loop`])
+/// - [`Done`]: when `N == _0` and `Mode == Continue` (i.e. [`Done`] is like [`Continue`] when
+///   inside a [`Loop`] and not at the outermost level of a `Seq`)
 ///
 /// # Examples
 ///
 /// ```
-/// use dialectic::prelude::*;
-/// use static_assertions::assert_type_eq_all;
+/// use dialectic::types::*;
+/// # use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(
 ///     <Send<i64, Offer<(Break, Continue, Loop<Break<_1>>)>> as Subst<Recv<()>>>::Substituted,
@@ -132,15 +130,21 @@ pub trait Subst<P, N: Unary = Z, Mode = Continue>: sealed::IsSession {
     type Substituted: 'static;
 }
 
-pub trait EachSubst<P, N: Unary = Z, Mode = Continue>: sealed::EachSession {
+/// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
+/// protocols. The sealed [`EachSubst`] trait ensures that every protocol in a type level list of
+/// protocols can [`Subst`].
+pub trait EachSubst<P, N: Unary = Z, Mode: sealed::SubstMode = Continue>:
+    sealed::EachSession
+{
+    /// The result of the substitution on every element of the list.
     type Substituted: 'static;
 }
 
-impl<N: Unary, Q, Mode> EachSubst<Q, N, Mode> for () {
+impl<N: Unary, Q, Mode: sealed::SubstMode> EachSubst<Q, N, Mode> for () {
     type Substituted = ();
 }
 
-impl<N: Unary, Q, Mode, P, Ps> EachSubst<Q, N, Mode> for (P, Ps)
+impl<N: Unary, Q, Mode: sealed::SubstMode, P, Ps> EachSubst<Q, N, Mode> for (P, Ps)
 where
     P: Subst<Q, N, Mode>,
     Ps: EachSubst<Q, N, Mode>,
@@ -156,7 +160,7 @@ where
 ///
 /// ```
 /// # use static_assertions::assert_type_eq_all;
-/// use dialectic::prelude::*;
+/// use dialectic::types::*;
 ///
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_0>>::Selected, _0);
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_2>>::Selected, _2);
@@ -199,6 +203,9 @@ mod sealed {
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
+
+    /// Only allow [`Done`] and [`Continue`] to be used as substitution modes.
+    pub trait SubstMode: IsSession {}
 }
 
 /// Asserts that the specified type is a valid *closed* session type (that is, it does not
@@ -212,8 +219,8 @@ macro_rules! assert_all_closed_sessions {
         const _: fn() = || {
             fn assert_impl_all<T>()
             where
-                T: $crate::HasDual + $crate::Actionable,
-                T::Dual: $crate::HasDual + $crate::Actionable,
+                T: $crate::Session,
+                <T as Session>::Dual: $crate::Session,
             {
             }
             assert_impl_all::<$session>();

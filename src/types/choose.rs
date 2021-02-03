@@ -3,7 +3,7 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
-/// Actively [`choose`](crate::CanonicalChan::choose) between any of the protocols in the tuple
+/// Actively [`choose`](crate::Chan::choose) between any of the protocols in the tuple
 /// `Choices`.
 ///
 /// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
@@ -20,16 +20,16 @@ where
     Choices::AsList: EachHasDual,
     <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
 {
-    type Dual = Offer<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
+    type DualSession = Offer<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
 }
 
 impl<Choices> Actionable for Choose<Choices> {
-    type Action = Self;
+    type NextAction = Self;
 }
 
 impl<N: Unary, Choices: Tuple> Scoped<N> for Choose<Choices> where Choices::AsList: EachScoped<N> {}
 
-impl<N: Unary, Mode, P, Choices> Subst<P, N, Mode> for Choose<Choices>
+impl<N: Unary, Mode: sealed::SubstMode, P, Choices> Subst<P, N, Mode> for Choose<Choices>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachHasDual + EachSubst<P, N, Mode>,

@@ -3,7 +3,7 @@
 //!
 //! Due to a limitation in Rust, at present the maximum number which can be listed here is 128.
 #![allow(missing_docs)]
-use crate::types::unary::{types::*, S, Z};
+use crate::unary::{types::*, S, Z};
 
 pub const _0: _0 = Z;
 pub const _1: _1 = S(_0);

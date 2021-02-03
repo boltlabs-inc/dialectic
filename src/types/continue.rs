@@ -1,7 +1,8 @@
 use std::any::Any;
 
+use super::sealed::{IsSession, SubstMode};
 use super::*;
-use super::{sealed::IsSession, unary::Compare};
+use crate::unary::Compare;
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at [`Z`].
@@ -12,7 +13,7 @@ pub struct Continue<N: Unary = Z>(pub N);
 impl<N: Unary + Any> IsSession for Continue<N> {}
 
 impl<N: Unary + Any> HasDual for Continue<N> {
-    type Dual = Continue<N>;
+    type DualSession = Continue<N>;
 }
 
 impl<N: Unary, M: Unary> Scoped<N> for Continue<M> where M: LessThan<N> {}
@@ -24,6 +25,8 @@ where
 {
     type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
 }
+
+impl SubstMode for Continue {}
 
 #[cfg(test)]
 mod tests {

@@ -19,16 +19,16 @@ where
     Choices::AsList: EachHasDual,
     <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
 {
-    type Dual = Choose<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
+    type DualSession = Choose<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
 }
 
 impl<Choices> Actionable for Offer<Choices> {
-    type Action = Self;
+    type NextAction = Self;
 }
 
 impl<N: Unary, Choices: Tuple> Scoped<N> for Offer<Choices> where Choices::AsList: EachScoped<N> {}
 
-impl<N: Unary, Mode, P, Choices> Subst<P, N, Mode> for Offer<Choices>
+impl<N: Unary, Mode: sealed::SubstMode, P, Choices> Subst<P, N, Mode> for Offer<Choices>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachHasDual + EachSubst<P, N, Mode>,

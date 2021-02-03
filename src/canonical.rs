@@ -1,4 +1,4 @@
-//! The [`CanonicalChan`] type is defined here. Typically, you don't need to import this module, and
+//! The [`Chan`] type is defined here. Typically, you don't need to import this module, and
 //! should use the [`Chan`](super::Chan) type synonym instead.
 use std::{
     any::TypeId,
@@ -12,26 +12,22 @@ use std::{
 
 use pin_project::pin_project;
 
-use crate::prelude::*;
-use crate::Chan;
+use crate::tuple::{HasLength, List, Tuple};
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
+use crate::{
+    prelude::*,
+    types::{EachHasDual, EachScoped, Select},
+};
 use crate::{Available, Unavailable};
 use futures::Future;
-use tuple::{HasLength, List, Tuple};
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
-/// `Rx`. ⚠️ **Important: in type signatures, always write the type synonym [`Chan`](crate::Chan),
-/// not [`CanonicalChan`] directly.** [Read more
-/// here.](crate::Chan#technical-notes-on-canonicity-tldr-always-write-chan)
+/// `Rx`.
 ///
-/// The fourth `E` parameter to a [`CanonicalChan`] is a type-level list describing the *session
-/// environment* of the channel: the stack of [`Loop`]s the channel has entered. When a loop
-/// repeats, the next session type is retrieved by selecting the `N`th element of this list.
+/// # Creating new `Chan`s: use [`Session`](crate::Session)
 ///
-/// # Creating new `Chan`s: use [`NewSession`](crate::NewSession)
-///
-/// To construct a new `Chan`, use one of the static methods of [`NewSession`](crate::NewSession) on
-/// the session type for which you want to create a channel. Here, we create two `Chan`s with the
+/// To construct a new `Chan`, use one of the static methods of [`Session`](crate::Session) on the
+/// session type for which you want to create a channel. Here, we create two `Chan`s with the
 /// session type `Send<String>` and its dual `Recv<String>`, wrapping an underlying bidirectional
 /// transport built from a pair of [`tokio::sync::mpsc::channel`]s:
 ///
@@ -50,7 +46,7 @@ use tuple::{HasLength, List, Tuple};
 /// ```
 ///
 /// If you already have a sender and receiver and want to wrap them in a `Chan`, use the
-/// [`wrap`](crate::NewSession::wrap) method for a session type. This is useful, for example, if
+/// [`wrap`](crate::Session::wrap) method for a session type. This is useful, for example, if
 /// you're talking to another process over a network connection, where it's not possible to build
 /// both halves of the channel on one computer, and instead each computer will wrap one end of the
 /// connection:
@@ -69,11 +65,7 @@ use tuple::{HasLength, List, Tuple};
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct CanonicalChan<
-    Tx: std::marker::Send + 'static,
-    Rx: std::marker::Send + 'static,
-    S: Scoped + Actionable + HasDual,
-> {
+pub struct Chan<Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static, S: Session> {
     tx: Option<Tx>,
     rx: Option<Rx>,
     #[derivative(Debug = "ignore")]
@@ -84,14 +76,14 @@ pub struct CanonicalChan<
     session: PhantomData<S>,
 }
 
-impl<Tx, Rx, S> Drop for CanonicalChan<Tx, Rx, S>
+impl<Tx, Rx, S> Drop for Chan<Tx, Rx, S>
 where
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
-    S: Scoped + Actionable + HasDual,
+    S: Session,
 {
     fn drop(&mut self) {
-        let done = TypeId::of::<S::Action>() == TypeId::of::<Done>();
+        let done = TypeId::of::<<S as Session>::Action>() == TypeId::of::<Done>();
         let tx = self.tx.take();
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.take();
@@ -105,16 +97,13 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: HasDual> CanonicalChan<Tx, Rx, S>
-where
-    S: Scoped + Actionable<Action = Done>,
-{
+impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx, Rx, S> {
     /// Close a finished session, dropping the underlying connections.
     ///
-    /// If called inside a future given to [`split`](CanonicalChan::split) or
-    /// [`seq`](CanonicalChan::seq), the underlying connections are implicitly recovered for use in
+    /// If called inside a future given to [`split`](Chan::split) or
+    /// [`seq`](Chan::seq), the underlying connections are implicitly recovered for use in
     /// subsequent actions in the session, or if called in a future given to in
-    /// [`over`](NewSession::over), are returned to the caller.
+    /// [`over`](Session::over), are returned to the caller.
     ///
     /// # Examples
     ///
@@ -149,21 +138,15 @@ where
     /// ```
     ///
     /// If you *really* want to destruct a channel before the end of its session, use
-    /// [`unwrap`](CanonicalChan::unwrap), but beware that this may cause the party on the other end
+    /// [`unwrap`](Chan::unwrap), but beware that this may cause the party on the other end
     /// of the channel to throw errors due to your violation of the channel's protocol!
-    pub fn close(self) {
+    pub fn close(self)
+    where
+        S: Session<Action = Done>,
+    {
         drop(self)
     }
-}
 
-impl<'a, Tx, Rx, T, S, P> CanonicalChan<Tx, Rx, S>
-where
-    Tx: marker::Send + 'static,
-    Rx: Receive<T> + marker::Send + 'static,
-    T: marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Recv<T, P>>,
-    P: Scoped + Actionable + HasDual,
-{
     /// Receive something of type `T` on the channel, returning the pair of the received object and
     /// the channel.
     ///
@@ -188,19 +171,16 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn recv(mut self) -> Result<(T, Chan<Tx, Rx, P>), Rx::Error> {
+    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<Tx, Rx, P>), Rx::Error>
+    where
+        S: Session<Action = Recv<T, P>>,
+        P: Session,
+        Rx: Receive<T>,
+    {
         let result = self.rx.as_mut().unwrap().recv().await?;
         Ok((result, self.unchecked_cast()))
     }
-}
 
-impl<'a, Tx, Rx, T: 'static, S, P> CanonicalChan<Tx, Rx, S>
-where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Send<T, P>>,
-    P: Scoped + Actionable + HasDual,
-{
     /// Send something of type `T` on the channel, returning the channel.
     ///
     /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
@@ -229,11 +209,14 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send<'b, Convention: CallingConvention>(
+    pub async fn send<'b, Convention, T, P>(
         mut self,
         message: <T as CallBy<'b, Convention>>::Type,
     ) -> Result<Chan<Tx, Rx, P>, <Tx as Transmit<T, Convention>>::Error>
     where
+        S: Session<Action = Send<T, P>>,
+        P: Session,
+        Convention: CallingConvention,
         Tx: Transmit<T, Convention>,
         T: CallBy<'b, Convention>,
         <T as CallBy<'b, Convention>>::Type: marker::Send,
@@ -241,25 +224,14 @@ where
         self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
     }
-}
 
-impl<Tx, Rx, Choices: 'static, S> CanonicalChan<Tx, Rx, S>
-where
-    Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val> + marker::Send + 'static,
-    Rx: marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Choose<Choices>>,
-    Choices: Tuple,
-    Choices::AsList: HasLength + EachHasDual + EachScoped,
-    <Choices::AsList as HasLength>::Length: marker::Send,
-    <Choices::AsList as EachHasDual>::Duals: List,
-{
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
     /// other end of the connection, alerting the other party to this choice by sending the number
     /// `N` over the channel.
     ///
     /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
     /// supported numbers of choices (up to a maximum of 127) are available in the
-    /// [`constants`](crate::types::unary::constants) module, each named for its corresponding
+    /// [`constants`](crate::unary::constants) module, each named for its corresponding
     /// decimal number prefixed with an underscore (e.g. `_0`, or `_42`).
     ///
     /// # Errors
@@ -316,14 +288,18 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn choose<N: Unary>(
+    pub async fn choose<N, Choices>(
         mut self,
         _choice: N,
     ) -> Result<Chan<Tx, Rx, <Choices::AsList as Select<N>>::Selected>, Tx::Error>
     where
-        N: LessThan<_128>,
-        Choices::AsList: Select<N>,
-        <Choices::AsList as Select<N>>::Selected: Scoped + Actionable + HasDual,
+        S: Session<Action = Choose<Choices>>,
+        Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
+        Choices: Tuple,
+        Choices::AsList: Select<N> + HasLength + EachHasDual + EachScoped,
+        <Choices::AsList as EachHasDual>::Duals: List,
+        <Choices::AsList as Select<N>>::Selected: Session,
+        N: Unary + LessThan<_128>,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -331,19 +307,7 @@ where
         self.tx.as_mut().unwrap().send(choice).await?;
         Ok(self.unchecked_cast())
     }
-}
 
-impl<'a, Tx, Rx, Choices: 'static, S> CanonicalChan<Tx, Rx, S>
-where
-    Tx: marker::Send + 'static,
-    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>> + marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Offer<Choices>>,
-    Choices: Tuple,
-    Choices::AsList: HasLength + EachScoped,
-    <Choices::AsList as EachHasDual>::Duals: List,
-    Choices::AsList: EachHasDual,
-    _0: LessThan<<Choices::AsList as HasLength>::Length>,
-{
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// by sending a number which protocol to proceed with.
     ///
@@ -418,7 +382,15 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(mut self) -> Result<Branches<Tx, Rx, Choices>, Rx::Error> {
+    pub async fn offer<Choices>(mut self) -> Result<Branches<Tx, Rx, Choices>, Rx::Error>
+    where
+        S: Session<Action = Offer<Choices>>,
+        Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
+        Choices: Tuple + 'static,
+        Choices::AsList: HasLength + EachScoped + EachHasDual,
+        <Choices::AsList as EachHasDual>::Duals: List,
+        _0: LessThan<<Choices::AsList as HasLength>::Length>,
+    {
         let tx = self.tx.take();
         let mut rx = self.rx.take();
         let drop_tx = self.drop_tx.take();
@@ -434,26 +406,17 @@ where
             environment: PhantomData,
         })
     }
-}
 
-impl<'a, Tx, Rx, S, P, Q> CanonicalChan<Tx, Rx, S>
-where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Split<P, Q>>,
-    P: Scoped + Actionable + HasDual,
-    Q: Scoped + Actionable + HasDual,
-{
     /// Split a channel into transmit-only and receive-only ends and manipulate them, potentially
     /// concurrently, in the given closure.
     ///
     /// To use the channel as a reunited whole after it has been split, combine this operation with
-    /// [`seq`](CanonicalChan::seq) to sequence further operations after it.
+    /// [`seq`](Chan::seq) to sequence further operations after it.
     ///
     /// # Errors
     ///
     /// The closure must *finish* the session for both the send-only and receive-only ends of the
-    /// channel and drop or [`close`](CanonicalChan::close) each end *before* the future completes.
+    /// channel and drop or [`close`](Chan::close) each end *before* the future completes.
     /// If either end is dropped before finishing its session, or is not closed after finishing its
     /// session, a [`SessionIncomplete`] error will be returned instead of a finished channel.
     ///
@@ -515,16 +478,19 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn split<T, Err, F, Fut>(
+    pub async fn split<T, E, P, Q, F, Fut>(
         mut self,
         with_parts: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Done>, SessionIncomplete<Tx, Rx>>), Err>
+    ) -> Result<(T, Result<Chan<Tx, Rx, Done>, SessionIncomplete<Tx, Rx>>), E>
     where
+        S: Session<Action = Split<P, Q>>,
+        P: Session,
+        Q: Session,
         F: FnOnce(
             Chan<Available<Tx>, Unavailable<Rx>, P>,
             Chan<Unavailable<Tx>, Available<Rx>, Q>,
         ) -> Fut,
-        Fut: Future<Output = Result<T, Err>>,
+        Fut: Future<Output = Result<T, E>>,
     {
         use IncompleteHalf::*;
         use SessionIncomplete::*;
@@ -584,7 +550,7 @@ where
         };
         Ok((
             result,
-            maybe_tx_rx.map(|(tx, rx)| CanonicalChan {
+            maybe_tx_rx.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
                 drop_tx: Some(drop_tx),
@@ -593,16 +559,7 @@ where
             }),
         ))
     }
-}
 
-impl<'a, Tx, Rx, S, P, Q> CanonicalChan<Tx, Rx, S>
-where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
-    S: Scoped + HasDual + Actionable<Action = Seq<P, Q>>,
-    P: Scoped + Actionable + HasDual,
-    Q: Scoped + Actionable + HasDual,
-{
     /// Sequence an arbitrary session `P` before another session `Q`.
     ///
     /// This operation takes as input an asynchronous closure that runs a channel for the session
@@ -616,7 +573,7 @@ where
     /// channel before the future returns. If the channel is dropped before completing `P` or is not
     /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
     /// channel for `Q`. The best way to ensure this error does not occur is to call
-    /// [`close`](CanonicalChan::close) on the channel before returning from the future, because
+    /// [`close`](Chan::close) on the channel before returning from the future, because
     /// this statically checks that the session is complete and drops the channel.
     ///
     /// Additionally, this function returns an `Err` if the closure returns an `Err`.
@@ -734,15 +691,18 @@ where
     ///
     /// For more on context-free session types, see "Context-Free Session Type Inference" by Luca
     /// Padovani: <https://doi.org/10.1145/3229062>. When comparing with that paper, note that the
-    /// [`seq`](CanonicalChan::seq) operator is roughly equivalent to its `@=` operator, and the
+    /// [`seq`](Chan::seq) operator is roughly equivalent to its `@=` operator, and the
     /// [`Seq`] type is equivalent to `;`.
-    pub async fn seq<T, Err, F, Fut>(
+    pub async fn seq<T, E, P, Q, F, Fut>(
         mut self,
         first: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Q>, SessionIncomplete<Tx, Rx>>), Err>
+    ) -> Result<(T, Result<Chan<Tx, Rx, Q>, SessionIncomplete<Tx, Rx>>), E>
     where
+        S: Session<Action = Seq<P, Q>>,
+        P: Session,
+        Q: Session,
         F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
-        Fut: Future<Output = Result<T, Err>>,
+        Fut: Future<Output = Result<T, E>>,
     {
         let tx = self.tx.take().unwrap();
         let rx = self.rx.take().unwrap();
@@ -751,7 +711,7 @@ where
         let (result, maybe_chan) = over::<P, _, _, _, _, _, _>(tx, rx, first).await?;
         Ok((
             result,
-            maybe_chan.map(|(tx, rx)| CanonicalChan {
+            maybe_chan.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
                 drop_tx: Some(drop_tx),
@@ -759,27 +719,6 @@ where
                 session: PhantomData,
             }),
         ))
-    }
-}
-
-impl<'a, Tx: 'a, Rx: 'a, P> CanonicalChan<Tx, Rx, P>
-where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
-    P: Scoped + Actionable + HasDual,
-{
-    /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<Q>(mut self) -> CanonicalChan<Tx, Rx, Q>
-    where
-        Q: Scoped + Actionable + HasDual,
-    {
-        CanonicalChan {
-            tx: self.tx.take(),
-            rx: self.rx.take(),
-            drop_tx: self.drop_tx.take(),
-            drop_rx: self.drop_rx.take(),
-            session: PhantomData,
-        }
     }
 
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
@@ -806,11 +745,25 @@ where
         (tx, rx)
     }
 
+    /// Cast a channel to arbitrary new session types and environment. Use with care!
+    fn unchecked_cast<Q>(mut self) -> Chan<Tx, Rx, Q>
+    where
+        Q: Session,
+    {
+        Chan {
+            tx: self.tx.take(),
+            rx: self.rx.take(),
+            drop_tx: self.drop_tx.take(),
+            drop_rx: self.drop_rx.take(),
+            session: PhantomData,
+        }
+    }
+
     /// Create a new channel with an arbitrary environment and session type. This is equivalent to
     /// casting a new channel to an arbitrary environment, and doesn't guarantee the environment is
     /// coherent with regard to the session type. Use with care!
-    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> CanonicalChan<Tx, Rx, P> {
-        CanonicalChan {
+    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> Chan<Tx, Rx, S> {
+        Chan {
             tx: Some(tx),
             rx: Some(rx),
             drop_tx: Some(Box::new(|_, _| {})),
@@ -820,20 +773,16 @@ where
     }
 }
 
-/// The implementation of `NewSession::over`, generalized to any environment (unlike the public
+/// The implementation of `Session::over`, generalized to any environment (unlike the public
 /// `over` function which only works in the empty environment). This is not safe to export because
 /// nonsense environments could be specified.
-pub(crate) fn over<P, Tx, Rx, T, Err, F, Fut>(
-    tx: Tx,
-    rx: Rx,
-    with_chan: F,
-) -> Over<Tx, Rx, T, Err, Fut>
+pub(crate) fn over<P, Tx, Rx, T, E, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, E, Fut>
 where
-    P: Scoped + Actionable + HasDual,
+    P: Session,
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
     F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
-    Fut: Future<Output = Result<T, Err>>,
+    Fut: Future<Output = Result<T, E>>,
 {
     use IncompleteHalf::*;
     let dropped_tx = Arc::new(Mutex::new(Err(Unclosed)));
@@ -848,7 +797,7 @@ where
         Some(Box::new(move |done, rx| {
             *dropped_rx.lock().unwrap() = if done { Ok(rx) } else { Err(Unfinished(rx)) };
         }));
-    let chan = CanonicalChan {
+    let chan = Chan {
         tx: Some(tx),
         rx: Some(rx),
         drop_tx,
@@ -890,20 +839,23 @@ where
     }
 }
 
-/// The future returned by [`NewSession::over`] (see its documentation for details).
+/// The future returned by [`Session::over`] (see its documentation for details).
 #[pin_project]
 #[derive(Debug)]
 pub struct Over<Tx, Rx, T, E, Fut>
 where
     Fut: Future<Output = Result<T, E>>,
 {
+    /// The destination for the reclaimed transmit half after drop.
     reclaimed_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
+    /// The destination for the reclaimed receive half after drop.
     reclaimed_rx: Arc<Mutex<Result<Rx, IncompleteHalf<Rx>>>>,
+    /// The wrapped future itself.
     #[pin]
     future: Fut,
 }
 
-/// The result of [`offer`](CanonicalChan::offer): an enumeration of the possible new channel states
+/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states
 /// that could result from the offering of the tuple of protocols `Choices`.
 ///
 /// To find out which protocol was selected by the other party, use [`Branches::case`], or better
@@ -963,7 +915,7 @@ where
     Rx: marker::Send + 'static,
     Choices: Tuple<AsList = (P, Ps)>,
     (P, Ps): List<AsTuple = Choices>,
-    P: Scoped + Actionable + HasDual,
+    P: Session,
     Ps: EachScoped + EachHasDual + List,
 {
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
@@ -976,7 +928,7 @@ where
         let drop_tx = self.drop_tx.take();
         let drop_rx = self.drop_rx.take();
         if variant == 0 {
-            Ok(CanonicalChan {
+            Ok(Chan {
                 tx,
                 rx,
                 drop_tx,

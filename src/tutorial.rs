@@ -56,8 +56,8 @@
 //! use dialectic::backend::mpsc;
 //! ```
 //!
-//! The static method [`channel`](crate::NewSession::channel) is automatically defined for all valid
-//! session types (note: its corresponding trait [`NewSession`] needs to be in scope for it to be
+//! The static method [`channel`](crate::Session::channel) is automatically defined for all valid
+//! session types (note: its corresponding trait [`Session`] needs to be in scope for it to be
 //! callable). It takes as input a closure that creates some underlying unidirectional transport
 //! channel, and creates a matched pair of bidirectional session-typed channels wrapping the
 //! underlying channel type.
@@ -274,9 +274,9 @@
 //! );
 //! ```
 //!
-//! Just as the [`send`](CanonicalChan::send) and [`recv`](CanonicalChan::recv) methods enact the
-//! [`Send`] and [`Recv`] session types, the [`choose`](CanonicalChan::choose) method and
-//! [`offer!`](crate::offer) macro enact the [`Choose`] and [`Offer`] session types.
+//! Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the [`Send`] and
+//! [`Recv`] session types, the [`choose`](Chan::choose) method and [`offer!`](crate::offer) macro
+//! enact the [`Choose`] and [`Offer`] session types.
 //!
 //! Suppose we want to offer a choice between two protocols: either sending a single integer
 //! (`Send<i64>`) or receiving a string (`Recv<String>`). Correspondingly, the other end of the
@@ -323,14 +323,14 @@
 //! want to bind a channel name to the result of the `offer!`, each expression must step the channel
 //! forward to an identical session type (in the case above, that's `Done`).
 //!
-//! Dually, to select an offered option, you can call the [`choose`](CanonicalChan::choose) method
-//! on a channel, passing it as input a constant corresponding to the index of the choice. These
+//! Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
+//! channel, passing it as input a constant corresponding to the index of the choice. These
 //! constants are *not* Rust's built-in numeric types, but rather [unary type-level
-//! numbers](crate::types::unary). Dialectic supports up to 128 possible choices in an `Offer` or
-//! `Choose`, and the corresponding constants [`_0`](crate::types::unary::constants::_0),
-//! [`_1`](crate::types::unary::constants::_1), [`_2`](crate::types::unary::constants::_2), ...
-//! [`_127`](crate::types::unary::constants::_127) are defined in the
-//! [`constants`](crate::types::unary::constants) module.
+//! numbers](crate::unary). Dialectic supports up to 128 possible choices in an `Offer` or
+//! `Choose`, and the corresponding constants [`_0`](crate::unary::constants::_0),
+//! [`_1`](crate::unary::constants::_1), [`_2`](crate::unary::constants::_2), ...
+//! [`_127`](crate::unary::constants::_127) are defined in the
+//! [`constants`](crate::unary::constants) module.
 //!
 //! # Looping back
 //!
@@ -418,31 +418,25 @@
 //! the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop;
 //! however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc.
 //! Likewise, `Break` breaks out of the innermost loop, `Break<_1>` breaks out of the
-//! second-innermost, `Break<_2>` the third-innermost, etc. The types [`_0`](unary::types::_0),
-//! [`_1`](unary::types::_1), [`_2`](unary::types::_2), etc. are defined in the [`unary::types`]
-//! module and imported by default in the [`dialectic::*`](crate) namespace.
+//! second-innermost, `Break<_2>` the third-innermost, etc. The types [`_0`](type@_0),
+//! [`_1`](type@_1), [`_2`](type@_2), etc. are imported by default in the
+//! [`dialectic::prelude::*`](crate::prelude) namespace.
 //!
 //! ## Automatic looping
 //!
-//! You may have noticed how in the example above, [`choose`](CanonicalChan::choose) can be called
-//! on `c1` even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin
-//! with [`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`],
-//! [`Break`], or [`Continue`] that leads to a session type for which a given operation is valid,
-//! that operation is valid on the [`Chan`]. In the instance above, calling
-//! [`choose`](CanonicalChan::choose) on a [`Chan`] with session type `Loop<Choose<...>>` works, no
-//! matter how many `Loop`s enclose the `Choose`. Similarly, if a `Chan`'s type is `Continue`,
-//! whatever operation would be valid for the session type at the start of the corresponding `Loop`
-//! is valid for that `Chan`.
+//! You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
+//! even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
+//! [`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`], [`Break`],
+//! or [`Continue`] that leads to a session type for which a given operation is valid, that
+//! operation is valid on the [`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a
+//! [`Chan`] with session type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the
+//! `Choose`.
 //!
-//! This behavior is enabled by the [`Actionable`] trait, which defines what the next "real action"
-//! on a session type is. For most session types, the "real action" is that session type itself.
-//! However, for only [`Loop`], [`Break`], and [`Continue`], the next action is whatever follows
-//! entering the loop(s) or recurring, respectively.
-//!
-//! In most uses of Dialectic, you won't need to directly care about the [`Actionable`] trait or
-//! most of the traits in [`types`](crate::types) aside from [`Session`]. It's good to know what
-//! it's for, though, because that might help you understand an error message more thoroughly in the
-//! future!
+//! This behavior is enabled by the [`Session`] trait, which in addition to defining the
+//! [`Dual`](crate::Session::Dual) of each session type, defines what the next "real"
+//! [`Action`](crate::Session::Action) on a session type is. For most session types, the "real
+//! action" is that session type itself. However, for [`Loop`], the next real action is whatever
+//! follows entering the loop(s), with the loop body unrolled by one iteration.
 //!
 //! # Splitting off
 //!
@@ -451,8 +445,8 @@
 //! executing certain portions of them in parallel.
 //!
 //! Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
-//! a session type of `Split<P, Q>` can be [`split`](CanonicalChan::split) into a send-only end with
-//! the session type `P` and a receive-only end with the session type `Q`, which can then be used
+//! a session type of `Split<P, Q>` can be [`split`](Chan::split) into a send-only end with the
+//! session type `P` and a receive-only end with the session type `Q`, which can then be used
 //! concurrently. In the example below, the two ends of a channel **concurrently swap** a
 //! `Vec<usize>` and a `String`. If this example were run over a network and these values were
 //! large, this could represent a significant reduction in runtime.
@@ -541,9 +535,8 @@
 //! - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
 //! - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
 //! - It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
-//!   before the future completes. This is subject to the same behavior as in
-//!   [`seq`](CanonicalChan::seq), described below. [See here for more
-//!   explanation](#errors-in-subroutines-what-not-to-do).
+//!   before the future completes. This is subject to the same behavior as in [`seq`](Chan::seq),
+//!   described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).
 //!
 //! # Sequencing and Modularity
 //!
@@ -582,13 +575,13 @@
 //! Then, at some later point in time, you might realize you need to implement a protocol that makes
 //! several calls to `Query` in a loop. Unfortunately, the type of `Query` ends with [`Done`], and
 //! its implementation `query` (correctly) closes the [`Chan`] at the end. Without
-//! [`seq`](CanonicalChan::seq), you would have to modify both the type `Query` and the function
-//! `query`, just to let them be called from a larger context.
+//! [`seq`](Chan::seq), you would have to modify both the type `Query` and the function `query`,
+//! just to let them be called from a larger context.
 //!
 //! Instead of re-writing both the specification and the implementation, we can use [`Seq`] to
 //! integrate `query` as a subroutine in a larger protocol, without changing its type or definition.
-//! All we need to do is use the [`seq`](CanonicalChan::seq) method to call it as a subroutine on
-//! the channel.
+//! All we need to do is use the [`seq`](Chan::seq) method to call it as a subroutine on the
+//! channel.
 //!
 //! ```
 //! # use dialectic::prelude::*;
@@ -625,28 +618,26 @@
 //! }
 //! ```
 //!
-//! Furthermore, [`seq`](CanonicalChan::seq) can be used to implement **context free session
-//! types**, where the sub-protocol in the first half `P` of `Seq<P, Q>` uses [`Continue`] to recur
-//! back outside the [`Seq`] itself. This allows you to define recursive protocols that can be
-//! shaped like any arbitrary tree. For more details and an example, see the documentation for
-//! [`seq`](CanonicalChan::seq).
+//! Furthermore, [`seq`](Chan::seq) can be used to implement **context free session types**, where
+//! the sub-protocol in the first half `P` of `Seq<P, Q>` uses [`Continue`] to recur back outside
+//! the [`Seq`] itself. This allows you to define recursive protocols that can be shaped like any
+//! arbitrary tree. For more details and an example, see the documentation for [`seq`](Chan::seq).
 //!
 //! ## Errors in subroutines (what not to do)
 //!
-//! In order for the [`seq`](CanonicalChan::seq) method to preserve the validity of the session type
-//! `Seq<P, Q>`, we need to make sure that the subroutine executing `P` **finishes** the session `P`
-//! by driving the channel to the `Done` session type. If we didn't check this, it would be possible
-//! to drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol.
-//! The [`seq`](CanonicalChan::seq) method solves this problem by returning a pair of the
-//! subroutine's return value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed
-//! successfully, or a [`SessionIncomplete`] error if not. It's almost always a programmer error if
-//! you get a [`SessionIncomplete`] error, so it's usually the right idea to
-//! [`unwrap`](Result::unwrap) it and proceed without further fanfare.
+//! In order for the [`seq`](Chan::seq) method to preserve the validity of the session type `Seq<P,
+//! Q>`, we need to make sure that the subroutine executing `P` **finishes** the session `P` by
+//! driving the channel to the `Done` session type. If we didn't check this, it would be possible to
+//! drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol. The
+//! [`seq`](Chan::seq) method solves this problem by returning a pair of the subroutine's return
+//! value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed successfully, or a
+//! [`SessionIncomplete`] error if not. It's almost always a programmer error if you get a
+//! [`SessionIncomplete`] error, so it's usually the right idea to [`unwrap`](Result::unwrap) it and
+//! proceed without further fanfare.
 //!
-//! 💡 **A useful pattern:** If you make sure to *always* call [`close`](CanonicalChan::close) on
-//! the channel before the subroutine's future returns, you can be guaranteed that such errors are
-//! impossible, because [`close`](CanonicalChan::close) can only be called when a channel's session
-//! is complete.
+//! 💡 **A useful pattern:** If you make sure to *always* call [`close`](Chan::close) on the channel
+//! before the subroutine's future returns, you can be guaranteed that such errors are impossible,
+//! because [`close`](Chan::close) can only be called when a channel's session is complete.
 //!
 //! # Wrapping up
 //!
