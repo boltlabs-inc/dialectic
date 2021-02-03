@@ -118,6 +118,7 @@ where
 ///
 /// ```
 /// use dialectic::types::*;
+/// use dialectic::prelude::*;
 /// # use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(
@@ -161,6 +162,7 @@ where
 /// ```
 /// # use static_assertions::assert_type_eq_all;
 /// use dialectic::types::*;
+/// use dialectic::prelude::*;
 ///
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_0>>::Selected, _0);
 /// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_2>>::Selected, _2);
