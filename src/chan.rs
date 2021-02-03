@@ -76,6 +76,12 @@ pub struct Chan<Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static
     session: PhantomData<S>,
 }
 
+// This is safe because `S` is only used as a phantom type.
+unsafe impl<Tx: std::marker::Send, Rx: std::marker::Send, S: Session> std::marker::Send
+    for Chan<Tx, Rx, S>
+{
+}
+
 impl<Tx, Rx, S> Drop for Chan<Tx, Rx, S>
 where
     Tx: std::marker::Send + 'static,

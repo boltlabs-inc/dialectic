@@ -1,4 +1,4 @@
-pub use crate::canonical::Over;
+pub use crate::chan::Over;
 
 use super::*;
 use crate::types::*;
@@ -307,7 +307,7 @@ where
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static,
     {
-        canonical::Chan::from_raw_unchecked(tx, rx)
+        chan::Chan::from_raw_unchecked(tx, rx)
     }
 
     fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
@@ -317,6 +317,6 @@ where
         F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
-        crate::canonical::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
+        crate::chan::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
     }
 }

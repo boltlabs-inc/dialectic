@@ -117,9 +117,9 @@ pub mod unary;
 mod session;
 pub use session::Session;
 
-mod canonical;
+mod chan;
 #[doc(inline)]
-pub use canonical::{Branches, Chan};
+pub use chan::{Branches, Chan};
 
 use prelude::*;
 
