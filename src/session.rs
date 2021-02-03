@@ -1,8 +1,9 @@
 pub use crate::canonical::Over;
 
 use super::*;
+use crate::types::*;
 
-/// The `NewSession` extension trait gives methods to create session-typed channels from session
+/// The `Session` extension trait gives methods to create session-typed channels from session
 /// types. These are implemented as static methods on the session type itself.
 ///
 /// # Examples
@@ -22,7 +23,7 @@ use super::*;
 ///
 /// # Notes
 ///
-/// The trait bounds specified for [`NewSession`] ensure that the session type is well-formed.
+/// The trait bounds specified for [`Session`] ensure that the session type is well-formed.
 /// However, it does not ensure that all the types in the session type can be sent or received over
 /// the given channels.
 ///
@@ -53,7 +54,7 @@ use super::*;
 ///   |
 ///   = help: consider adding a `#![recursion_limit="256"]` attribute to your crate
 ///   = note: required because of the requirements on the impl of `Actionable<()>` for `Loop<Continue>`
-///   = note: required because of the requirements on the impl of `NewSession` for `Loop<Continue>`
+///   = note: required because of the requirements on the impl of `Session` for `Loop<Continue>`
 /// ```
 ///
 /// In this situation, you **should not** take `rustc`'s advice. If you add a
@@ -65,9 +66,27 @@ use super::*;
 /// recursion.
 pub trait Session
 where
-    Self: Scoped + Actionable + HasDual,
-    Self::Dual: Scoped + Actionable + HasDual,
+    Self: Scoped
+        + Actionable<NextAction = <Self as Session>::Action>
+        + HasDual<DualSession = <Self as Session>::Dual>,
 {
+    /// The dual to this session type, i.e. the session type for the other side of this channel.
+    ///
+    /// Every individual session type component has a dual defined by [`HasDual`]. This is that
+    /// type.
+    type Dual;
+
+    /// The canonical next channel action for this session type.
+    ///
+    /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`] (when
+    /// [`Done`] is outside a [`Loop`] or in the first argument to [`Seq`]), the next channel action
+    /// is the session type itself. For [`Loop`], the next channel action is the inside of the loop,
+    /// with all [`Continue`]s, [`Break`]s, and [`Done`]s within it appropriately unrolled by one
+    /// loop iteration.
+    ///
+    /// This is always the action type defined by [`Actionable`] for this session type.
+    type Action;
+
     /// Given a closure which generates a uni-directional underlying transport channel, create a
     /// pair of dual [`Chan`]s which communicate over the transport channels resulting from these
     /// closures.
@@ -88,8 +107,9 @@ where
     /// ```
     fn channel<Tx, Rx>(
         make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>)
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, <Self as Session>::Dual>)
     where
+        <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static;
 
@@ -117,8 +137,12 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>)
+    ) -> (
+        Chan<Tx0, Rx1, Self>,
+        Chan<Tx1, Rx0, <Self as Session>::Dual>,
+    )
     where
+        <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx0: marker::Send + 'static,
         Rx0: marker::Send + 'static,
         Tx1: marker::Send + 'static,
@@ -157,7 +181,7 @@ where
     /// channel before the future returns. If the channel is dropped before completing `P` or is not
     /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
     /// channel for `Q`. The best way to ensure this error does not occur is to call
-    /// [`close`](CanonicalChan::close) on the channel before returning from the future, because
+    /// [`close`](Chan::close) on the channel before returning from the future, because
     /// this statically checks that the session is complete and drops the channel.
     ///
     /// # Examples
@@ -242,25 +266,32 @@ where
 impl<P> Session for P
 where
     Self: Scoped + Actionable + HasDual,
-    Self::Dual: Scoped + Actionable + HasDual,
 {
+    type Dual = <Self as HasDual>::DualSession;
+    type Action = <Self as Actionable>::NextAction;
+
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, Self::Dual>)
+    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, <Self as Session>::Dual>)
     where
+        <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static,
     {
         let (tx0, rx0) = make();
         let (tx1, rx1) = make();
-        (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
+        (P::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
     }
 
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (Chan<Tx0, Rx1, Self>, Chan<Tx1, Rx0, Self::Dual>)
+    ) -> (
+        Chan<Tx0, Rx1, Self>,
+        Chan<Tx1, Rx0, <Self as Session>::Dual>,
+    )
     where
+        <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx0: marker::Send + 'static,
         Rx0: marker::Send + 'static,
         Tx1: marker::Send + 'static,
@@ -268,7 +299,7 @@ where
     {
         let (tx0, rx0) = make0();
         let (tx1, rx1) = make1();
-        (P::wrap(tx0, rx1), <P::Dual>::wrap(tx1, rx0))
+        (P::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
     }
 
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>
@@ -276,7 +307,7 @@ where
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static,
     {
-        canonical::CanonicalChan::from_raw_unchecked(tx, rx)
+        canonical::Chan::from_raw_unchecked(tx, rx)
     }
 
     fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>

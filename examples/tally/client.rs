@@ -7,8 +7,8 @@ mod server;
 use server::{get_port, wrap_socket, Operation, Server, Tally};
 
 // The client is the dual of the server
-type Client = <Server as HasDual>::Dual;
-type ClientTally = <Tally as HasDual>::Dual;
+type Client = <Server as Session>::Dual;
+type ClientTally = <Tally as Session>::Dual;
 
 /// Loop presenting a prompt until the user enters a parseable string or the input ends, returning
 /// `Ok(None)` on end of input and `Err(_)` on other errors.

@@ -3,18 +3,18 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
-/// Sequence two sessions `P` and `Q` together using [`seq`](CanonicalChan::seq).
+/// Sequence two sessions `P` and `Q` together using [`seq`](Chan::seq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Seq<P, Q = Done>(pub P, pub Q);
 
 impl<P: Any, Q: Any> IsSession for Seq<P, Q> {}
 
 impl<P: HasDual, Q: HasDual> HasDual for Seq<P, Q> {
-    type Dual = Seq<P::Dual, Q::Dual>;
+    type DualSession = Seq<P::DualSession, Q::DualSession>;
 }
 
 impl<P, Q> Actionable for Seq<P, Q> {
-    type Action = Self;
+    type NextAction = Self;
 }
 
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Seq<P, Q> {}

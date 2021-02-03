@@ -18,7 +18,7 @@
 // ```
 
 #![allow(clippy::type_complexity)]
-use crate::types::tuple::{List, Tuple};
+use crate::tuple::{List, Tuple};
 
 impl Tuple for () {
     type AsList = ();

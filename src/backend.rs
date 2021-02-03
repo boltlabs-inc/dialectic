@@ -5,10 +5,10 @@
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
 //! session (and in the case of [`Transmit`], for the particular calling conventions used to pass
-//! those types to [`Chan::send`](crate::CanonicalChan::send)).
+//! those types to [`Chan::send`](crate::Chan::send)).
 //!
 //! Additionally, in order to support [`offer!`](crate::offer) and
-//! [`choose`](crate::CanonicalChan::choose), the sending channel `Tx` must implement
+//! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement
 //! `Transmit<'static, Choice<N>, Val>`, and the receiving channel `Rx` must implement
 //! `Receive<Choice<N>>`, for all `N`. For more information, see [`Choice`](crate::Choice).
 
@@ -30,7 +30,7 @@ pub mod serde;
 /// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a message
 /// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 ///
-/// In order to support the [`Chan::choose`](crate::CanonicalChan::choose) method, all backends must
+/// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
 /// implement `Transmit<Choice<N>, Val>` for all `N`. For more information, see
 /// [`Choice`](crate::Choice).
 ///
@@ -55,7 +55,7 @@ pub trait Transmit<T, Convention: CallingConvention> {
 
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
 ///
-/// In order to support the [`Chan::offer`](crate::CanonicalChan::offer) method, all backends must
+/// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must
 /// implement `Receive<Choice<N>>`, in addition to whatever other types they support. For more
 /// information, see [`Choice`](crate::Choice).
 ///

@@ -1,8 +1,8 @@
 use super::sealed::IsSession;
-use crate::prelude::*;
+use crate::types::*;
 use std::{any::Any, marker::PhantomData};
 
-/// Send a message of type `T` using [`send`](crate::CanonicalChan::send), then continue with
+/// Send a message of type `T` using [`send`](crate::Chan::send), then continue with
 /// protocol `P`.
 ///
 /// # Notes
@@ -16,11 +16,11 @@ pub struct Send<T, P = Done>(pub PhantomData<T>, pub P);
 impl<T: Any, P: Any> IsSession for Send<T, P> {}
 
 impl<T: Any, P: HasDual> HasDual for Send<T, P> {
-    type Dual = Recv<T, P::Dual>;
+    type DualSession = Recv<T, P::DualSession>;
 }
 
 impl<T, P> Actionable for Send<T, P> {
-    type Action = Self;
+    type NextAction = Self;
 }
 
 impl<T, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}

@@ -1,7 +1,8 @@
 use std::any::Any;
 
+use super::sealed::IsSession;
 use super::*;
-use super::{sealed::IsSession, unary::Compare};
+use crate::unary::Compare;
 
 /// Break out of a [`Loop`]. The type-level index points to the loop to be broken, counted from the
 /// innermost starting at [`Z`].
@@ -13,7 +14,7 @@ pub struct Break<N: Unary = Z>(pub N);
 impl<N: Unary + Any> IsSession for Break<N> {}
 
 impl<N: Unary + Any> HasDual for Break<N> {
-    type Dual = Break<N>;
+    type DualSession = Break<N>;
 }
 
 impl<N: Unary, M: Unary> Scoped<N> for Break<M> where M: LessThan<N> {}

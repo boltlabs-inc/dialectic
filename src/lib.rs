@@ -48,10 +48,9 @@
 //! Dialectic. A quick summary:
 //!
 //! - To make a pair of dual [`Chan`]s for a session type `P`: [`let (c1, c2) = P::channel(||
-//!   {...})`](NewSession::channel) with some closure that builds a unidirectional underlying
-//!   channel.
+//!   {...})`](Session::channel) with some closure that builds a unidirectional underlying channel.
 //! - To wrap an existing sender `tx` and receiver `rx` in a single [`Chan`] for `P`: [`let c =
-//!   P::wrap(tx, rx)`](NewSession::wrap).
+//!   P::wrap(tx, rx)`](Session::wrap).
 //! - Backend transports suitable for being wrapped in a [`Chan`] are provided in [`backend`], along
 //!   with the [`Transmit`] and [`Receive`] traits necessary to implement your own.
 //!
@@ -59,16 +58,16 @@
 //!
 //! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<_, _, S, _>`) | Dual Type (`S::Dual`) |
 //! | :----------- | :------------------- | :-------- |
-//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](CanonicalChan::send) | [`Recv<T, P::Dual>`](Recv) |
-//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](CanonicalChan::recv) | [`Send<T, P::Dual>`](Send) |
-//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](CanonicalChan::choose) | [`Offer<Choices::Dual>`](Offer) |
+//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
 //! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Dual>`](Choose) |
-//! | [`Split<P, Q>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `Done`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](CanonicalChan::split) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Split<P, Q>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `Done`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
-//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
-//! | [`Seq<P, Q>`](Seq) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.seq(&#124;c&#124; async move { ... }).await?;</code>](CanonicalChan::seq) | [`Seq<P::Dual, Q::Dual>`](Seq) |
-//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](CanonicalChan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](CanonicalChan::close) |
+//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
+//! | [`Seq<P, Q>`](Seq) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.seq(&#124;c&#124; async move { ... }).await?;</code>](Chan::seq) | [`Seq<P::Dual, Q::Dual>`](Seq) |
+//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
@@ -98,102 +97,31 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::backend::{Choice, Receive, Transmit};
     #[doc(no_inline)]
-    pub use crate::new_session::Session;
+    pub use crate::session::Session;
     pub use crate::tuple::{List, Tuple};
-    pub use crate::types::unary::constants::*;
-    pub use crate::types::unary::types::*;
-    pub use crate::types::unary::{Compare, LessThan, Unary, S, Z};
-    pub use crate::types::*;
-    pub use crate::{
-        canonical::{Branches, CanonicalChan},
-        offer, Chan, IncompleteHalf, SessionIncomplete,
-    };
+    pub use crate::types::{Break, Choose, Continue, Done, Loop, Offer, Recv, Send, Seq, Split};
+    pub use crate::unary::constants::*;
+    pub use crate::unary::types::*;
+    pub use crate::unary::{Compare, LessThan, Unary, S, Z};
+    pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
 }
 
 pub mod backend;
+pub mod tuple;
 pub mod tutorial;
 pub mod types;
+pub mod unary;
 
-mod new_session;
-pub use new_session::Session;
+mod session;
+pub use session::Session;
 
-pub mod canonical;
+mod canonical;
 #[doc(inline)]
-pub use canonical::Branches;
+pub use canonical::{Branches, Chan};
 
 use prelude::*;
-
-/// A bidirectional communications channel using the session type `P` over the connections `Tx` and
-/// `Rx`.
-///
-/// **[See the documentation for `CanonicalChan` for available methods and trait
-/// implementations.](CanonicalChan)**
-///
-/// **Important: always write this type synonym ([`Chan`]) in type signatures, not️
-/// [`CanonicalChan`] directly.** This is because the [`Chan`] type synonym canonicalizes its
-/// session type argument, which means it can be used more flexibly. The details:
-///
-/// # Technical notes on canonicity: TL;DR: always write `Chan`
-///
-/// In Dialectic, operations are liberally available on [`Chan`]s wherever they make
-/// sense. For instance, it's valid to call [`send`](CanonicalChan::send) on a channel which was
-/// created using the session type `Loop<Send<String>>`, even though the type does not literally
-/// begin with `Send<String>`.
-///
-/// A `CanonicalChan` always has a session type which is syntactically a real action: it will never
-/// be [`Loop`], [`Continue`], or [`Break`] (or, when inside a [`Loop`], it will never be [`Done`]).
-/// Every action available on a [`CanonicalChan`] "fast-forwards" through such control operators,
-/// yielding a [`CanonicalChan`] that corresponds to the next real action available.
-///
-/// While this design means greater flexibility and concision in writing session-typed code, it can
-/// be confusing in the case where you want to explicitly write out the session type of a channel,
-/// because the automatic canonicalization can mean a [`Chan`] does not have the type
-/// you might think it does.
-///
-/// ⚠️ **The problem:** Suppose you wanted to explicitly annotate the type of a new channel:
-///
-/// ```compile_fail
-/// # use dialectic::prelude::*;
-/// # use dialectic::backend::mpsc;
-/// use dialectic::canonical::CanonicalChan;
-///
-/// type P = Loop<Send<String>>;
-/// let (c1, c2): (CanonicalChan<_, _, P, ()>, _) = P::channel(mpsc::unbounded_channel);
-/// ```
-///
-/// This fails to typecheck, returning several errors (abridged for clarity):
-///
-/// ```text
-/// error[E0271]: type mismatch resolving `<Loop<Send<String>> as Actionable>::Action == Loop<Send<String>>`
-///    = note: expected struct `Loop<Send<_>>`
-///               found struct `Send<_>`
-///
-/// error[E0271]: type mismatch resolving `<Loop<Send<String>> as Actionable>::Env == ()`
-///    = note: expected unit type `()`
-///                    found type `(Send<String>, ())`
-/// ```
-///
-/// These errors indicate that the returned [`CanonicalChan`] from `P::channel` *does not* have the
-/// session type `P` and the initial empty environment `E = ()`, as annotated. Instead, it has the
-/// session type and environment corresponding to the *inside* of the `Loop`, which are the
-/// *canonical* session type and environment for `P`.
-///
-/// 💡 **Do this instead:** When annotating the types of channels, prefer the type synonym
-/// [`Chan`], which computes the correct [`CanonicalChan`] type for a given (possibly
-/// non-canonical) session type. Using [`Chan`]instead of [`CanonicalChan`], we can
-/// correctly annotate a newly created channel of any session type:
-///
-/// ```
-/// # use dialectic::prelude::*;
-/// # use dialectic::backend::mpsc;
-/// #
-/// type P = Loop<Send<String>>;
-/// let (c1, c2): (Chan<_, _, P>, Chan<_, _, <P as Session>::Dual>) =
-///     P::channel(mpsc::unbounded_channel);
-/// ```
-pub type Chan<Tx, Rx, P> = CanonicalChan<Tx, Rx, P>;
 
 /// Offer a set of different protocols, allowing the other side of the channel to choose with which
 /// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
@@ -243,8 +171,8 @@ macro_rules! offer {
         $chan:ident => { $($t:tt)* }
     ) => (
         {
-            match $crate::canonical::CanonicalChan::offer($chan).await {
-                Ok(b) => $crate::offer!{@branches b, $chan, $crate::types::unary::Z, $($t)* },
+            match $crate::Chan::offer($chan).await {
+                Ok(b) => $crate::offer!{@branches b, $chan, $crate::unary::Z, $($t)* },
                 Err(e) => Err(e)?,
             }
         }
@@ -275,7 +203,7 @@ macro_rules! offer {
                 $code
             },
             std::result::Result::Err($branch) => {
-                $crate::offer!{@branches $branch, $chan, $crate::types::unary::S<$n>, $($t)+ }
+                $crate::offer!{@branches $branch, $chan, $crate::unary::S<$n>, $($t)+ }
             },
         }
     );
@@ -283,7 +211,7 @@ macro_rules! offer {
 
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
-/// When using [`split`](CanonicalChan::split), the resultant two channels can only send or only
+/// When using [`split`](Chan::split), the resultant two channels can only send or only
 /// receive, respectively. This is reflected at the type level by the presence of [`Unavailable`] on
 /// the type of the connection which *is not* present for each part of the split, and [`Available`]
 /// on the type of the connection which *is*.
@@ -299,7 +227,7 @@ impl<T> Unavailable<T> {
 
 /// An available [`Transmit`] or [`Receive`] end of a connection.
 ///
-/// When using [`split`](CanonicalChan::split), the resultant two channels can only send or only
+/// When using [`split`](Chan::split), the resultant two channels can only send or only
 /// receive, respectively. This is reflected at the type level by the presence of [`Available`] on
 /// the type of the connection which *is* present for each part of the split, and [`Unavailable`] on
 /// the type of the connection which *is not*.
@@ -365,7 +293,7 @@ where
 ///
 /// This error can arise either if the channel is dropped *before* its session is completed, or if
 /// it is stored somewhere and is dropped *after* the closure's future is finished. The best way to
-/// ensure this error does not occur is to call [`close`](CanonicalChan::close) on the channel,
+/// ensure this error does not occur is to call [`close`](Chan::close) on the channel,
 /// which statically ensures it is dropped exactly when the session is complete.
 #[derive(Derivative)]
 #[derivative(Debug(bound = ""))]
@@ -412,7 +340,7 @@ pub enum SessionIncomplete<Tx, Rx> {
 pub enum IncompleteHalf<T> {
     /// The underlying channel was dropped before the session was `Done`.
     Unfinished(#[derivative(Debug = "ignore")] T),
-    /// The underlying channel was not dropped or [`close`](CanonicalChan::close)d after the session
+    /// The underlying channel was not dropped or [`close`](Chan::close)d after the session
     /// was `Done`.
     Unclosed,
 }

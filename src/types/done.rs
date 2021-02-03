@@ -1,19 +1,25 @@
-use super::sealed::IsSession;
+use super::sealed::{IsSession, SubstMode};
 use super::*;
 
 /// A finished session. The only thing to do with a [`Chan`] when it is `Done` is to drop it or,
-/// preferably, [`close`](CanonicalChan::close) it.
+/// preferably, [`close`](Chan::close) it.
+///
+/// If [`Done`] occurs within a [`Loop`], it is implicitly equivalent to [`Continue`]; that is to
+/// say, the behavior of `Loop<Send<String, Done>>` is equivalent to `Loop<Send<String, Continue>>`.
+/// This is overridden in the case where [`Done`] occurs inside the outermost level of the first
+/// argument to [`Seq`]: that is, `Loop<Seq<Send<String, Done>, Done>>` is equivalent to
+/// `Loop<Seq<Send<String, Break>, Continue>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Done;
 
 impl IsSession for Done {}
 
 impl HasDual for Done {
-    type Dual = Done;
+    type DualSession = Done;
 }
 
 impl Actionable for Done {
-    type Action = Self;
+    type NextAction = Self;
 }
 
 impl<N: Unary> Scoped<N> for Done {}
@@ -22,7 +28,7 @@ impl<P: 'static> Subst<P, Z, Continue> for Done {
     type Substituted = P;
 }
 
-impl<P: 'static> Subst<P, Z, Done> for Done {
+impl<P> Subst<P, Z, Done> for Done {
     type Substituted = Done;
 }
 
@@ -33,6 +39,8 @@ impl<P, N: Unary> Subst<P, S<N>, Continue> for Done {
 impl<P, N: Unary> Subst<P, S<N>, Done> for Done {
     type Substituted = Break<N>;
 }
+
+impl SubstMode for Done {}
 
 #[cfg(test)]
 mod tests {

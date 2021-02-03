@@ -1,4 +1,4 @@
-use crate::types::unary::*;
+use crate::unary::*;
 use std::convert::{TryFrom, TryInto};
 use std::marker::PhantomData;
 use thiserror::Error;
@@ -20,7 +20,7 @@ use thiserror::Error;
 /// ```
 /// use std::convert::TryInto;
 /// use dialectic::backend::Choice;
-/// use dialectic::types::unary::types::*;
+/// use dialectic::unary::types::*;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let zero: Choice<_3> = 0_u8.try_into()?;
@@ -40,7 +40,7 @@ use thiserror::Error;
 /// ```
 /// # use std::convert::TryInto;
 /// # use dialectic::backend::Choice;
-/// # use dialectic::types::unary::types::*;
+/// # use dialectic::unary::types::*;
 /// #
 /// let attempted_three: Result<Choice<_3>, _> = 3_u8.try_into();
 /// let attempted_four: Result<Choice<_3>, _> = 4_u8.try_into();
@@ -55,7 +55,7 @@ use thiserror::Error;
 /// ```
 /// # use std::convert::TryInto;
 /// # use dialectic::backend::Choice;
-/// # use dialectic::types::unary::types::*;
+/// # use dialectic::unary::types::*;
 /// #
 /// for i in 0 ..= u8::MAX {
 ///    let attempt: Result<Choice<_0>, _> = i.try_into();
