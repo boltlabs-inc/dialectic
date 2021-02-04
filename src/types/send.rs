@@ -4,14 +4,9 @@ use std::{any::Any, marker::PhantomData};
 
 /// Send a message of type `T` using [`send`](crate::Chan::send), then continue with
 /// protocol `P`.
-///
-/// # Notes
-///
-/// A session ending with a `Send` can be abbreviated: `Send<String>` is shorthand for `Send<String,
-/// Done>`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Send<T, P = Done>(pub PhantomData<T>, pub P);
+pub struct Send<T, P>(pub PhantomData<T>, pub P);
 
 impl<T: Any, P: Any> IsSession for Send<T, P> {}
 

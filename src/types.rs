@@ -5,7 +5,6 @@ use crate::unary::{LessThan, Unary, S, Z};
 
 // Each construct in the session types language lives in its own module, along with the
 // implementation of its various typing rules.
-mod r#break;
 mod choose;
 mod r#continue;
 mod done;
@@ -19,7 +18,6 @@ mod split;
 pub use choose::*;
 pub use done::*;
 pub use offer::*;
-pub use r#break::*;
 pub use r#continue::*;
 pub use r#loop::*;
 pub use recv::*;
@@ -66,7 +64,7 @@ pub trait Actionable {
     type NextAction: Actionable<NextAction = Self::NextAction>;
 }
 
-/// A session type is [`Scoped`] if none of its [`Continue`]s or [`Break`]s refer to outside of the
+/// A session type is [`Scoped`] if none of its [`Continue`]s refer to outside of the
 /// [`Loop`]s which they are within.
 pub trait Scoped<N: Unary = Z> {}
 
@@ -100,19 +98,8 @@ where
     type Duals = (P::DualSession, Ps::Duals);
 }
 
-/// Substitute `P` for every reference to `N` in the given session type.
-///
-/// The three places substitution occurs, in `Subst<P, N>`:
-///
-/// - [`Continue<M>`]: when `N == M`, this becomes `P` (i.e. a [`Loop`] is unrolled by one step)
-/// - [`Break<Z>`]: when `N == _0`, this becomes [`Done`] (i.e. this is a [`Break`] out of an
-///   outermost [`Loop`])
-/// - [`Break<S<M>>`]: when `N == S<M>`, this becomes `P` (i.e. this is a [`Break`] out of a
-///   non-outermost [`Loop`])
-/// - [`Break<S<M>>`]: when `N != S<M>`, this becomes `Break<M>` (i.e. this will eventually step to
-///   [`Done`] when `N == _0`)
-/// - [`Done`]: when `N == _0` and `Mode == Continue` (i.e. [`Done`] is like [`Continue`] when
-///   inside a [`Loop`] and not at the outermost level of a `Seq`)
+/// Substitute `P` for every [`Continue`] referring to the outermost scope in the given session
+/// type.
 ///
 /// # Examples
 ///
@@ -122,8 +109,8 @@ where
 /// # use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(
-///     <Send<i64, Offer<(Break, Continue, Loop<Break<_1>>)>> as Subst<Recv<()>>>::Substituted,
-///     Send<i64, Offer<(Done, Recv<()>, Loop<Break<_0>>)>>,
+///     <Send<i64, Continue> as Subst<Recv<(), Done>>>::Substituted,
+///     Send<i64, Recv<(), Done>>,
 /// );
 /// ```
 pub trait Subst<P, N: Unary = Z>: sealed::IsSession {
@@ -238,9 +225,13 @@ mod tests {
         type P = Loop<
             Loop<
                 Choose<(
-                    Send<usize>,
-                    Recv<String>,
-                    Offer<(Send<bool>, Continue<S<Z>>, Split<Send<isize>, Recv<isize>>)>,
+                    Send<usize, Continue>,
+                    Recv<String, Continue>,
+                    Offer<(
+                        Send<bool, Continue>,
+                        Continue<S<Z>>,
+                        Split<Send<isize, Continue>, Recv<isize, Continue>>,
+                    )>,
                 )>,
             >,
         >;

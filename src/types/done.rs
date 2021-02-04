@@ -3,12 +3,6 @@ use super::*;
 
 /// A finished session. The only thing to do with a [`Chan`] when it is `Done` is to drop it or,
 /// preferably, [`close`](Chan::close) it.
-///
-/// If [`Done`] occurs within a [`Loop`], it is implicitly equivalent to [`Continue`]; that is to
-/// say, the behavior of `Loop<Send<String, Done>>` is equivalent to `Loop<Send<String, Continue>>`.
-/// This is overridden in the case where [`Done`] occurs inside the outermost level of the first
-/// argument to [`Seq`]: that is, `Loop<Seq<Send<String, Done>, Done>>` is equivalent to
-/// `Loop<Seq<Send<String, Break>, Continue>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Done;
 
@@ -37,7 +31,7 @@ mod tests {
     fn done_in_seq() {
         use crate::prelude::*;
 
-        type S = Loop<Seq<Send<String, Done>, Recv<String, Break>>>;
+        type S = Loop<Seq<Send<String, Done>, Recv<String, Done>>>;
 
         async fn serve<Tx, Rx>(chan: Chan<Tx, Rx, S>) -> Result<(), Box<dyn std::error::Error>>
         where

@@ -14,7 +14,7 @@ use crate::types::*;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let (c1, c2) = <Send<String>>::channel(mpsc::unbounded_channel);
+/// let (c1, c2) = <Send<String, Done>>::channel(mpsc::unbounded_channel);
 /// // do something with these channels...
 /// #   c1.unwrap();
 /// #   c2.unwrap();
@@ -81,8 +81,7 @@ where
     /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`] (when
     /// [`Done`] is outside a [`Loop`] or in the first argument to [`Seq`]), the next channel action
     /// is the session type itself. For [`Loop`], the next channel action is the inside of the loop,
-    /// with all [`Continue`]s, [`Break`]s, and [`Done`]s within it appropriately unrolled by one
-    /// loop iteration.
+    /// with all [`Continue`]s within it appropriately unrolled by one loop iteration.
     ///
     /// This is always the action type defined by [`Actionable`] for this session type.
     type Action;
@@ -216,7 +215,7 @@ where
     /// use IncompleteHalf::Unfinished;
     ///
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let (_, ends) = <Send<String>>::over(tx, rx, |chan| async move {
+    /// let (_, ends) = <Send<String, Done>>::over(tx, rx, |chan| async move {
     ///     Ok::<_, mpsc::Error>(())
     /// }).await?;
     ///
@@ -243,7 +242,7 @@ where
     /// let hold = hold_on_to_chan.clone();
     ///
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let (_, ends) = <Send<String>>::over(tx, rx, |chan| async move {
+    /// let (_, ends) = <Send<String, Done>>::over(tx, rx, |chan| async move {
     ///     *hold.lock().unwrap() = Some(chan);
     ///     Ok::<_, mpsc::Error>(())
     /// }).await?;

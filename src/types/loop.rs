@@ -1,7 +1,7 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// Label a loop point, which can be reiterated with [`Continue`], or broken out of with [`Break`].
+/// Label a loop point, which can be reiterated with [`Continue`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Loop<P>(pub P);
