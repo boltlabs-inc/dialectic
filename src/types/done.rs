@@ -1,4 +1,4 @@
-use super::sealed::{IsSession, SubstMode};
+use super::sealed::IsSession;
 use super::*;
 
 /// A finished session. The only thing to do with a [`Chan`] when it is `Done` is to drop it or,
@@ -24,23 +24,9 @@ impl Actionable for Done {
 
 impl<N: Unary> Scoped<N> for Done {}
 
-impl<P: 'static> Subst<P, Z, Continue> for Done {
-    type Substituted = P;
-}
-
-impl<P> Subst<P, Z, Done> for Done {
+impl<P, N: Unary> Subst<P, N> for Done {
     type Substituted = Done;
 }
-
-impl<P, N: Unary> Subst<P, S<N>, Continue> for Done {
-    type Substituted = Done;
-}
-
-impl<P, N: Unary> Subst<P, S<N>, Done> for Done {
-    type Substituted = Break<N>;
-}
-
-impl SubstMode for Done {}
 
 #[cfg(test)]
 mod tests {

@@ -26,15 +26,15 @@ impl<N: Unary, M: Unary> Scoped<N> for Break<M> where M: LessThan<N> {}
 // substitution occurs. Therefore, in any well-`Scoped` session type, the outermost `Break`s will
 // always end up `Done` by the time we reach them.
 
-impl<P, M: Unary, Mode> Subst<P, Z, Mode> for Break<M> {
+impl<P> Subst<P, Z> for Break<Z> {
     type Substituted = Done;
 }
 
-impl<P, Mode> Subst<P, S<Z>, Mode> for Break<Z> {
+impl<P, N: Unary> Subst<P, S<N>> for Break<Z> {
     type Substituted = Break<Z>;
 }
 
-impl<P, N: Unary, M: Unary, Mode> Subst<P, S<N>, Mode> for Break<S<M>>
+impl<P, N: Unary, M: Unary> Subst<P, S<N>> for Break<S<M>>
 where
     (M, S<N>): Compare<Break<M>, P, Break<S<M>>>,
     <(M, S<N>) as Compare<Break<M>, P, Break<S<M>>>>::Result: 'static,
@@ -54,5 +54,7 @@ mod tests {
             Loop<Loop<Break<_1>>>,
             Loop<Send<String, Break>>,
         );
+
+        static_assertions::assert_impl_all!(Loop<Loop<Send<String, Break<_0>>>>: Session<Action = Send<String, Loop<Loop<Send<String, Break<_0>>>>>>);
     }
 }

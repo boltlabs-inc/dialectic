@@ -126,7 +126,7 @@ where
 ///     Send<i64, Offer<(Done, Recv<()>, Loop<Break<_0>>)>>,
 /// );
 /// ```
-pub trait Subst<P, N: Unary = Z, Mode = Continue>: sealed::IsSession {
+pub trait Subst<P, N: Unary = Z>: sealed::IsSession {
     /// The result of the substitution.
     type Substituted: 'static;
 }
@@ -134,21 +134,19 @@ pub trait Subst<P, N: Unary = Z, Mode = Continue>: sealed::IsSession {
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachSubst`] trait ensures that every protocol in a type level list of
 /// protocols can [`Subst`].
-pub trait EachSubst<P, N: Unary = Z, Mode: sealed::SubstMode = Continue>:
-    sealed::EachSession
-{
+pub trait EachSubst<P, N: Unary = Z>: sealed::EachSession {
     /// The result of the substitution on every element of the list.
     type Substituted: 'static;
 }
 
-impl<N: Unary, Q, Mode: sealed::SubstMode> EachSubst<Q, N, Mode> for () {
+impl<N: Unary, Q> EachSubst<Q, N> for () {
     type Substituted = ();
 }
 
-impl<N: Unary, Q, Mode: sealed::SubstMode, P, Ps> EachSubst<Q, N, Mode> for (P, Ps)
+impl<N: Unary, Q, P, Ps> EachSubst<Q, N> for (P, Ps)
 where
-    P: Subst<Q, N, Mode>,
-    Ps: EachSubst<Q, N, Mode>,
+    P: Subst<Q, N>,
+    Ps: EachSubst<Q, N>,
 {
     type Substituted = (P::Substituted, Ps::Substituted);
 }
@@ -205,9 +203,6 @@ mod sealed {
     pub trait Select<N: Unary> {}
     impl<T, S> Select<Z> for (T, S) {}
     impl<T, P, Rest, N: Unary> Select<S<N>> for (T, (P, Rest)) where (P, Rest): Select<N> {}
-
-    /// Only allow [`Done`] and [`Continue`] to be used as substitution modes.
-    pub trait SubstMode: IsSession {}
 }
 
 /// Asserts that the specified type is a valid *closed* session type (that is, it does not

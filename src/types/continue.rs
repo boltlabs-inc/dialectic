@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use super::sealed::{IsSession, SubstMode};
+use super::sealed::IsSession;
 use super::*;
 use crate::unary::Compare;
 
@@ -18,15 +18,13 @@ impl<N: Unary + Any> HasDual for Continue<N> {
 
 impl<N: Unary, M: Unary> Scoped<N> for Continue<M> where M: LessThan<N> {}
 
-impl<P, Mode, N: Unary, M: Unary> Subst<P, N, Mode> for Continue<M>
+impl<P, N: Unary, M: Unary> Subst<P, N> for Continue<M>
 where
     (N, M): Compare<Continue<M>, P, Continue<M>>,
     <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result: 'static,
 {
     type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
 }
-
-impl SubstMode for Continue {}
 
 #[cfg(test)]
 mod tests {

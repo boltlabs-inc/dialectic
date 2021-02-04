@@ -23,8 +23,6 @@ impl<P, Q> Actionable for Split<P, Q> {
 
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 
-impl<N: Unary, Mode, P: Subst<R, N, Mode>, Q: Subst<R, N, Mode>, R> Subst<R, N, Mode>
-    for Split<P, Q>
-{
+impl<N: Unary, P: Subst<R, N>, Q: Subst<R, N>, R> Subst<R, N> for Split<P, Q> {
     type Substituted = Split<P::Substituted, Q::Substituted>;
 }

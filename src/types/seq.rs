@@ -19,10 +19,6 @@ impl<P, Q> Actionable for Seq<P, Q> {
 
 impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Seq<P, Q> {}
 
-/// Importantly, we require that `P: Subst<R, N, Done>`, which means [`Done`] doesn't implicitly
-/// loop at the outermost level of the first part of a [`Seq`].
-impl<N: Unary, Mode, P: Subst<R, N, Done>, Q: Subst<R, N, Mode>, R> Subst<R, N, Mode>
-    for Seq<P, Q>
-{
+impl<N: Unary, P: Subst<R, N>, Q: Subst<R, N>, R> Subst<R, N> for Seq<P, Q> {
     type Substituted = Seq<P::Substituted, Q::Substituted>;
 }

@@ -19,16 +19,16 @@ impl<N: Unary, P: Scoped<S<N>>> Scoped<N> for Loop<P> {}
 
 impl<P> Actionable for Loop<P>
 where
-    P: Subst<Loop<P>, Z, Continue>,
+    P: Subst<Loop<P>, Z>,
     P::Substituted: Actionable,
 {
     type NextAction = <P::Substituted as Actionable>::NextAction;
 }
 
-impl<P, Q, Mode, N: Unary> Subst<Q, N, Mode> for Loop<P>
+impl<P, Q, N: Unary> Subst<Q, N> for Loop<P>
 where
-    P: Subst<Q, S<N>, Continue>,
-    <P as Subst<Q, S<N>, Continue>>::Substituted: HasDual,
+    P: Subst<Q, S<N>>,
+    <P as Subst<Q, S<N>>>::Substituted: HasDual,
 {
-    type Substituted = Loop<<P as Subst<Q, S<N>, Continue>>::Substituted>;
+    type Substituted = Loop<<P as Subst<Q, S<N>>>::Substituted>;
 }
