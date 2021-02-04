@@ -25,6 +25,6 @@ impl<T, P> Actionable for Send<T, P> {
 
 impl<T, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}
 
-impl<N: Unary, Mode, T: 'static, P: Subst<Q, N, Mode>, Q> Subst<Q, N, Mode> for Send<T, P> {
+impl<N: Unary, T: 'static, P: Subst<Q, N>, Q> Subst<Q, N> for Send<T, P> {
     type Substituted = Send<T, P::Substituted>;
 }

@@ -28,14 +28,13 @@ impl<Choices> Actionable for Offer<Choices> {
 
 impl<N: Unary, Choices: Tuple> Scoped<N> for Offer<Choices> where Choices::AsList: EachScoped<N> {}
 
-impl<N: Unary, Mode: sealed::SubstMode, P, Choices> Subst<P, N, Mode> for Offer<Choices>
+impl<N: Unary, P, Choices> Subst<P, N> for Offer<Choices>
 where
     Choices: Tuple + 'static,
-    Choices::AsList: EachHasDual + EachSubst<P, N, Mode>,
+    Choices::AsList: EachHasDual + EachSubst<P, N>,
     <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
-    <Choices::AsList as EachSubst<P, N, Mode>>::Substituted: List + EachHasDual,
-    <<Choices::AsList as EachSubst<P, N, Mode>>::Substituted as EachHasDual>::Duals: List,
+    <Choices::AsList as EachSubst<P, N>>::Substituted: List + EachHasDual,
+    <<Choices::AsList as EachSubst<P, N>>::Substituted as EachHasDual>::Duals: List,
 {
-    type Substituted =
-        Offer<<<Choices::AsList as EachSubst<P, N, Mode>>::Substituted as List>::AsTuple>;
+    type Substituted = Offer<<<Choices::AsList as EachSubst<P, N>>::Substituted as List>::AsTuple>;
 }

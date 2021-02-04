@@ -25,6 +25,6 @@ impl<T, P> Actionable for Recv<T, P> {
 
 impl<T, N: Unary, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
 
-impl<N: Unary, Mode, T: 'static, P: Subst<Q, N, Mode>, Q> Subst<Q, N, Mode> for Recv<T, P> {
+impl<N: Unary, T: 'static, P: Subst<Q, N>, Q> Subst<Q, N> for Recv<T, P> {
     type Substituted = Recv<T, P::Substituted>;
 }
