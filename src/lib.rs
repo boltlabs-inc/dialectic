@@ -44,6 +44,9 @@
 //!
 //! # Quick reference
 //!
+//! The [`prelude`] module exports all the relevant constructs for writing programs with Dialectic.
+//! Most programs using Dialectic should `use dialectic::prelude::*;`.
+//!
 //! The **[tutorial]** covers all the constructs necessary to write session-typed programs with
 //! Dialectic. A quick summary:
 //!
@@ -58,16 +61,15 @@
 //!
 //! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<_, _, S, _>`) | Dual Type (`S::Dual`) |
 //! | :----------- | :------------------- | :-------- |
-//! | [`Send<T, P = Done>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
-//! | [`Recv<T, P = Done>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
-//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Dual>`](Offer) |
-//! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Dual>`](Choose) |
+//! | [`Send<T, P>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+//! | [`Recv<T, P>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+//! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Duals>`](Offer) |
+//! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Duals>`](Choose) |
 //! | [`Split<P, Q>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `Done`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
-//! | [`Break<N = Z>`](Break) | • If exiting the *outermost* [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If exiting an *inner* [`Loop`]: Whatever operations are available for the start of the `(N + 1)`th-innermost [`Loop`] | [`Break<N>`](Break) |
 //! | [`Seq<P, Q>`](Seq) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.seq(&#124;c&#124; async move { ... }).await?;</code>](Chan::seq) | [`Seq<P::Dual, Q::Dual>`](Seq) |
-//! | [`Done`] | • If *outside* a [`Loop`]: Returns the underlying [`Transmit`]/[`Receive`] ends: [`let (tx, rx) = c.close();`](Chan::close)<br> • If *inside* a [`Loop`], equivalent to [`Continue`]: whatever operations are available for the start of the innermost [`Loop`] | [`Done`] | [`c.close()`](Chan::close) |
+//! | [`Done`] | Closes the channel, dropping its receive/transmit ends: [`c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
 
 #![recursion_limit = "256"]
 #![allow(clippy::type_complexity)]
@@ -96,13 +98,15 @@ use futures::Future;
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::backend::{Choice, Receive, Transmit};
-    #[doc(no_inline)]
-    pub use crate::session::Session;
     pub use crate::tuple::{List, Tuple};
-    pub use crate::types::{Break, Choose, Continue, Done, Loop, Offer, Recv, Send, Seq, Split};
+    #[doc(no_inline)]
+    pub use crate::types::{Choose, Continue, Done, Loop, Offer, Recv, Send, Seq, Split};
     pub use crate::unary::constants::*;
     pub use crate::unary::types::*;
     pub use crate::unary::{Compare, LessThan, Unary, S, Z};
+    #[doc(no_inline)]
+    pub use crate::Session;
+    #[doc(no_inline)]
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
@@ -144,7 +148,7 @@ use prelude::*;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// type GiveOrTake = Choose<(Send<i64>, Recv<String>)>;
+/// type GiveOrTake = Choose<(Send<i64, Done>, Recv<String, Done>)>;
 ///
 /// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
 ///
