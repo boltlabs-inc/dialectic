@@ -3,8 +3,8 @@ pub use crate::chan::Over;
 use super::*;
 use crate::types::*;
 
-/// The `Session` extension trait gives methods to create session-typed channels from session
-/// types. These are implemented as static methods on the session type itself.
+/// The `Session` extension trait gives methods to create session-typed channels from session types.
+/// These are implemented as static methods on the session type itself.
 ///
 /// # Examples
 ///
@@ -12,58 +12,44 @@ use crate::types::*;
 /// use dialectic::prelude::*;
 /// use dialectic::backend::mpsc;
 ///
-/// # #[tokio::main]
-/// # async fn main() {
 /// let (c1, c2) = <Send<String, Done>>::channel(mpsc::unbounded_channel);
 /// // do something with these channels...
-/// #   c1.unwrap();
-/// #   c2.unwrap();
-/// # }
 /// ```
 ///
-/// # Notes
+/// # Counterexamples
 ///
-/// The trait bounds specified for [`Session`] ensure that the session type is well-formed.
-/// However, it does not ensure that all the types in the session type can be sent or received over
-/// the given channels.
+/// It is only possible to create a session-typed channel when the session type is valid. The
+/// following examples fail, for the reasons described:
 ///
-/// Valid session types must contain only "productive" recursion: they must not contain any
-/// [`Continue`] directly inside the loop to which that recursion refers. For instance, attempting
-/// to use the session type `Loop<Continue>` will result in a compile-time trait solver overflow.
+/// 1. The session type `Send<&'a str, Done>` for a non-static `'a` is not `'static`, but all
+///    session types must be `'static`:
 ///
-/// ```compile_fail
-/// use dialectic::*;
-/// use dialectic::backend::mpsc;
+///    ```compile_fail
+///    # use dialectic::prelude::*;
+///    # use dialectic::backend::mpsc;
+///    fn something<'a>(_: &'a str) {
+///        let (c1, c2) = <Send<&'a str, Done>>::channel(mpsc::unbounded_channel);
+///    }
+///    ```
 ///
-/// # #[tokio::main]
-/// # async fn main() {
-/// let (c1, c2) = <Loop<Continue>>::channel(mpsc::unbounded_channel);
-/// #   c1.unwrap();
-/// #   c2.unwrap();
-/// # }
-/// ```
+/// 2. The session type `Loop<Continue<_1>>` is not `Scoped`, because `Continue<_1>` must occur
+///    within two nested [`Loop`]s to be properly scoped:
 ///
-/// This results in the compiler error:
+///    ```compile_fail
+///    # use dialectic::prelude::*;
+///    # use dialectic::backend::mpsc;
+///    let (c1, c2) = <Loop<Continue<_1>>>::channel(mpsc::unbounded_channel);
+///    ```
 ///
+/// 3. The session type `Loop<Continue>` is not `Actionable` because it is an "unproductive"
+///    infinite loop, where no matter how many times you loop, there will never be an available
+///    action to perform on the channel:
 ///
-/// ```text
-/// error[E0275]: overflow evaluating the requirement `Continue: Actionable<(Continue, ())>`
-///   |
-/// 7 | let (c1, c2) = <Loop<Continue>>::channel(backend::mpsc::unbounded_channel);
-///   |                ^^^^^^^^^^^^^^^^^^^^^^
-///   |
-///   = help: consider adding a `#![recursion_limit="256"]` attribute to your crate
-///   = note: required because of the requirements on the impl of `Actionable<()>` for `Loop<Continue>`
-///   = note: required because of the requirements on the impl of `Session` for `Loop<Continue>`
-/// ```
-///
-/// In this situation, you **should not** take `rustc`'s advice. If you add a
-/// `#![recursion_limit="256"]` attribute to your crate: this will only cause the compiler to work
-/// harder before giving you the same error!
-///
-/// What the compiler is trying to tell you is that the session type as specified does not
-/// correspond to a valid sequence of actions on the channel, because it contains unproductive
-/// recursion.
+///    ```compile_fail
+///    # use dialectic::prelude::*;
+///    # use dialectic::backend::mpsc;
+///    let (c1, c2) = <Loop<Continue>>::channel(mpsc::unbounded_channel);
+///    ```
 pub trait Session
 where
     Self: Scoped
