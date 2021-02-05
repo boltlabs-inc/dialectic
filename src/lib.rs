@@ -85,7 +85,9 @@ use std::marker;
 #[macro_use]
 extern crate derivative;
 
+#[allow(unused_imports)]
 use crate::backend::*;
+
 use futures::Future;
 
 /// The prelude module for quickly getting started with Dialectic.
@@ -212,10 +214,9 @@ macro_rules! offer {
 
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
-/// When using [`split`](Chan::split), the resultant two channels can only send or only
-/// receive, respectively. This is reflected at the type level by the presence of [`Unavailable`] on
-/// the type of the connection which *is not* present for each part of the split, and [`Available`]
-/// on the type of the connection which *is*.
+/// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
+/// respectively. This is reflected at the type level by the presence of [`Unavailable`] on the type
+/// of the connection which *is not* present for each part of the split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Unavailable;
 
