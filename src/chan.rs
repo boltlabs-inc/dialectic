@@ -660,8 +660,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// use dialectic::backend::mpsc;
     ///
     /// let (c1, c2) = <Send<String, Done>>::channel(mpsc::unbounded_channel);
-    /// let (tx1, rx1) = c1.unwrap();
-    /// let (tx2, rx2) = c2.unwrap();
+    /// let (tx1, rx1) = c1.into_inner();
+    /// let (tx2, rx2) = c2.into_inner();
     /// ```
     pub fn into_inner(mut self) -> (Tx, Rx) {
         let tx = self.tx.take().unwrap();
