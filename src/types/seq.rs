@@ -5,7 +5,7 @@ use super::*;
 
 /// Sequence two sessions `P` and `Q` together using [`seq`](Chan::seq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Seq<P, Q = Done>(pub P, pub Q);
+pub struct Seq<P, Q>(pub P, pub Q);
 
 impl<P: Any, Q: Any> IsSession for Seq<P, Q> {}
 
