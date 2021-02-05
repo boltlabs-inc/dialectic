@@ -13,12 +13,12 @@ use std::{
 use pin_project::pin_project;
 
 use crate::tuple::{HasLength, List, Tuple};
+use crate::Unavailable;
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
 use crate::{
     prelude::*,
     types::{EachHasDual, EachScoped, Select},
 };
-use crate::{Available, Unavailable};
 use futures::Future;
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
@@ -492,10 +492,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
         S: Session<Action = Split<P, Q>>,
         P: Session,
         Q: Session,
-        F: FnOnce(
-            Chan<Available<Tx>, Unavailable<Rx>, P>,
-            Chan<Unavailable<Tx>, Available<Rx>, Q>,
-        ) -> Fut,
+        F: FnOnce(Chan<Tx, Unavailable, P>, Chan<Unavailable, Rx, Q>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
         use IncompleteHalf::*;
@@ -506,12 +503,10 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
         let ((result, maybe_rx), maybe_tx) =
-            over::<P, _, _, _, _, _, _>(Available(tx), Unavailable::new(), |tx_only| async move {
-                over::<Q, _, _, _, _, _, _>(
-                    Unavailable::new(),
-                    Available(rx),
-                    |rx_only| async move { with_parts(tx_only, rx_only).await },
-                )
+            over::<P, _, _, _, _, _, _>(tx, Unavailable, |tx_only| async move {
+                over::<Q, _, _, _, _, _, _>(Unavailable, rx, |rx_only| async move {
+                    with_parts(tx_only, rx_only).await
+                })
                 .await
             })
             .await?;
@@ -526,22 +521,22 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
                 .map(|(_, rx)| Ok(rx))
                 .unwrap_or_else(|incomplete| incomplete.into_halves().1),
         ) {
-            (Ok(Available(tx)), Ok(Available(rx))) => Ok((tx, rx)),
-            (Ok(Available(tx)), Err(Unclosed)) => Err(RxHalf { tx, rx: Unclosed }),
-            (Err(Unclosed), Ok(Available(rx))) => Err(TxHalf { tx: Unclosed, rx }),
-            (Ok(Available(tx)), Err(Unfinished(Available(rx)))) => Err(RxHalf {
+            (Ok(tx), Ok(rx)) => Ok((tx, rx)),
+            (Ok(tx), Err(Unclosed)) => Err(RxHalf { tx, rx: Unclosed }),
+            (Err(Unclosed), Ok(rx)) => Err(TxHalf { tx: Unclosed, rx }),
+            (Ok(tx), Err(Unfinished(rx))) => Err(RxHalf {
                 tx,
                 rx: Unfinished(rx),
             }),
-            (Err(Unfinished(Available(tx))), Ok(Available(rx))) => Err(TxHalf {
+            (Err(Unfinished(tx)), Ok(rx)) => Err(TxHalf {
                 tx: Unfinished(tx),
                 rx,
             }),
-            (Err(Unfinished(Available(tx))), Err(Unclosed)) => Err(BothHalves {
+            (Err(Unfinished(tx)), Err(Unclosed)) => Err(BothHalves {
                 tx: Unfinished(tx),
                 rx: Unclosed,
             }),
-            (Err(Unclosed), Err(Unfinished(Available(rx)))) => Err(BothHalves {
+            (Err(Unclosed), Err(Unfinished(rx))) => Err(BothHalves {
                 tx: Unclosed,
                 rx: Unfinished(rx),
             }),
@@ -549,7 +544,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
                 tx: Unclosed,
                 rx: Unclosed,
             }),
-            (Err(Unfinished(Available(tx))), Err(Unfinished(Available(rx)))) => Err(BothHalves {
+            (Err(Unfinished(tx)), Err(Unfinished(rx))) => Err(BothHalves {
                 tx: Unfinished(tx),
                 rx: Unfinished(rx),
             }),
