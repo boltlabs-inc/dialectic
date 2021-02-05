@@ -80,10 +80,7 @@
 #![warn(unused)]
 #![forbid(broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-use std::{
-    marker::{self, PhantomData},
-    pin::Pin,
-};
+use std::marker;
 
 #[macro_use]
 extern crate derivative;
@@ -219,78 +216,8 @@ macro_rules! offer {
 /// receive, respectively. This is reflected at the type level by the presence of [`Unavailable`] on
 /// the type of the connection which *is not* present for each part of the split, and [`Available`]
 /// on the type of the connection which *is*.
-#[derive(Debug)]
-pub struct Unavailable<T>(PhantomData<T>);
-
-impl<T> Unavailable<T> {
-    /// Make a new `Unavailable`.
-    fn new() -> Self {
-        Unavailable(PhantomData)
-    }
-}
-
-/// An available [`Transmit`] or [`Receive`] end of a connection.
-///
-/// When using [`split`](Chan::split), the resultant two channels can only send or only
-/// receive, respectively. This is reflected at the type level by the presence of [`Available`] on
-/// the type of the connection which *is* present for each part of the split, and [`Unavailable`] on
-/// the type of the connection which *is not*.
-///
-/// Whenever `C` implements [`Transmit`] or [`Receive`], so does `Available<C>`.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash, Default)]
-pub struct Available<C>(C);
-
-impl<C> Available<C> {
-    /// Retrieve the inner `C` connection.
-    pub fn into_inner(self) -> C {
-        self.0
-    }
-}
-
-impl<C> AsRef<C> for Available<C> {
-    fn as_ref(&self) -> &C {
-        &self.0
-    }
-}
-
-impl<C> AsMut<C> for Available<C> {
-    fn as_mut(&mut self) -> &mut C {
-        &mut self.0
-    }
-}
-
-impl<T, Convention: CallingConvention, C> Transmit<T, Convention> for Available<C>
-where
-    C: Transmit<T, Convention>,
-{
-    type Error = C::Error;
-
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        message: <T as CallBy<'a, Convention>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + marker::Send + 'async_lifetime>>
-    where
-        T: CallBy<'a, Convention>,
-        <T as CallBy<'a, Convention>>::Type: marker::Send,
-        'a: 'async_lifetime,
-    {
-        self.0.send(message)
-    }
-}
-
-impl<T, C> Receive<T> for Available<C>
-where
-    C: Receive<T>,
-{
-    type Error = C::Error;
-
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + marker::Send + 'async_lifetime>>
-    {
-        self.0.recv()
-    }
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Unavailable;
 
 /// The error returned when a closure which is expected to complete a channel's session fails to
 /// finish the session of the channel it is given.
