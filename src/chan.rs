@@ -106,10 +106,10 @@ where
 impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx, Rx, S> {
     /// Close a finished session, dropping the underlying connections.
     ///
-    /// If called inside a future given to [`split`](Chan::split) or
-    /// [`seq`](Chan::seq), the underlying connections are implicitly recovered for use in
-    /// subsequent actions in the session, or if called in a future given to in
-    /// [`over`](Session::over), are returned to the caller.
+    /// If called inside a future given to [`split`](Chan::split) or [`seq`](Chan::seq), the
+    /// underlying connections are implicitly recovered for use in subsequent actions in the
+    /// session, or if called in a future given to in [`over`](Session::over), are returned to the
+    /// caller.
     ///
     /// # Examples
     ///
@@ -144,7 +144,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// ```
     ///
     /// If you *really* want to destruct a channel before the end of its session, use
-    /// [`unwrap`](Chan::unwrap), but beware that this may cause the party on the other end
+    /// [`into_inner`](Chan::into_inner), but beware that this may cause the party on the other end
     /// of the channel to throw errors due to your violation of the channel's protocol!
     pub fn close(self)
     where
@@ -663,7 +663,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// let (tx1, rx1) = c1.unwrap();
     /// let (tx2, rx2) = c2.unwrap();
     /// ```
-    pub fn unwrap(mut self) -> (Tx, Rx) {
+    pub fn into_inner(mut self) -> (Tx, Rx) {
         let tx = self.tx.take().unwrap();
         let rx = self.rx.take().unwrap();
         (tx, rx)

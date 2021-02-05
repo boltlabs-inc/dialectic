@@ -29,8 +29,9 @@ pub use split::*;
 /// other side of the channel. The sealed trait `HasDual` enumerates these types, and provides the
 /// dual of each.
 ///
-/// In general, you should prefer the [`Session`] trait to the [`HasDual`] trait, since [`Session`]
-/// also ensures that a given type is a valid session type and provides other functionality.
+/// 💡 In general, you should prefer the [`Session`] trait to the [`HasDual`] trait, since
+/// [`Session`] also ensures that a given type is a valid session type and provides other
+/// functionality.
 ///
 /// # Examples
 ///
@@ -55,6 +56,10 @@ pub trait HasDual: Sized + 'static {
 /// Each session type has a canonical [`Actionable::NextAction`], the session type which corresponds
 /// to the next thing to do on the channel. For most types, this is the same as `Self`, but for
 /// control constructs like [`Loop`], this corresponds to the inside of the [`Loop`].
+///
+/// 💡 In general, you should prefer the [`Session`] trait to the [`Actionable`] trait, since
+/// [`Session`] also ensures that a given type is a valid session type and provides other
+/// functionality.
 pub trait Actionable {
     /// The next actual channel action, which must be one of [`Send`], [`Recv`], [`Offer`],
     /// [`Choose`], [`Split`], [`Seq`], or [`Done`].
@@ -66,6 +71,10 @@ pub trait Actionable {
 
 /// A session type is [`Scoped`] if none of its [`Continue`]s refer to outside of the
 /// [`Loop`]s which they are within.
+///
+/// 💡 In general, you should prefer the [`Session`] trait to the [`Scoped`] trait, since
+/// [`Session`] also ensures that a given type is a valid session type and provides other
+/// functionality.
 pub trait Scoped<N: Unary = Z> {}
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
@@ -100,6 +109,10 @@ where
 
 /// Substitute `P` for every [`Continue`] referring to the outermost scope in the given session
 /// type.
+///
+/// When entering a [`Loop`], all [`Continue`]s which refer to that [`Loop`] are unrolled by one
+/// loop iteration so that the session type remains valid. This trait implements that type-level
+/// operation.
 ///
 /// # Examples
 ///
