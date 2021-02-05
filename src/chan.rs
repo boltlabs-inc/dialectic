@@ -73,13 +73,7 @@ pub struct Chan<Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static
     #[derivative(Debug = "ignore")]
     drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
     #[derivative(Debug = "ignore")]
-    session: PhantomData<S>,
-}
-
-// This is safe because `S` is only used as a phantom type.
-unsafe impl<Tx: std::marker::Send, Rx: std::marker::Send, S: Session> std::marker::Send
-    for Chan<Tx, Rx, S>
-{
+    session: PhantomData<fn() -> S>,
 }
 
 impl<Tx, Rx, S> Drop for Chan<Tx, Rx, S>
@@ -409,7 +403,6 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
             drop_tx,
             drop_rx,
             protocols: PhantomData,
-            environment: PhantomData,
         })
     }
 
@@ -502,14 +495,13 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
         let rx = self.rx.take().unwrap();
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
-        let ((result, maybe_rx), maybe_tx) =
-            over::<P, _, _, _, _, _, _>(tx, Unavailable, |tx_only| async move {
-                over::<Q, _, _, _, _, _, _>(Unavailable, rx, |rx_only| async move {
-                    with_parts(tx_only, rx_only).await
-                })
-                .await
+        let ((result, maybe_rx), maybe_tx) = P::over(tx, Unavailable, |tx_only| async move {
+            Q::over(Unavailable, rx, |rx_only| async move {
+                with_parts(tx_only, rx_only).await
             })
-            .await?;
+            .await
+        })
+        .await?;
         // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
         // Available/Unavailable and maximize possible returned things (it's fine to drop the
         // Unavailable end of something if for some reason you split twice)
@@ -627,7 +619,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
         let rx = self.rx.take().unwrap();
         let drop_tx = self.drop_tx.take().unwrap();
         let drop_rx = self.drop_rx.take().unwrap();
-        let (result, maybe_chan) = over::<P, _, _, _, _, _, _>(tx, rx, first).await?;
+        let (result, maybe_chan) = P::over(tx, rx, first).await?;
         Ok((
             result,
             maybe_chan.map(|(tx, rx)| Chan {
@@ -692,9 +684,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     }
 }
 
-/// The implementation of `Session::over`, generalized to any environment (unlike the public
-/// `over` function which only works in the empty environment). This is not safe to export because
-/// nonsense environments could be specified.
+/// The implementation of `Session::over`. This has to be defined here because it uses the internals
+/// of `Chan`.
 pub(crate) fn over<P, Tx, Rx, T, E, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, E, Fut>
 where
     P: Session,
@@ -785,7 +776,7 @@ where
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct Branches<Tx, Rx, Choices, E = ()>
+pub struct Branches<Tx, Rx, Choices>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -800,12 +791,10 @@ where
     #[derivative(Debug = "ignore")]
     drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
     #[derivative(Debug = "ignore")]
-    protocols: PhantomData<Choices>,
-    #[derivative(Debug = "ignore")]
-    environment: PhantomData<E>,
+    protocols: PhantomData<fn() -> Choices>,
 }
 
-impl<Tx, Rx, Choices, E> Drop for Branches<Tx, Rx, Choices, E>
+impl<Tx, Rx, Choices> Drop for Branches<Tx, Rx, Choices>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -828,7 +817,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx, Choices, P, Ps, E> Branches<Tx, Rx, Choices, E>
+impl<'a, Tx, Rx, Choices, P, Ps> Branches<Tx, Rx, Choices>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -862,7 +851,6 @@ where
                 drop_tx,
                 drop_rx,
                 protocols: PhantomData,
-                environment: PhantomData,
             })
         }
     }
