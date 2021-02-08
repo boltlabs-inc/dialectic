@@ -1,4 +1,8 @@
-//! The types in this module enumerate the shapes of all expressible sessions.
+//! The structs in this module enumerate the shapes of all expressible sessions.
+//!
+//! The traits in this module are used to implement the session type system rules, and generally do
+//! not need to be referred to directly from code that uses this library. All of them are sealed, so
+//! that they can only ever apply to the session types defined in this crate.
 
 use crate::prelude::*;
 use crate::unary::{LessThan, Unary, S, Z};
