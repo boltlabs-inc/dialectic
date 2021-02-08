@@ -13,7 +13,7 @@ impl<P: HasDual, Q: HasDual> HasDual for Seq<P, Q> {
     type DualSession = Seq<P::DualSession, Q::DualSession>;
 }
 
-impl<P, Q> Actionable for Seq<P, Q> {
+impl<P: 'static, Q: 'static> Actionable for Seq<P, Q> {
     type NextAction = Self;
 }
 

@@ -17,7 +17,7 @@ impl<P: HasDual, Q: HasDual> HasDual for Split<P, Q> {
     type DualSession = Split<Q::DualSession, P::DualSession>;
 }
 
-impl<P, Q> Actionable for Split<P, Q> {
+impl<P: 'static, Q: 'static> Actionable for Split<P, Q> {
     type NextAction = Self;
 }
 

@@ -23,11 +23,14 @@ where
     type DualSession = Offer<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
 }
 
-impl<Choices> Actionable for Choose<Choices> {
+impl<Choices: 'static> Actionable for Choose<Choices> {
     type NextAction = Self;
 }
 
-impl<N: Unary, Choices: Tuple> Scoped<N> for Choose<Choices> where Choices::AsList: EachScoped<N> {}
+impl<N: Unary, Choices: Tuple + 'static> Scoped<N> for Choose<Choices> where
+    Choices::AsList: EachScoped<N>
+{
+}
 
 impl<N: Unary, P, Choices> Subst<P, N> for Choose<Choices>
 where
