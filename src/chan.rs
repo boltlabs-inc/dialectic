@@ -26,10 +26,10 @@ use futures::Future;
 ///
 /// # Creating new `Chan`s: use [`Session`](crate::Session)
 ///
-/// To construct a new `Chan`, use one of the static methods of [`Session`](crate::Session) on the
-/// session type for which you want to create a channel. Here, we create two `Chan`s with the
-/// session type `Send<String, Done>` and its dual `Recv<String, Done>`, wrapping an underlying
-/// bidirectional transport built from a pair of [`tokio::sync::mpsc::channel`]s:
+/// The [`Session`](crate::Session) trait is implemented for all valid session types. To create a
+/// new [`Chan`] for some session type, use one of the provided static methods. Here, we create two
+/// `Chan`s with the session type `Send<String, Done>` and its dual `Recv<String, Done>`, wrapping
+/// an underlying bidirectional transport built from a pair of [`tokio::sync::mpsc::channel`]s:
 ///
 /// ```
 /// use dialectic::prelude::*;
@@ -185,8 +185,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     ///
     /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
     /// [`CallingConvention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
-    /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val>(1)` or
-    /// `chan.send::<Ref>(&true)`.
+    /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val, i64, _>(1)` or
+    /// `chan.send::<Ref, bool, _>(&true)`.
     ///
     /// # Errors
     ///
@@ -600,10 +600,11 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// ```
     ///
     /// More generally, this construct permits the expression of context free session types, by
-    /// allowing recursion in the first parameter to [`Seq`]. For more background, see "Context-Free
-    /// Session Type Inference" by Luca Padovani: <https://doi.org/10.1145/3229062>. When comparing
-    /// with that paper, note that the [`seq`](Chan::seq) operator is roughly equivalent to its `@=`
-    /// operator, and the [`Seq`] type is equivalent to `;`.
+    /// allowing recursion in the first parameter to [`Seq`]. For more background, see the paper
+    /// [*Context-Free Session Type Inference*](https://doi.org/10.1145/3229062) by Luca Padovani.
+    /// When comparing with that paper, note that the [`seq`](Chan::seq) operator is roughly
+    /// equivalent to the paper's `@=` operator, and the [`Seq`] type is equivalent to the paper's
+    /// `;` type operator.
     pub async fn seq<T, E, P, Q, F, Fut>(
         mut self,
         first: F,
@@ -765,14 +766,14 @@ where
     future: Fut,
 }
 
-/// The result of [`offer`](Chan::offer): an enumeration of the possible new channel states
-/// that could result from the offering of the tuple of protocols `Choices`.
+/// The result of [`offer`](Chan::offer): an `N`-ary enumeration of the possible [`Chan`]s that
+/// could result from the what the other party [`choose`](Chan::choose)s.
 ///
-/// To find out which protocol was selected by the other party, use [`Branches::case`], or better
-/// yet, use the [`offer!`](crate::offer) macro to ensure you don't miss any cases.
+/// To find out which protocol was selected by the other party, use [`Branches::case`] (the analogue
+/// to a `match` statement on [`Branches`]).
 ///
-/// **When possible, prefer the [`offer!`] macro over using [`Branches`] and
-/// [`case`](Branches::case).**
+/// 💡 When possible, prefer the [`offer!`] macro over using [`Branches`] and
+/// [`case`](Branches::case), as it guarantees exhaustiveness and is more concise.
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
