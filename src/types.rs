@@ -47,7 +47,7 @@ pub use split::*;
 ///
 /// assert_type_eq_all!(Client, <Server as HasDual>::DualSession);
 /// ```
-pub trait HasDual: Sized + 'static {
+pub trait HasDual: sealed::IsSession + Sized + 'static {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
     type DualSession: HasDual<DualSession = Self>;
@@ -60,7 +60,7 @@ pub trait HasDual: Sized + 'static {
 /// 💡 In general, you should prefer the [`Session`] trait to the [`Actionable`] trait, since
 /// [`Session`] also ensures that a given type is a valid session type and provides other
 /// functionality.
-pub trait Actionable {
+pub trait Actionable: sealed::IsSession {
     /// The next actual channel action, which must be one of [`Send`], [`Recv`], [`Offer`],
     /// [`Choose`], [`Split`], [`Seq`], or [`Done`].
     ///
@@ -75,19 +75,19 @@ pub trait Actionable {
 /// 💡 In general, you should prefer the [`Session`] trait to the [`Scoped`] trait, since
 /// [`Session`] also ensures that a given type is a valid session type and provides other
 /// functionality.
-pub trait Scoped<N: Unary = Z> {}
+pub trait Scoped<N: Unary = Z>: sealed::IsSession {}
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachScoped`] trait ensures that every protocol in a type level list of
 /// protocols is [`Scoped`].
-pub trait EachScoped<N: Unary = Z> {}
+pub trait EachScoped<N: Unary = Z>: sealed::EachSession {}
 impl<N: Unary> EachScoped<N> for () {}
 impl<N: Unary, P: Scoped<N>, Ps: EachScoped<N>> EachScoped<N> for (P, Ps) {}
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachHasDual`] trait ensures that every protocol in a type level list of
 /// protocols [`HasDual`].
-pub trait EachHasDual: Sized + 'static
+pub trait EachHasDual: sealed::EachSession + Sized + 'static
 where
     Self::Duals: EachHasDual<Duals = Self>,
 {

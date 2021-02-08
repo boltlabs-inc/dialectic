@@ -14,11 +14,11 @@ impl<T: Any, P: HasDual> HasDual for Send<T, P> {
     type DualSession = Recv<T, P::DualSession>;
 }
 
-impl<T, P> Actionable for Send<T, P> {
+impl<T: 'static, P: 'static> Actionable for Send<T, P> {
     type NextAction = Self;
 }
 
-impl<T, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}
+impl<T: 'static, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}
 
 impl<N: Unary, T: 'static, P: Subst<Q, N>, Q> Subst<Q, N> for Send<T, P> {
     type Substituted = Send<T, P::Substituted>;
