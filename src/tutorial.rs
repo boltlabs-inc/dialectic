@@ -241,7 +241,7 @@ c1.send("Hello again!".to_string()).await?;
 # }
 ```
 
-...we get an error we saying the returned channel is now of type `Chan<_, _, Done>`, and we
+...we get an error we saying the returned channel is now of type `Chan<Done, _, _>`, and we
 can't send when it's the end:
 
 ```text
