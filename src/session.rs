@@ -6,6 +6,9 @@ use crate::types::*;
 /// The `Session` extension trait gives methods to create session-typed channels from session types.
 /// These are implemented as static methods on the session type itself.
 ///
+/// This trait is already implemented for all valid session types, and cannot be extended by users
+/// of this crate.
+///
 /// # Examples
 ///
 /// ```
@@ -64,10 +67,10 @@ where
 
     /// The canonical next channel action for this session type.
     ///
-    /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`] (when
-    /// [`Done`] is outside a [`Loop`] or in the first argument to [`Seq`]), the next channel action
-    /// is the session type itself. For [`Loop`], the next channel action is the inside of the loop,
-    /// with all [`Continue`]s within it appropriately unrolled by one loop iteration.
+    /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`], the next
+    /// channel action is the session type itself. For [`Loop`], the next channel action is the
+    /// inside of the loop, with all [`Continue`]s within it appropriately unrolled by one loop
+    /// iteration.
     ///
     /// This is always the action type defined by [`Actionable`] for this session type.
     type Action;
