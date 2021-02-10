@@ -88,6 +88,9 @@ extern crate derivative;
 #[allow(unused_imports)]
 use crate::backend::*;
 
+#[allow(unused_imports)]
+use crate::prelude::*;
+
 use futures::Future;
 
 /// The prelude module for quickly getting started with Dialectic.
