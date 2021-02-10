@@ -27,9 +27,6 @@ the list of examples, in rough order of increasing sophistication, is:
 
 ## Running the examples
 
-You need a recent Rust compiler to build and run the examples. [Installation instructions for Rust
-can be found here](https://www.rust-lang.org/learn/get-started).
-
 Each example builds a single binary which can run either the server or the client for that example
 depending on whether you invoke its `server` or `client` subcommand from the shell. To run an
 example, first start its server:
