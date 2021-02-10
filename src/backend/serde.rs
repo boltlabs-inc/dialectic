@@ -21,7 +21,8 @@ use std::{future::Future, pin::Pin};
 
 use crate::{
     backend::{Choice, Receive, Ref, Transmit, Val},
-    Chan, unary::Unary,
+    unary::Unary,
+    Chan,
 };
 use call_by::CallBy;
 use futures::sink::SinkExt;
@@ -105,7 +106,7 @@ where
 /// A [`Chan`] for the session type `P` and the environment `E`, using a symmetrical
 /// serialization/encoding and the [`AsyncWrite`]/[`AsyncRead`] pair `W`/`R` as transport.
 pub type SymmetricalChan<Format, Encoding, W, R, P> =
-    Chan<Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>, P>;
+    Chan<P, Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>>;
 
 /// Create a [`Sender`]/[`Receiver`] pair which use the same serialization format and frame encoding
 /// in both directions, allocating an initial capacity for the read buffer on the receiver.

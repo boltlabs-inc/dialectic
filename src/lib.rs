@@ -62,7 +62,7 @@
 //!
 //! Once you've got a channel, here's what you can do:
 //!
-//! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<_, _, S, _>`) | Dual Type (`S::Dual`) |
+//! | Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<S, _, _>`) | Dual Type (`S::Dual`) |
 //! | :----------- | :------------------- | :-------- |
 //! | [`Send<T, P>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
 //! | [`Recv<T, P>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |

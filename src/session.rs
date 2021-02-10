@@ -6,6 +6,9 @@ use crate::types::*;
 /// The `Session` extension trait gives methods to create session-typed channels from session types.
 /// These are implemented as static methods on the session type itself.
 ///
+/// This trait is already implemented for all valid session types, and cannot be extended by users
+/// of this crate.
+///
 /// # Examples
 ///
 /// ```
@@ -64,10 +67,10 @@ where
 
     /// The canonical next channel action for this session type.
     ///
-    /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`] (when
-    /// [`Done`] is outside a [`Loop`] or in the first argument to [`Seq`]), the next channel action
-    /// is the session type itself. For [`Loop`], the next channel action is the inside of the loop,
-    /// with all [`Continue`]s within it appropriately unrolled by one loop iteration.
+    /// For [`Send`], [`Recv`], [`Offer`], [`Choose`], [`Split`], [`Seq`], and [`Done`], the next
+    /// channel action is the session type itself. For [`Loop`], the next channel action is the
+    /// inside of the loop, with all [`Continue`]s within it appropriately unrolled by one loop
+    /// iteration.
     ///
     /// This is always the action type defined by [`Actionable`] for this session type.
     type Action;
@@ -92,7 +95,7 @@ where
     /// ```
     fn channel<Tx, Rx>(
         make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, <Self as Session>::Dual>)
+    ) -> (Chan<Self, Tx, Rx>, Chan<Self::Dual, Tx, Rx>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx: marker::Send + 'static,
@@ -122,10 +125,7 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (
-        Chan<Tx0, Rx1, Self>,
-        Chan<Tx1, Rx0, <Self as Session>::Dual>,
-    )
+    ) -> (Chan<Self, Tx0, Rx1>, Chan<Self::Dual, Tx1, Rx0>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx0: marker::Send + 'static,
@@ -152,7 +152,7 @@ where
     /// c.close();
     /// # }
     /// ```
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Self, Tx, Rx>
     where
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static;
@@ -244,7 +244,7 @@ where
     where
         Tx: std::marker::Send + 'static,
         Rx: std::marker::Send + 'static,
-        F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
+        F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, Err>>;
 }
 
@@ -257,7 +257,7 @@ where
 
     fn channel<Tx, Rx>(
         mut make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Tx, Rx, Self>, Chan<Tx, Rx, <Self as Session>::Dual>)
+    ) -> (Chan<Self, Tx, Rx>, Chan<Self::Dual, Tx, Rx>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx: marker::Send + 'static,
@@ -271,10 +271,7 @@ where
     fn bichannel<Tx0, Rx0, Tx1, Rx1>(
         make0: impl FnOnce() -> (Tx0, Rx0),
         make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (
-        Chan<Tx0, Rx1, Self>,
-        Chan<Tx1, Rx0, <Self as Session>::Dual>,
-    )
+    ) -> (Chan<Self, Tx0, Rx1>, Chan<Self::Dual, Tx1, Rx0>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
         Tx0: marker::Send + 'static,
@@ -287,7 +284,7 @@ where
         (P::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
     }
 
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Tx, Rx, Self>
+    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Self, Tx, Rx>
     where
         Tx: marker::Send + 'static,
         Rx: marker::Send + 'static,
@@ -299,7 +296,7 @@ where
     where
         Tx: std::marker::Send + 'static,
         Rx: std::marker::Send + 'static,
-        F: FnOnce(Chan<Tx, Rx, Self>) -> Fut,
+        F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
         crate::chan::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
