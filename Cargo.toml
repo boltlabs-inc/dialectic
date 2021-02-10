@@ -44,17 +44,30 @@ serde_json = "1"
 serde-crate = { package = "serde", version = "1" }
 futures = "0.3"
 bytes = "1"
-
-[[example]]
-name = "tally-client"
-path = "examples/tally/client.rs"
-required-features = ["bincode"]
-
-[[example]]
-name = "tally-server"
-path = "examples/tally/server.rs"
-required-features = ["bincode"]
+colored = "2"
+structopt = "0.3"
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "common"
+required-features = ["bincode"]
+crate-type = ["staticlib"]
+
+[[example]]
+name = "hello"
+required-features = ["bincode"]
+
+[[example]]
+name = "stack"
+required-features = ["bincode"]
+
+[[example]]
+name = "tally"
+required-features = ["bincode"]
+
+[[example]]
+name = "template"
+required-features = ["bincode"]
