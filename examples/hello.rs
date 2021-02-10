@@ -3,11 +3,11 @@ use std::error::Error;
 use tokio::io::{AsyncWriteExt, BufReader, Stdin, Stdout};
 
 mod common;
-use common::*;
+use common::{demo, prompt, TcpChan};
 
 #[tokio::main]
 async fn main() {
-    tcp_server_client::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
+    demo::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
 }
 
 /// The session from the client's perspective.
@@ -15,8 +15,8 @@ type Client = Send<String, Recv<String, Done>>;
 
 /// The implementation of the client.
 async fn client(
-    #[allow(unused)] mut input: BufReader<Stdin>,
-    #[allow(unused)] mut output: Stdout,
+    mut input: BufReader<Stdin>,
+    mut output: Stdout,
     chan: TcpChan<Client>,
 ) -> Result<(), Box<dyn Error>> {
     let name = prompt("What's your name? ", &mut input, &mut output, |name| {

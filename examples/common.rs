@@ -98,15 +98,7 @@ enum Party {
 /// Given client and server functions for a given session type `P`, construct a simple app that
 /// behaves as either a client or a server, depending on its command line arguments, and
 /// communicates over TCP.
-pub async fn tcp_server_client<
-    P,
-    Server,
-    ServerFuture,
-    ServerResult,
-    Client,
-    ClientFuture,
-    ClientResult,
->(
+pub async fn demo<P, Server, ServerFuture, ServerResult, Client, ClientFuture, ClientResult>(
     server: &'static Server,
     client: &'static Client,
     max_length: usize,
