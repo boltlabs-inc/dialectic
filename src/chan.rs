@@ -65,7 +65,7 @@ use futures::Future;
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct Chan<Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static, S: Session> {
+pub struct Chan<S: Session, Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static> {
     tx: Option<Tx>,
     rx: Option<Rx>,
     #[derivative(Debug = "ignore")]
@@ -76,7 +76,7 @@ pub struct Chan<Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static
     session: PhantomData<fn() -> S>,
 }
 
-impl<Tx, Rx, S> Drop for Chan<Tx, Rx, S>
+impl<Tx, Rx, S> Drop for Chan<S, Tx, Rx>
 where
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
@@ -97,7 +97,7 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx, Rx, S> {
+impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S, Tx, Rx> {
     /// Close a finished session, dropping the underlying connections.
     ///
     /// If called inside a future given to [`split`](Chan::split) or [`seq`](Chan::seq), the
@@ -171,7 +171,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<Tx, Rx, P>), Rx::Error>
+    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<P, Tx, Rx>), Rx::Error>
     where
         S: Session<Action = Recv<T, P>>,
         P: Session,
@@ -212,7 +212,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     pub async fn send<'b, Convention, T, P>(
         mut self,
         message: <T as CallBy<'b, Convention>>::Type,
-    ) -> Result<Chan<Tx, Rx, P>, <Tx as Transmit<T, Convention>>::Error>
+    ) -> Result<Chan<P, Tx, Rx>, <Tx as Transmit<T, Convention>>::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
@@ -291,7 +291,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     pub async fn choose<N, Choices>(
         mut self,
         _choice: N,
-    ) -> Result<Chan<Tx, Rx, <Choices::AsList as Select<N>>::Selected>, Tx::Error>
+    ) -> Result<Chan<<Choices::AsList as Select<N>>::Selected, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Choose<Choices>>,
         Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
@@ -382,7 +382,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer<Choices>(mut self) -> Result<Branches<Tx, Rx, Choices>, Rx::Error>
+    pub async fn offer<Choices>(mut self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error>
     where
         S: Session<Action = Offer<Choices>>,
         Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
@@ -480,12 +480,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     pub async fn split<T, E, P, Q, F, Fut>(
         mut self,
         with_parts: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Done>, SessionIncomplete<Tx, Rx>>), E>
+    ) -> Result<(T, Result<Chan<Done, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
         S: Session<Action = Split<P, Q>>,
         P: Session,
         Q: Session,
-        F: FnOnce(Chan<Tx, Unavailable, P>, Chan<Unavailable, Rx, Q>) -> Fut,
+        F: FnOnce(Chan<P, Tx, Unavailable>, Chan<Q, Unavailable, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
         use IncompleteHalf::*;
@@ -609,12 +609,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     pub async fn seq<T, E, P, Q, F, Fut>(
         mut self,
         first: F,
-    ) -> Result<(T, Result<Chan<Tx, Rx, Q>, SessionIncomplete<Tx, Rx>>), E>
+    ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
         S: Session<Action = Seq<P, Q>>,
         P: Session,
         Q: Session,
-        F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
+        F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
         let tx = self.tx.take().unwrap();
@@ -659,7 +659,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     }
 
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<Q>(mut self) -> Chan<Tx, Rx, Q>
+    fn unchecked_cast<Q>(mut self) -> Chan<Q, Tx, Rx>
     where
         Q: Session,
     {
@@ -675,7 +675,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<Tx
     /// Create a new channel with an arbitrary environment and session type. This is equivalent to
     /// casting a new channel to an arbitrary environment, and doesn't guarantee the environment is
     /// coherent with regard to the session type. Use with care!
-    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> Chan<Tx, Rx, S> {
+    pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> Chan<S, Tx, Rx> {
         Chan {
             tx: Some(tx),
             rx: Some(rx),
@@ -693,7 +693,7 @@ where
     P: Session,
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
-    F: FnOnce(Chan<Tx, Rx, P>) -> Fut,
+    F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
     use IncompleteHalf::*;
@@ -778,7 +778,7 @@ where
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct Branches<Tx, Rx, Choices>
+pub struct Branches<Choices, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -796,7 +796,7 @@ where
     protocols: PhantomData<fn() -> Choices>,
 }
 
-impl<Tx, Rx, Choices> Drop for Branches<Tx, Rx, Choices>
+impl<Tx, Rx, Choices> Drop for Branches<Choices, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -819,7 +819,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx, Choices, P, Ps> Branches<Tx, Rx, Choices>
+impl<Tx, Rx, Choices, P, Ps> Branches<Choices, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -831,7 +831,7 @@ where
     /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
     /// channel; otherwise, return all the other possibilities.
     #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(mut self) -> Result<Chan<Tx, Rx, P>, Branches<Tx, Rx, Ps::AsTuple>> {
+    pub fn case(mut self) -> Result<Chan<P, Tx, Rx>, Branches<Ps::AsTuple, Tx, Rx>> {
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
@@ -858,7 +858,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx> Branches<Tx, Rx, ()>
+impl<'a, Tx, Rx> Branches<(), Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,

@@ -33,7 +33,7 @@ mod tests {
 
         type S = Loop<Seq<Send<String, Done>, Recv<String, Done>>>;
 
-        async fn serve<Tx, Rx>(chan: Chan<Tx, Rx, S>) -> Result<(), Box<dyn std::error::Error>>
+        async fn serve<Tx, Rx>(chan: Chan<S, Tx, Rx>) -> Result<(), Box<dyn std::error::Error>>
         where
             Tx: std::marker::Send + Transmit<String, Val>,
             Rx: std::marker::Send + Receive<String>,
