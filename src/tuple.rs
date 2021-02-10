@@ -1,5 +1,5 @@
-//! Conversions back and forth between flat tuples like `(P, Q, R)` and their corresponding
-//! inductive structures like `(P, (Q, (R, ())))`.
+//! Conversions back and forth between flat tuples and their corresponding inductive list
+//! structures.
 //!
 //! Internally, this library uses inductive type-level lists, but presents an external interface in
 //! terms of tuples, for readability. The traits here convert between the two equivalent
