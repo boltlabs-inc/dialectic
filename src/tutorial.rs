@@ -67,8 +67,8 @@ to the given session type, and `c2`'s type corresponds to its dual:
 # use dialectic::backend::mpsc;
 # type JustSendOneString = Send<String, Done>;
 # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
-let _: Chan<mpsc::Sender, mpsc::Receiver, Send<String, Done>> = c1;
-let _: Chan<mpsc::Sender, mpsc::Receiver, Recv<String, Done>> = c2;
+let _: Chan<Send<String, Done>, mpsc::Sender, mpsc::Receiver> = c1;
+let _: Chan<Recv<String, Done>, mpsc::Sender, mpsc::Receiver> = c2;
 ```
 
 Now that we have the two ends of a bidirectional session-typed channel, we can use them to
