@@ -619,7 +619,7 @@ async fn query_all(
 Furthermore, [`seq`](Chan::seq) can be used to implement **context free session types**, where
 the sub-protocol in the first half `P` of `Seq<P, Q>` uses [`Continue`] to recur back outside
 the [`Seq`] itself. This allows you to define recursive protocols that can be shaped like any
-arbitrary tree. For more details, see the documentation for [`seq`](Chan::seq).
+arbitrary tree. For more details, see the documentation for [`seq`](Chan::seq) and the [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples/stack.rs).
 
 ## Errors in subroutines (what not to do)
 
