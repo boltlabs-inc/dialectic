@@ -21,7 +21,7 @@ use std::{future::Future, pin::Pin};
 
 use crate::{
     backend::{Choice, Receive, Ref, Transmit, Val},
-    Chan, Unary,
+    Chan, unary::Unary,
 };
 use call_by::CallBy;
 use futures::sink::SinkExt;

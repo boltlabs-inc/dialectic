@@ -124,8 +124,6 @@ mod chan;
 #[doc(inline)]
 pub use chan::{Branches, Chan};
 
-use prelude::*;
-
 /// Offer a set of different protocols, allowing the other side of the channel to choose with which
 /// one to proceed. This macro only works in a `Try` context, i.e. somewhere the `?` operator would
 /// make sense to use.
