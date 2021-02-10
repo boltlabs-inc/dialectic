@@ -254,4 +254,6 @@ mod tests {
         >;
         assert_eq!(std::mem::size_of::<P>(), 0);
     }
+
+    include!(concat!(env!("OUT_DIR"), "/valid_sessions.rs"));
 }

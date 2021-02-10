@@ -25,18 +25,3 @@ where
 {
     type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::assert_all_closed_sessions;
-
-    #[test]
-    fn break_good() {
-        assert_all_closed_sessions!(
-            Loop<Send<i64, Continue>>,
-            Loop<Send<i64, Loop<Continue<_1>>>>,
-            Loop<Send<String, Continue>>,
-        );
-    }
-}
