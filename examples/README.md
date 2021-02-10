@@ -7,7 +7,8 @@ step-by-step tutorial.**
 
 Each example is a demonstration of a particular different session type and how the two ends of that
 session might be implemented using Dialectic. The examples in this repository are all of a
-client/server architecture using TCP sockets and binary serialization for communication.
+client/server architecture using TCP sockets and binary serialization for communication (this common
+functionality being implemented in [`common.rs`](common.rs)).
 
 ## Reading and editing the examples
 
@@ -15,13 +16,13 @@ The examples live in the `examples` directory, one file per example. Both the se
 for that example are defined in the same file, as the functions `server` and `client`. Currently,
 the list of examples, in rough order of increasing sophistication, is:
 
-- [`template`](examples/template.rs): The shortest session-typed program: this session performs no
+- [`template`](template.rs): The shortest session-typed program: this session performs no
   communication.
-- [`hello`](examples/hello.rs): Hello world in session types: a send followed by a receive.
-- [`tally`](examples/tally.rs): A more complex example: the server tallies input numbers either by
+- [`hello`](hello.rs): Hello world in session types: a send followed by a receive.
+- [`tally`](tally.rs): A more complex example: the server tallies input numbers either by
   summing them or taking their product. This example demonstrates nested loops, offering and
   choosing different protocol options, abstracting out subroutines, and control flow operations.
-- [`stack`](examples/stack.rs): A context-free session type: a server which stores a stack of
+- [`stack`](stack.rs): A context-free session type: a server which stores a stack of
   strings and pops them when requested, but uppercase. This example demonstrates how session types
   can be used to make it a type error to pop from the empty stack.
 
@@ -32,13 +33,13 @@ depending on whether you invoke its `server` or `client` subcommand from the she
 example, first start its server:
 
 ```bash
-cargo run --quiet --features="bincode" --example some_particular_example -- server
+cargo run --quiet --features="bincode" --example hello -- server
 ```
 
 Then, in another terminal window, run the client for that example:
 
 ```bash
-cargo run --quiet --features="bincode" --example some_particular_example -- client
+cargo run --quiet --features="bincode" --example hello -- client
 ```
 
 You can quit the server by pressing `^C`.
@@ -52,14 +53,15 @@ input. Running them connected to the open internet might be a bad idea!**
 
 ## Creating a new example
 
-Run the script `./new-example` from the project root, using some new example name for
+Run the script `./new-example` _from the project root_, using some new example name for
 `my_new_example`:
 
 ```bash
 ./new-example my_new_example
 ```
 
-This will create `examples/my_new_example.rs` by copying `examples/template.rs`.
+This will create `examples/my_new_example.rs` by copying `examples/template.rs` and adding a new
+`[[example]]` clause to the project's `Cargo.toml`.
 
 ## Contributing
 
