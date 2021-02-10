@@ -1,0 +1,12 @@
+#! /bin/env bash
+
+if [ -n "$1" ]; then
+    cp "./examples/template.rs" "./examples/$1.rs"
+    echo >> Cargo.toml
+    echo '[[example]]' >> Cargo.toml
+    echo "name = \"$1\"" >> Cargo.toml
+    echo 'required-features = ["bincode"]' >> Cargo.toml
+    echo 'Created new example: '"./bin/$1.rs"
+else
+    echo "Please specify the name of the example binary you would like to create."
+fi
