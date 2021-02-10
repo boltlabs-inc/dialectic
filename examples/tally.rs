@@ -8,11 +8,11 @@ use thiserror::Error;
 use tokio::io::{AsyncWriteExt, BufReader, Stdin, Stdout};
 
 mod common;
-use common::*;
+use common::{demo, prompt, Deserialize, Serialize, TcpChan};
 
 #[tokio::main]
 async fn main() {
-    tcp_server_client::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
+    demo::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
 }
 
 /// The session from the client's perspective.

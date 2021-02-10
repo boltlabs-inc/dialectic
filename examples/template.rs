@@ -3,11 +3,12 @@ use std::error::Error;
 use tokio::io::{BufReader, Stdin, Stdout};
 
 mod common;
-use common::*;
+#[allow(unused)]
+use common::{demo, prompt, TcpChan};
 
 #[tokio::main]
 async fn main() {
-    tcp_server_client::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
+    demo::<Server, _, _, _, _, _, _>(&server, &client, usize::MAX).await;
 }
 
 /// The session from the client's perspective.
