@@ -112,7 +112,7 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::Session;
     #[doc(no_inline)]
-    pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete};
+    pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
 }

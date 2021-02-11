@@ -46,10 +46,15 @@ futures = "0.3"
 bytes = "1"
 colored = "2"
 structopt = "0.3"
+criterion = { version = "0.3", features = ["async_tokio"] }
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+name = "mpsc"
+harness = false
 
 [[example]]
 name = "common"
