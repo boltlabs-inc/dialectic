@@ -10,11 +10,31 @@ use tokio::sync::mpsc;
 
 /// Shorthand for a [`Chan`](crate::Chan) using a bounded [`mpsc`](crate::backend::mpsc) [`Sender`]
 /// and [`Receiver`].
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use dialectic::backend::mpsc;
+///
+/// let _: (mpsc::Chan<Done>, mpsc::Chan<Done>) =
+///     Done::channel(|| mpsc::channel(1));
+/// ```
 pub type Chan<P> = crate::Chan<P, Sender<'static>, Receiver<'static>>;
 
 /// Shorthand for a [`Chan`](crate::Chan) using an unbounded [`mpsc`](crate::backend::mpsc)
 /// [`UnboundedSender`] and [`UnboundedReceiver`].
-pub type UnboundedChan<'a, P> = crate::Chan<P, UnboundedSender<'a>, UnboundedReceiver<'a>>;
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use dialectic::backend::mpsc;
+///
+/// let _: (mpsc::UnboundedChan<Done>, mpsc::UnboundedChan<Done>) =
+///     Done::channel(mpsc::unbounded_channel);
+/// ```
+pub type UnboundedChan<P> = crate::Chan<P, UnboundedSender<'static>, UnboundedReceiver<'static>>;
 
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
 pub type Receiver<'a> = mpsc::Receiver<Box<dyn Any + Send + 'a>>;
