@@ -85,15 +85,15 @@ pub trait Deserializer<Input> {
 
 /// Create a [`Sender`]/[`Receiver`] pair which use the same serialization format and frame encoding
 /// in both directions.
-pub fn symmetrical<Format, Encoding, I, O, W, R>(
-    format: Format,
-    encoding: Encoding,
+pub fn symmetrical<F, E, W, R>(
+    format: F,
+    encoding: E,
     writer: W,
     reader: R,
-) -> (Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>)
+) -> (Sender<F, E, W>, Receiver<F, E, R>)
 where
-    Format: Serializer<Output = O> + Deserializer<I> + Clone,
-    Encoding: Encoder<O> + Decoder<Item = I> + Clone,
+    F: Serializer + Deserializer<<E as Decoder>::Item> + Clone,
+    E: Encoder<<F as Serializer>::Output> + Decoder + Clone,
     W: AsyncWrite,
     R: AsyncRead,
 {
@@ -103,14 +103,14 @@ where
     )
 }
 
-/// A [`Chan`] for the session type `P` and the environment `E`, using a symmetrical
+/// A [`Chan`] for the session type `S` and the environment `E`, using a symmetrical
 /// serialization/encoding and the [`AsyncWrite`]/[`AsyncRead`] pair `W`/`R` as transport.
-pub type SymmetricalChan<Format, Encoding, W, R, P> =
-    Chan<P, Sender<Format, Encoding, W>, Receiver<Format, Encoding, R>>;
+pub type SymmetricalChan<S, F, E, W, R> =
+    Chan<S, Sender<F, E, W>, Receiver<F, E, R>>;
 
 /// Create a [`Sender`]/[`Receiver`] pair which use the same serialization format and frame encoding
 /// in both directions, allocating an initial capacity for the read buffer on the receiver.
-pub fn symmetrical_with_capacity<F, E, I, O, W, R>(
+pub fn symmetrical_with_capacity<F, E, W, R>(
     format: F,
     encoding: E,
     writer: W,
@@ -118,8 +118,8 @@ pub fn symmetrical_with_capacity<F, E, I, O, W, R>(
     capacity: usize,
 ) -> (Sender<F, E, W>, Receiver<F, E, R>)
 where
-    F: Serializer<Output = O> + Deserializer<I> + Clone,
-    E: Encoder<O> + Decoder<Item = I> + Clone,
+    F: Serializer + Deserializer<<E as Decoder>::Item> + Clone,
+    E: Encoder<<F as Serializer>::Output> + Decoder + Clone,
     W: AsyncWrite,
     R: AsyncRead,
 {

@@ -1,16 +1,16 @@
 //! Transport backends for [`Chan`](crate::Chan), and the traits they implement in order to be used
 //! as such.
 //!
-//! A [`Chan<Tx, Rx, P, E>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
+//! A [`Chan<S, Tx, Rx>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
 //! session (and in the case of [`Transmit`], for the particular calling conventions used to pass
 //! those types to [`Chan::send`](crate::Chan::send)).
 //!
-//! Additionally, in order to support [`offer!`](crate::offer) and
-//! [`choose`](crate::Chan::choose), the sending channel `Tx` must implement
-//! `Transmit<'static, Choice<N>, Val>`, and the receiving channel `Rx` must implement
-//! `Receive<Choice<N>>`, for all `N`. For more information, see [`Choice`](crate::Choice).
+//! Additionally, in order to support [`offer!`](crate::offer) and [`choose`](crate::Chan::choose),
+//! the sending channel `Tx` must implement `Transmit<Choice<N>, Val>`, and the receiving channel
+//! `Rx` must implement `Receive<Choice<N>>`, for all `N: Unary`. For more information, see
+//! [`Choice`](crate::Choice).
 
 #[doc(no_inline)]
 pub use call_by::*;

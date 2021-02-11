@@ -45,12 +45,12 @@ where
 }
 
 /// A session-typed channel over TCP using length-delimited bincode encoding for serialization.
-pub type TcpChan<P> = dialectic::backend::serde::SymmetricalChan<
+pub type TcpChan<S> = dialectic::backend::serde::SymmetricalChan<
+    S,
     Bincode,
     LengthDelimitedCodec,
     OwnedWriteHalf,
     OwnedReadHalf,
-    P,
 >;
 
 /// Wrap a raw TCP socket in a given session type, using the length delimited bincode transport
