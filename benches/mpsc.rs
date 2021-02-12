@@ -1,15 +1,15 @@
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dialectic::backend::mpsc;
 use dialectic::prelude::*;
-use std::any::Any;
-use std::marker;
+use std::{any::Any, sync::Arc, time::Duration};
+use std::{marker, time::Instant};
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::channel;
 
 type Server = Loop<Send<bool, Continue>>;
 type Client = <Server as Session>::Dual;
 
-async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::UnboundedReceiver<'static>>) {
+async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::Receiver<'static>>) {
     while {
         let (b, c) = chan.recv().await.unwrap();
         chan = c;
@@ -17,13 +17,13 @@ async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::UnboundedRec
     } {}
 }
 
-async fn plain_client(mut rx: mpsc::UnboundedReceiver<'static>) {
+async fn plain_client(mut rx: mpsc::Receiver<'static>) {
     while *rx.recv().await.unwrap().downcast().unwrap() {}
 }
 
 async fn dialectic_server(
     iterations: usize,
-    mut chan: Chan<Server, mpsc::UnboundedSender<'static>, Unavailable>,
+    mut chan: Chan<Server, mpsc::Sender<'static>, Unavailable>,
 ) {
     for _ in 0..iterations {
         chan = chan.send(true).await.unwrap();
@@ -31,11 +31,11 @@ async fn dialectic_server(
     let _ = chan.send(false).await.unwrap();
 }
 
-fn plain_server(iterations: usize, tx: mpsc::UnboundedSender<'static>) {
+async fn plain_server(iterations: usize, tx: mpsc::Sender<'static>) {
     for _ in 0..iterations {
-        tx.send(Box::new(true)).unwrap();
+        tx.send(Box::new(true)).await.unwrap();
     }
-    tx.send(Box::new(false)).unwrap();
+    tx.send(Box::new(false)).await.unwrap();
 }
 
 fn bench_send_recv(c: &mut Criterion) {
@@ -44,29 +44,37 @@ fn bench_send_recv(c: &mut Criterion) {
     let mut dialectic_group = c.benchmark_group("dialectic");
     dialectic_group.throughput(Throughput::Elements(size as u64));
 
+    let rt = Arc::new(Runtime::new().unwrap());
+
     dialectic_group.bench_with_input(BenchmarkId::new("recv", size), &size, |b, &s| {
-        b.to_async(Runtime::new().unwrap()).iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total_duration = Duration::from_secs(0);
+            for _ in 0..iters {
                 // Pre-populate the channel with things to receive
-                let (tx, rx) = unbounded_channel::<Box<dyn Any + marker::Send>>();
-                plain_server(s, tx.clone());
-                (tx, rx)
-            },
-            move |(tx, rx)| async move {
+                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                rt.block_on(plain_server(s, tx.clone()));
                 let client = Client::wrap(Unavailable, rx);
-                dialectic_client(client).await;
+                let start = Instant::now();
+                rt.block_on(dialectic_client(client));
+                total_duration += start.elapsed();
                 drop(tx);
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            total_duration
+        });
     });
 
     dialectic_group.bench_with_input(BenchmarkId::new("send", size), &size, |b, &s| {
-        b.to_async(Runtime::new().unwrap()).iter(|| async {
-            let (tx, rx) = unbounded_channel::<Box<dyn Any + marker::Send>>();
-            let server = Server::wrap(tx, Unavailable);
-            dialectic_server(s, server).await;
-            drop(rx);
+        b.iter_custom(|iters| {
+            let mut total_duration = Duration::from_secs(0);
+            for _ in 0..iters {
+                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let server = Server::wrap(tx, Unavailable);
+                let start = Instant::now();
+                rt.block_on(dialectic_server(s, server));
+                total_duration += start.elapsed();
+                drop(rx);
+            }
+            total_duration
         });
     });
 
@@ -76,26 +84,32 @@ fn bench_send_recv(c: &mut Criterion) {
     plain_group.throughput(Throughput::Elements(size as u64));
 
     plain_group.bench_with_input(BenchmarkId::new("recv", size), &size, |b, &s| {
-        b.to_async(Runtime::new().unwrap()).iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total_duration = Duration::from_secs(0);
+            for _ in 0..iters {
                 // Pre-populate the channel with things to receive
-                let (tx, rx) = unbounded_channel::<Box<dyn Any + marker::Send>>();
-                plain_server(s, tx.clone());
-                (tx, rx)
-            },
-            move |(tx, rx)| async move {
-                plain_client(rx).await;
+                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                rt.block_on(plain_server(s, tx.clone()));
+                let start = Instant::now();
+                rt.block_on(plain_client(rx));
+                total_duration += start.elapsed();
                 drop(tx);
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            total_duration
+        });
     });
 
     plain_group.bench_with_input(BenchmarkId::new("send", size), &size, |b, &s| {
-        b.to_async(Runtime::new().unwrap()).iter(|| async {
-            let (tx, rx) = unbounded_channel::<Box<dyn Any + marker::Send>>();
-            plain_server(s, tx);
-            drop(rx);
+        b.iter_custom(|iters| {
+            let mut total_duration = Duration::from_secs(0);
+            for _ in 0..iters {
+                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let start = Instant::now();
+                rt.block_on(plain_server(s, tx));
+                total_duration += start.elapsed();
+                drop(rx);
+            }
+            total_duration
         });
     });
 }
