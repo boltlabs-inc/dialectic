@@ -4,7 +4,7 @@ use std::{
     any::TypeId,
     convert::TryInto,
     marker::{self, PhantomData},
-    mem,
+    mem::{self, ManuallyDrop},
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -667,7 +667,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         // We have to manually drop because the drop glue assumes `tx` and `rx` are present -- also,
         // it's more efficient because there's no reason to run the drop glue every time we execute
         // a cast (which this function is called in)!
-        drop(std::mem::ManuallyDrop::new(self));
+        let _ = ManuallyDrop::new(self);
         (tx, rx, drop_tx, drop_rx)
     }
 
@@ -844,7 +844,7 @@ where
         let drop_tx = self.drop_tx.clone();
         let drop_rx = self.drop_rx.clone();
         // We have to manually drop because the drop glue assumes tx and rx are present
-        drop(std::mem::ManuallyDrop::new(self));
+        let _ = ManuallyDrop::new(self);
         if variant == 0 {
             Ok(Chan {
                 tx,
