@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // File header
     writeln!(f, "#[allow(unused_imports)] use crate::prelude::*;")?;
     writeln!(f, "use static_assertions::assert_impl_all;")?;
-    writeln!(f, "")?;
+    writeln!(f)?;
 
     // Write out the test
     writeln!(f, "#[test]")?;
@@ -66,7 +66,7 @@ impl Session {
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use Session::*;
-        Ok(match self {
+        match self {
             Done => write!(f, "Done")?,
             Recv(s) => write!(f, "Recv<(), {}>", s)?,
             Send(s) => write!(f, "Send<(), {}>", s)?,
@@ -107,7 +107,8 @@ impl Display for Session {
                     write!(f, "<_{}>", n)?;
                 }
             }
-        })
+        }
+        Ok(())
     }
 }
 
@@ -242,12 +243,10 @@ impl Session {
                 }
                 if cs.len() < max_width.into() {
                     cs.push(Done);
+                } else if loops > 0 && productive < loops {
+                    *self = Continue(productive);
                 } else {
-                    if loops > 0 && productive < loops {
-                        *self = Continue(productive);
-                    } else {
-                        return false;
-                    }
+                    return false;
                 }
             }
             Continue(n) => {
