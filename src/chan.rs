@@ -68,11 +68,8 @@ use futures::Future;
 pub struct Chan<S: Session, Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static> {
     tx: Option<Tx>,
     rx: Option<Rx>,
-    #[derivative(Debug = "ignore")]
-    drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>>,
-    #[derivative(Debug = "ignore")]
-    drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
-    #[derivative(Debug = "ignore")]
+    drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
+    drop_rx: Arc<Mutex<Result<Rx, IncompleteHalf<Rx>>>>,
     session: PhantomData<fn() -> S>,
 }
 
@@ -84,16 +81,20 @@ where
 {
     fn drop(&mut self) {
         let done = TypeId::of::<<S as Session>::Action>() == TypeId::of::<Done>();
-        let tx = self.tx.take();
-        let rx = self.rx.take();
-        let drop_tx = self.drop_tx.take();
-        let drop_rx = self.drop_rx.take();
-        if let (Some(drop_tx), Some(tx)) = (drop_tx, tx) {
-            drop_tx(done, tx);
-        }
-        if let (Some(drop_rx), Some(rx)) = (drop_rx, rx) {
-            drop_rx(done, rx);
-        }
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
+        let drop_tx = self.drop_tx.clone();
+        let drop_rx = self.drop_rx.clone();
+        *drop_tx.lock().unwrap() = if done {
+            Ok(tx)
+        } else {
+            Err(IncompleteHalf::Unfinished(tx))
+        };
+        *drop_rx.lock().unwrap() = if done {
+            Ok(rx)
+        } else {
+            Err(IncompleteHalf::Unfinished(rx))
+        };
     }
 }
 
@@ -382,7 +383,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer<Choices>(mut self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error>
+    pub async fn offer<Choices>(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error>
     where
         S: Session<Action = Offer<Choices>>,
         Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
@@ -391,10 +392,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         <Choices::AsList as EachHasDual>::Duals: List,
         _0: LessThan<<Choices::AsList as HasLength>::Length>,
     {
-        let tx = self.tx.take();
-        let mut rx = self.rx.take();
-        let drop_tx = self.drop_tx.take();
-        let drop_rx = self.drop_rx.take();
+        let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
         let variant = rx.as_mut().unwrap().recv().await?.into();
         Ok(Branches {
             variant,
@@ -478,7 +476,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// # }
     /// ```
     pub async fn split<T, E, P, Q, F, Fut>(
-        mut self,
+        self,
         with_parts: F,
     ) -> Result<(T, Result<Chan<Done, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
@@ -491,17 +489,15 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         use IncompleteHalf::*;
         use SessionIncomplete::*;
 
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        let drop_tx = self.drop_tx.take().unwrap();
-        let drop_rx = self.drop_rx.take().unwrap();
-        let ((result, maybe_rx), maybe_tx) = P::over(tx, Unavailable, |tx_only| async move {
-            Q::over(Unavailable, rx, |rx_only| async move {
-                with_parts(tx_only, rx_only).await
+        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
+        let ((result, maybe_rx), maybe_tx) =
+            P::over(tx.unwrap(), Unavailable, |tx_only| async move {
+                Q::over(Unavailable, rx.unwrap(), |rx_only| async move {
+                    with_parts(tx_only, rx_only).await
+                })
+                .await
             })
-            .await
-        })
-        .await?;
+            .await?;
         // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
         // Available/Unavailable and maximize possible returned things (it's fine to drop the
         // Unavailable end of something if for some reason you split twice)
@@ -546,8 +542,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
             maybe_tx_rx.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
-                drop_tx: Some(drop_tx),
-                drop_rx: Some(drop_rx),
+                drop_tx,
+                drop_rx,
                 session: PhantomData,
             }),
         ))
@@ -607,7 +603,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// paper, note that the [`seq`](Chan::seq) operator is roughly equivalent to the paper's `@=`
     /// operator, and the [`Seq`] type is equivalent to the paper's `;` type operator.
     pub async fn seq<T, E, P, Q, F, Fut>(
-        mut self,
+        self,
         first: F,
     ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
@@ -617,18 +613,15 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        let drop_tx = self.drop_tx.take().unwrap();
-        let drop_rx = self.drop_rx.take().unwrap();
-        let (result, maybe_chan) = P::over(tx, rx, first).await?;
+        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
+        let (result, maybe_chan) = P::over(tx.unwrap(), rx.unwrap(), first).await?;
         Ok((
             result,
             maybe_chan.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
-                drop_tx: Some(drop_tx),
-                drop_rx: Some(drop_rx),
+                drop_tx,
+                drop_rx,
                 session: PhantomData,
             }),
         ))
@@ -652,22 +645,43 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// let (tx1, rx1) = c1.into_inner();
     /// let (tx2, rx2) = c2.into_inner();
     /// ```
-    pub fn into_inner(mut self) -> (Tx, Rx) {
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        (tx, rx)
+    pub fn into_inner(self) -> (Tx, Rx) {
+        let (tx, rx, _, _) = self.unwrap_contents();
+        (tx.unwrap(), rx.unwrap())
+    }
+
+    /// Unwrap all the contained data in this `Chan` without returning its destructor. This is only
+    /// useful internally when implementing exposed functions.
+    fn unwrap_contents(
+        mut self,
+    ) -> (
+        Option<Tx>,
+        Option<Rx>,
+        Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
+        Arc<Mutex<Result<Rx, IncompleteHalf<Rx>>>>,
+    ) {
+        let tx = self.tx.take();
+        let rx = self.rx.take();
+        let drop_tx = self.drop_tx.clone();
+        let drop_rx = self.drop_rx.clone();
+        // We have to manually drop because the drop glue assumes `tx` and `rx` are present -- also,
+        // it's more efficient because there's no reason to run the drop glue every time we execute
+        // a cast (which this function is called in)!
+        drop(std::mem::ManuallyDrop::new(self));
+        (tx, rx, drop_tx, drop_rx)
     }
 
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<Q>(mut self) -> Chan<Q, Tx, Rx>
+    fn unchecked_cast<Q>(self) -> Chan<Q, Tx, Rx>
     where
         Q: Session,
     {
+        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
         Chan {
-            tx: self.tx.take(),
-            rx: self.rx.take(),
-            drop_tx: self.drop_tx.take(),
-            drop_rx: self.drop_rx.take(),
+            tx,
+            rx,
+            drop_tx,
+            drop_rx,
             session: PhantomData,
         }
     }
@@ -679,8 +693,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Chan {
             tx: Some(tx),
             rx: Some(rx),
-            drop_tx: Some(Box::new(|_, _| {})),
-            drop_rx: Some(Box::new(|_, _| {})),
+            drop_tx: Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed))),
+            drop_rx: Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed))),
             session: PhantomData,
         }
     }
@@ -696,19 +710,10 @@ where
     F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    use IncompleteHalf::*;
-    let dropped_tx = Arc::new(Mutex::new(Err(Unclosed)));
-    let dropped_rx = Arc::new(Mutex::new(Err(Unclosed)));
-    let reclaimed_tx = dropped_tx.clone();
-    let reclaimed_rx = dropped_rx.clone();
-    let drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>> =
-        Some(Box::new(move |done, tx| {
-            *dropped_tx.lock().unwrap() = if done { Ok(tx) } else { Err(Unfinished(tx)) };
-        }));
-    let drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>> =
-        Some(Box::new(move |done, rx| {
-            *dropped_rx.lock().unwrap() = if done { Ok(rx) } else { Err(Unfinished(rx)) };
-        }));
+    let drop_tx = Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed)));
+    let drop_rx = Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed)));
+    let reclaimed_tx = drop_tx.clone();
+    let reclaimed_rx = drop_rx.clone();
     let chan = Chan {
         tx: Some(tx),
         rx: Some(rx),
@@ -788,11 +793,8 @@ where
     variant: u8,
     tx: Option<Tx>,
     rx: Option<Rx>,
-    #[derivative(Debug = "ignore")]
-    drop_tx: Option<Box<dyn FnOnce(bool, Tx) + std::marker::Send>>,
-    #[derivative(Debug = "ignore")]
-    drop_rx: Option<Box<dyn FnOnce(bool, Rx) + std::marker::Send>>,
-    #[derivative(Debug = "ignore")]
+    drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
+    drop_rx: Arc<Mutex<Result<Rx, IncompleteHalf<Rx>>>>,
     protocols: PhantomData<fn() -> Choices>,
 }
 
@@ -806,16 +808,20 @@ where
     fn drop(&mut self) {
         // A `Branches` is never an end-state for a channel, so we always say it wasn't done
         let done = false;
-        let tx = self.tx.take();
-        let rx = self.rx.take();
-        let drop_tx = self.drop_tx.take();
-        let drop_rx = self.drop_rx.take();
-        if let (Some(drop_tx), Some(tx)) = (drop_tx, tx) {
-            drop_tx(done, tx);
-        }
-        if let (Some(drop_rx), Some(rx)) = (drop_rx, rx) {
-            drop_rx(done, rx);
-        }
+        let tx = self.tx.take().unwrap();
+        let rx = self.rx.take().unwrap();
+        let drop_tx = self.drop_tx.clone();
+        let drop_rx = self.drop_rx.clone();
+        *drop_tx.lock().unwrap() = if done {
+            Ok(tx)
+        } else {
+            Err(IncompleteHalf::Unfinished(tx))
+        };
+        *drop_rx.lock().unwrap() = if done {
+            Ok(rx)
+        } else {
+            Err(IncompleteHalf::Unfinished(rx))
+        };
     }
 }
 
@@ -835,8 +841,10 @@ where
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
-        let drop_tx = self.drop_tx.take();
-        let drop_rx = self.drop_rx.take();
+        let drop_tx = self.drop_tx.clone();
+        let drop_rx = self.drop_rx.clone();
+        // We have to manually drop because the drop glue assumes tx and rx are present
+        drop(std::mem::ManuallyDrop::new(self));
         if variant == 0 {
             Ok(Chan {
                 tx,
