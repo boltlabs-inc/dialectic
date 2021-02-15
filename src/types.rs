@@ -66,7 +66,7 @@ pub trait HasDual: sealed::IsSession + Sized + 'static {
 /// functionality.
 pub trait Actionable: sealed::IsSession {
     /// The next actual channel action, which must be one of [`Send`], [`Recv`], [`Offer`],
-    /// [`Choose`], [`Split`], [`Seq`], or [`Done`].
+    /// [`Choose`], [`Split`], [`Call`], or [`Done`].
     ///
     /// The constraints on this associated type ensure that it is idemopotent: the `Action` and of
     /// an `Action` is the same as that `Action`.

@@ -26,7 +26,7 @@ impl<P, N: Unary> Subst<P, N> for Done {
 mod tests {
     #![allow(unused)]
 
-    /// Tests whether [`Done`] is actually [`Done`] when inside the first argument to [`Seq`].
+    /// Tests whether [`Done`] is actually [`Done`] when inside the first argument to [`Call`].
     #[test]
     fn done_in_seq() {
         use crate::prelude::*;
