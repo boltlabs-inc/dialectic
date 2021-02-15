@@ -101,7 +101,7 @@ where
 impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S, Tx, Rx> {
     /// Close a finished session, dropping the underlying connections.
     ///
-    /// If called inside a future given to [`split`](Chan::split) or [`seq`](Chan::seq), the
+    /// If called inside a future given to [`split`](Chan::split) or [`call`](Chan::call), the
     /// underlying connections are implicitly recovered for use in subsequent actions in the
     /// session, or if called in a future given to in [`over`](Session::over), are returned to the
     /// caller.
@@ -408,7 +408,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// concurrently, in the given closure.
     ///
     /// To use the channel as a reunited whole after it has been split, combine this operation with
-    /// [`seq`](Chan::seq) to sequence further operations after it.
+    /// [`call`](Chan::call) to sequence further operations after it.
     ///
     /// # Errors
     ///
@@ -549,7 +549,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         ))
     }
 
-    /// Sequence an arbitrary session `P` before another session `Q`.
+    /// Execute the session type `P` as a subroutine in a closure.
     ///
     /// This operation takes as input an asynchronous closure that runs a channel for the session
     /// type `P` to completion and returns either an error `Err` or some result value `T`. The
@@ -580,7 +580,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (c1, c2) = <Call<Send<String, Done>, Send<String, Done>>>::channel(mpsc::unbounded_channel);
     ///
-    /// let ((), c1_result) = c1.seq(|c| async move {
+    /// let ((), c1_result) = c1.call(|c| async move {
     ///     let c = c.send("Hello!".to_string()).await?;
     ///     // Because we're done with this subroutine, we can "close" the channel here, but it
     ///     // will remain open to the calling context so it can run the rest of the session:
@@ -600,8 +600,8 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples). For more
     /// background on context-free session types, see the paper [*Context-Free Session Type
     /// Inference*](https://doi.org/10.1145/3229062) by Luca Padovani. When comparing with that
-    /// paper, note that the [`seq`](Chan::seq) operator is roughly equivalent to the paper's `@=`
-    /// operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
+    /// paper, note that the [`call`](Chan::call) operation is roughly equivalent to the paper's
+    /// `@=` operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
     pub async fn call<T, E, P, Q, F, Fut>(
         self,
         first: F,

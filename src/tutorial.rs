@@ -534,7 +534,7 @@ When using [`Split`], keep in mind its limitations:
 - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
 - It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
 - It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
-  before the future completes. This is subject to the same behavior as in [`seq`](Chan::seq),
+  before the future completes. This is subject to the same behavior as in [`call`](Chan::call),
   described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).
 
 # Sequencing and Modularity
@@ -574,12 +574,12 @@ async fn query(
 Then, at some later point in time, you might realize you need to implement a protocol that makes
 several calls to `Query` in a loop. Unfortunately, the type of `Query` ends with [`Done`], and
 its implementation `query` (correctly) closes the [`Chan`] at the end. Without
-[`seq`](Chan::seq), you would have to modify both the type `Query` and the function `query`,
+[`call`](Chan::call), you would have to modify both the type `Query` and the function `query`,
 just to let them be called from a larger context.
 
 Instead of re-writing both the specification and the implementation, we can use [`Call`] to
 integrate `query` as a subroutine in a larger protocol, without changing its type or definition.
-All we need to do is use the [`seq`](Chan::seq) method to call it as a subroutine on the
+All we need to do is use the [`call`](Chan::call) method to call it as a subroutine on the
 channel.
 
 ```
@@ -607,7 +607,7 @@ async fn query_all(
     for question in questions.into_iter() {
         let (answer, c) =
             chan.choose(_1).await?
-                .seq(|c| query(question, c)).await?;  // Call `query` as a subroutine
+                .call(|c| query(question, c)).await?;  // Call `query` as a subroutine
         chan = c.unwrap();
         answers.push(answer);
     }
@@ -616,18 +616,18 @@ async fn query_all(
 }
 ```
 
-Furthermore, [`seq`](Chan::seq) can be used to implement **context free session types**, where
+Furthermore, [`call`](Chan::call) can be used to implement **context free session types**, where
 the sub-protocol in the first half `P` of `Call<P, Q>` uses [`Continue`] to recur back outside
 the [`Call`] itself. This allows you to define recursive protocols that can be shaped like any
-arbitrary tree. For more details, see the documentation for [`seq`](Chan::seq) and the [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples/stack.rs).
+arbitrary tree. For more details, see the documentation for [`call`](Chan::call) and the [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples/stack.rs).
 
 ## Errors in subroutines (what not to do)
 
-In order for the [`seq`](Chan::seq) method to preserve the validity of the session type `Call<P,
+In order for the [`call`](Chan::call) method to preserve the validity of the session type `Call<P,
 Q>`, we need to make sure that the subroutine executing `P` **finishes** the session `P` by
 driving the channel to the `Done` session type. If we didn't check this, it would be possible to
 drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol. The
-[`seq`](Chan::seq) method solves this problem by returning a pair of the subroutine's return
+[`call`](Chan::call) method solves this problem by returning a pair of the subroutine's return
 value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed successfully, or a
 [`SessionIncomplete`] error if not. It's almost always a programmer error if you get a
 [`SessionIncomplete`] error, so it's usually the right idea to [`unwrap`](Result::unwrap) it and
