@@ -578,7 +578,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Seq<Send<String, Done>, Send<String, Done>>>::channel(mpsc::unbounded_channel);
+    /// let (c1, c2) = <Call<Send<String, Done>, Send<String, Done>>>::channel(mpsc::unbounded_channel);
     ///
     /// let ((), c1_result) = c1.seq(|c| async move {
     ///     let c = c.send("Hello!".to_string()).await?;
@@ -596,12 +596,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// ```
     ///
     /// More generally, this construct permits the expression of context-free session types, by
-    /// allowing recursion in the first parameter to [`Seq`]. For a demonstration of this, see the
+    /// allowing recursion in the first parameter to [`Call`]. For a demonstration of this, see the
     /// [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples). For more
     /// background on context-free session types, see the paper [*Context-Free Session Type
     /// Inference*](https://doi.org/10.1145/3229062) by Luca Padovani. When comparing with that
     /// paper, note that the [`seq`](Chan::seq) operator is roughly equivalent to the paper's `@=`
-    /// operator, and the [`Seq`] type is equivalent to the paper's `;` type operator.
+    /// operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
     pub async fn seq<T, E, P, Q, F, Fut>(
         self,
         first: F,

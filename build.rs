@@ -144,8 +144,8 @@ impl Session {
     fn step(
         &mut self,
         max_depth: u8,  // how many type constructors deep can we go?
-        min_width: u8,  // what's the min width of tuples in Offer/Choose? (if > 2, no Split/Seq)
-        max_width: u8,  // what's the max width of tuples in Offer/Choose? (if < 2, no Split/Seq)
+        min_width: u8,  // what's the min width of tuples in Offer/Choose? (if > 2, no Split/Call)
+        max_width: u8,  // what's the max width of tuples in Offer/Choose? (if < 2, no Split/Call)
         loops: u8,      // how many loops are we under (controls Continue)?
         productive: u8, // how many loops up is the nearest non-Loop type?
     ) -> bool {
