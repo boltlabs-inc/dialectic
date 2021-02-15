@@ -31,7 +31,7 @@ mod tests {
     fn done_in_seq() {
         use crate::prelude::*;
 
-        type S = Loop<Seq<Send<String, Done>, Recv<String, Done>>>;
+        type S = Loop<Call<Send<String, Done>, Recv<String, Done>>>;
 
         async fn serve<Tx, Rx>(chan: Chan<S, Tx, Rx>) -> Result<(), Box<dyn std::error::Error>>
         where

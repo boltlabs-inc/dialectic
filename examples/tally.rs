@@ -16,7 +16,7 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-pub type Client = Loop<Choose<(Send<Operation, Seq<ClientTally, Continue>>, Done)>>;
+pub type Client = Loop<Choose<(Send<Operation, Call<ClientTally, Continue>>, Done)>>;
 
 /// The implementation of the client.
 async fn client(
