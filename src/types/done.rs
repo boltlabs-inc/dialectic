@@ -41,7 +41,7 @@ mod tests {
             Rx::Error: std::error::Error,
         {
             let chan = chan
-                .seq(|chan| async move {
+                .call(|chan| async move {
                     chan.send("Hello!".to_string()).await?.close();
                     Ok::<_, Box<dyn std::error::Error>>(())
                 })

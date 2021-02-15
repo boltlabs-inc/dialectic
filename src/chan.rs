@@ -602,7 +602,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// Inference*](https://doi.org/10.1145/3229062) by Luca Padovani. When comparing with that
     /// paper, note that the [`seq`](Chan::seq) operator is roughly equivalent to the paper's `@=`
     /// operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
-    pub async fn seq<T, E, P, Q, F, Fut>(
+    pub async fn call<T, E, P, Q, F, Fut>(
         self,
         first: F,
     ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
