@@ -9,6 +9,7 @@ use crate::unary::{LessThan, Unary, S, Z};
 
 // Each construct in the session types language lives in its own module, along with the
 // implementation of its various typing rules.
+mod call;
 mod choose;
 mod r#continue;
 mod done;
@@ -16,9 +17,9 @@ mod r#loop;
 mod offer;
 mod recv;
 mod send;
-mod seq;
 mod split;
 
+pub use call::*;
 pub use choose::*;
 pub use done::*;
 pub use offer::*;
@@ -26,7 +27,6 @@ pub use r#continue::*;
 pub use r#loop::*;
 pub use recv::*;
 pub use send::*;
-pub use seq::*;
 pub use split::*;
 
 /// Each session type has a [`HasDual::DualSession`], the type of the corresponding client on the
