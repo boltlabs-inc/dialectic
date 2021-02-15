@@ -64,7 +64,7 @@ fn client_rec<'a>(
                     let chan = chan.choose(_1).await?.send(&string).await?;
                     // Recursively do `Client`
                     let chan = chan
-                        .seq(|chan| client_rec(size + 1, input, output, chan))
+                        .call(|chan| client_rec(size + 1, input, output, chan))
                         .await?
                         .1
                         .unwrap();
@@ -99,7 +99,7 @@ fn server(
                 // Client wants to push a value
                 _1 => {
                     let (string, chan) = chan.recv().await?;       // Receive pushed value
-                    let chan = chan.seq(server).await?.1.unwrap(); // Recursively do `Server`
+                    let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
                     chan.send(&string.to_uppercase()).await?       // Send back that pushed value
                 },
             })

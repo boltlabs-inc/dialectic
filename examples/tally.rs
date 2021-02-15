@@ -35,7 +35,7 @@ async fn client(
                 .await?;
             output.flush().await?;
             let (done, chan) = chan
-                .seq(|chan| client_tally(&operation, &mut input, &mut output, chan))
+                .call(|chan| client_tally(&operation, &mut input, &mut output, chan))
                 .await?;
             let chan = chan.unwrap();
             if done {
@@ -106,7 +106,7 @@ async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
             // Client wants to compute another tally
             _0 => {
                 let (op, chan) = chan.recv().await?;
-                chan.seq(|chan| server_tally(&op, chan)).await?.1.unwrap()
+                chan.call(|chan| server_tally(&op, chan)).await?.1.unwrap()
             },
             // Client wants to quit
             _1 => break chan.close(),
