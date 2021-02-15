@@ -44,7 +44,7 @@ pub enum Session {
     Loop(Box<Session>),
     Continue(u8),
     Split(Box<Session>, Box<Session>),
-    Seq(Box<Session>, Box<Session>),
+    Call(Box<Session>, Box<Session>),
 }
 
 impl Session {
@@ -72,7 +72,7 @@ impl Display for Session {
             Send(s) => write!(f, "Send<(), {}>", s)?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
             Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
-            Seq(s, p) => write!(f, "Seq<{}, {}>", s, p)?,
+            Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
                 write!(f, "Choose<(")?;
@@ -201,10 +201,10 @@ impl Session {
                 if !s.step(max_depth - 1, min_width, max_width, loops, 0)
                     && !p.step(max_depth - 1, min_width, max_width, loops, 0)
                 {
-                    *self = Seq(Box::new(Done), Box::new(Done));
+                    *self = Call(Box::new(Done), Box::new(Done));
                 }
             }
-            Seq(s, p) => {
+            Call(s, p) => {
                 if !s.step(max_depth - 1, min_width, max_width, loops, 0)
                     && !p.step(max_depth - 1, min_width, max_width, loops, 0)
                 {
