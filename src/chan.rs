@@ -607,7 +607,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         first: F,
     ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
-        S: Session<Action = Seq<P, Q>>,
+        S: Session<Action = Call<P, Q>>,
         P: Session,
         Q: Session,
         F: FnOnce(Chan<P, Tx, Rx>) -> Fut,

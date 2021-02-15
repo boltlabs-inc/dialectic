@@ -11,7 +11,7 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-type Client = Loop<Choose<(Done, Send<String, Seq<Continue, Recv<String, Continue>>>)>>;
+type Client = Loop<Choose<(Done, Send<String, Call<Continue, Recv<String, Continue>>>)>>;
 
 /// The implementation of the client.
 async fn client(

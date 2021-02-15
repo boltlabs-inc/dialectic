@@ -105,7 +105,7 @@ pub mod prelude {
     pub use crate::backend::{Choice, Receive, Transmit};
     pub use crate::tuple::{List, Tuple};
     #[doc(no_inline)]
-    pub use crate::types::{Choose, Continue, Done, Loop, Offer, Recv, Send, Seq, Split};
+    pub use crate::types::{Call, Choose, Continue, Done, Loop, Offer, Recv, Send, Split};
     pub use crate::unary::constants::*;
     pub use crate::unary::types::*;
     pub use crate::unary::{Compare, LessThan, Unary, S, Z};
