@@ -3,6 +3,8 @@ use {
     thunderdome::{Arena, Index},
 };
 
+pub mod parse;
+
 #[derive(Debug, Clone)]
 pub enum Ast {
     Recv(String),
