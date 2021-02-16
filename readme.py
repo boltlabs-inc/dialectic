@@ -5,7 +5,7 @@
 
 with open("README.md", "w") as readme:
     readme.write("# Dialectic\n\n")
-    with open("src/lib.rs", "r") as lib:
+    with open("dialectic/src/lib.rs", "r") as lib:
         for line in lib:
             if len(line) > 4:
                 line = line[4:]
