@@ -544,12 +544,7 @@ way of constructing session types and their implementations. At first, you will 
 to use [`Call`]; however, as you build larger programs, it makes it a lot easier to split them up
 into smaller, independent specifications and components.
 
-So, what does it do? A session type `Call<P, Q>` means "run the session `P`, then run the session
-`Q`". You can think of it like the `;` in Rust, which concatenates separate statements. In
-smaller protocols, you don't need to use [`Call`] to sequence operations, because all the session
-type primitives (with the exception of [`Split`]) take arguments indicating "what to do next":
-we don't need to write `Call<Send<String, Done>, Recv<String, Done>>`, because `Send<String,
-Recv<String, Done>>` works just as well.
+So, what does it do? A session type `Call<P, Q>` means "run the session `P`, then once `P` is `Done`, run the session `Q`". You can think of it like the `;` in Rust, which concatenates separate statements. In smaller protocols, you don't need to use [`Call`] to sequence operations, because all the session type primitives (with the exception of [`Split`]) take arguments indicating "what to do next": we don't need to write `Call<Send<String, Done>, Recv<String, Done>>`, because `Send<String, Recv<String, Done>>` works just as well.
 
 [`Call`] becomes useful however when you already have a subroutine that implements *part of* a
 session, and you'd like to use it in a larger context. Imagine, for example, that you had
