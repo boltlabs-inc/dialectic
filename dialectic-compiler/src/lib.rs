@@ -3,6 +3,76 @@ use {
     thunderdome::{Arena, Index},
 };
 
+#[derive(Debug, Clone)]
+pub enum Ast {
+    Recv(String),
+    Send(String),
+    Call(String),
+    Choose(Vec<Ast>),
+    Offer(Vec<Ast>),
+    Loop(Option<String>, Box<Ast>),
+    Break(Option<String>),
+    Continue(Option<String>),
+    Block(Vec<Ast>),
+}
+
+impl Ast {
+    pub fn to_cfg(&self, soup: &mut Soup) -> Index {
+        match self {
+            Ast::Recv(ty) => soup.unit(Expr::Recv(ty.clone())),
+            Ast::Send(ty) => soup.unit(Expr::Send(ty.clone())),
+            Ast::Call(ty) => soup.unit(Expr::Call(ty.clone())),
+            Ast::Choose(choices) => {
+                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(soup)).collect();
+                soup.unit(Expr::Choose(choice_nodes))
+            }
+            Ast::Offer(choices) => {
+                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(soup)).collect();
+                soup.unit(Expr::Offer(choice_nodes))
+            }
+            Ast::Loop(maybe_label, body) => {
+                let body_node = body.to_cfg(soup);
+
+                let mut last_node = body_node;
+                loop {
+                    if let Some(next) = soup[last_node].next {
+                        last_node = next;
+                    } else {
+                        break;
+                    }
+                }
+
+                match soup[last_node].expr {
+                    Expr::LabeledBreak(_)
+                    | Expr::LabeledContinue(_)
+                    | Expr::IndexedBreak(_)
+                    | Expr::IndexedContinue(_) => {}
+                    _ => {
+                        let continue_ = soup.unit(Expr::IndexedContinue(0));
+                        soup[last_node].next = Some(continue_);
+                    }
+                }
+
+                soup.unit(Expr::Loop(maybe_label.clone(), body_node))
+            }
+            Ast::Break(Some(label)) => soup.unit(Expr::LabeledBreak(label.clone())),
+            Ast::Break(None) => soup.unit(Expr::IndexedBreak(0)),
+            Ast::Continue(Some(label)) => soup.unit(Expr::LabeledContinue(label.clone())),
+            Ast::Continue(None) => soup.unit(Expr::IndexedContinue(0)),
+            Ast::Block(stmts) => {
+                let mut next = None;
+                for stmt in stmts.iter().rev() {
+                    let node = stmt.to_cfg(soup);
+                    soup[node].next = next;
+                    next = Some(node);
+                }
+
+                next.unwrap_or_else(|| soup.unit(Expr::Done))
+            }
+        }
+    }
+}
+
 /// A soup of CFG nodes, acting as an arena with limited support for unification.
 #[derive(Debug)]
 pub struct Soup {
@@ -163,15 +233,24 @@ impl Node {
         match &self.expr {
             Expr::Done => Session::Done,
             Expr::Recv(s) => {
-                let cont = self.next.map(|i| arena[i].to_session(arena, env));
+                let cont = self
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| arena[i].to_session(arena, env));
                 Session::Recv(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
             }
             Expr::Send(s) => {
-                let cont = self.next.map(|i| arena[i].to_session(arena, env));
+                let cont = self
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| arena[i].to_session(arena, env));
                 Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
             }
             Expr::Call(s) => {
-                let cont = self.next.map(|i| arena[i].to_session(arena, env));
+                let cont = self
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| arena[i].to_session(arena, env));
                 Session::Call(
                     Box::new(Session::Type(s.clone())),
                     Box::new(cont.unwrap_or(Session::Done)),
@@ -340,6 +419,30 @@ mod tests {
         Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client);
 
         let s = format!("{}", soup[client].to_session(&soup, &mut Vec::new()));
+        assert_eq!(
+            s,
+            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        );
+    }
+
+    #[test]
+    fn tally_client_expr_call_ast() {
+        let client_ast = Ast::Loop(
+            None,
+            Box::new(Ast::Choose(vec![
+                Ast::Break(None),
+                Ast::Block(vec![
+                    Ast::Send("Operation".to_owned()),
+                    Ast::Call("ClientTally".to_owned()),
+                ]),
+            ])),
+        );
+
+        let mut soup = Soup::new();
+        let client_cfg = client_ast.to_cfg(&mut soup);
+        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client_cfg);
+
+        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
