@@ -2,7 +2,7 @@ use {
     proc_macro2::Span,
     quote::ToTokens,
     syn::{
-        braced, parenthesized,
+        braced,
         parse::{Error, Parse, ParseStream, Result},
         token, Ident, Lifetime, Token, Type,
     },
@@ -44,28 +44,37 @@ impl Parse for Ast {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
         if lookahead.peek(kw::recv) {
-            // Ast::Recv: recv(<type>)
+            // Ast::Recv: recv <type>
             input.parse::<kw::recv>()?;
-            let content;
-            parenthesized!(content in input);
-            let ty = content.parse::<Type>()?;
+            let ty = input.parse::<Type>()?;
             Ok(Ast::Recv(ty.into_token_stream().to_string()))
         } else if lookahead.peek(kw::send) {
-            // Ast::Send: send(<type>)
+            // Ast::Send: send <type>
             input.parse::<kw::send>()?;
-            let content;
-            parenthesized!(content in input);
-            let ty = content.parse::<Type>()?;
+            let ty = input.parse::<Type>()?;
             Ok(Ast::Send(ty.into_token_stream().to_string()))
         } else if lookahead.peek(kw::call) {
-            // Ast::Call: call(<type>)
+            // Ast::Call: call <type> or call <block>
             input.parse::<kw::call>()?;
-            let content;
-            parenthesized!(content in input);
-            let ty = content.parse::<Type>()?;
-            Ok(Ast::Call(Box::new(Ast::Type(
-                ty.into_token_stream().to_string(),
-            ))))
+            let lookahead = input.lookahead1();
+
+            if lookahead.peek(token::Brace) {
+                let content;
+                braced!(content in input);
+                let nodes = content
+                    .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+                    .into_iter()
+                    .collect();
+                Ok(Ast::Call(Box::new(Ast::Block(nodes))))
+            } else {
+                let ty = input.parse::<Type>().map_err(|mut e| {
+                    e.combine(lookahead.error());
+                    e
+                })?;
+                Ok(Ast::Call(Box::new(Ast::Type(
+                    ty.into_token_stream().to_string(),
+                ))))
+            }
         } else if lookahead.peek(kw::choose) {
             // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
             input.parse::<kw::choose>()?;
@@ -78,7 +87,10 @@ impl Parse for Ast {
                 if i != choice_arm.index as usize {
                     return Err(Error::new(
                         choice_arm.span,
-                        format!("expected index {}, found {}", i, choice_arm.index),
+                        format!(
+                            "expected index {} in `choose` structure, found {}",
+                            i, choice_arm.index
+                        ),
                     ));
                 }
 
@@ -98,7 +110,10 @@ impl Parse for Ast {
                 if i != choice_arm.index as usize {
                     return Err(Error::new(
                         choice_arm.span,
-                        format!("expected index {}, found {}", i, choice_arm.index),
+                        format!(
+                            "expected index {} in `offer` structure, found {}",
+                            i, choice_arm.index
+                        ),
                     ));
                 }
 
