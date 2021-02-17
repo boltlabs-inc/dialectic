@@ -63,7 +63,9 @@ impl Parse for Ast {
             let content;
             parenthesized!(content in input);
             let ty = content.parse::<Type>()?;
-            Ok(Ast::Call(ty.into_token_stream().to_string()))
+            Ok(Ast::Call(Box::new(Ast::Type(
+                ty.into_token_stream().to_string(),
+            ))))
         } else if lookahead.peek(kw::choose) {
             // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
             input.parse::<kw::choose>()?;
