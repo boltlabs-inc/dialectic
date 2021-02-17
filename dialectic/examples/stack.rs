@@ -11,7 +11,7 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-type Client = session!(
+type Client = session! {
     loop {
         choose {
             _0 => break,
@@ -22,7 +22,7 @@ type Client = session!(
             }
         }
     }
-);
+};
 
 /// The implementation of the client.
 async fn client(
