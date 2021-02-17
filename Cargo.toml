@@ -2,4 +2,5 @@
 members = [
     "dialectic",
     "dialectic-compiler",
+    "dialectic-macro",
 ]
