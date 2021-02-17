@@ -8,7 +8,7 @@ use {
     },
 };
 
-use crate::{Ast, AstDef, Invocation, Modifier};
+use crate::Ast;
 
 mod kw {
     syn::custom_keyword!(recv);
@@ -180,42 +180,5 @@ impl Parse for Ast {
             };
             Ok(Ast::Type(ty.to_token_stream().to_string()))
         }
-    }
-}
-
-impl Parse for AstDef {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let modifier = if input.peek(Token![priv]) {
-            input.parse::<Token![priv]>()?;
-            Some(Modifier::Priv)
-        } else if input.peek(Token![pub]) {
-            input.parse::<Token![pub]>()?;
-            Some(Modifier::Pub)
-        } else {
-            None
-        };
-
-        input.parse::<Token![type]>()?;
-        let lhs = input.parse::<Type>()?;
-        input.parse::<Token![=]>()?;
-        let rhs = input.parse::<Ast>()?;
-        input.parse::<Token![;]>()?;
-
-        Ok(AstDef {
-            modifier,
-            lhs: lhs.to_token_stream().to_string(),
-            rhs,
-        })
-    }
-}
-
-impl Parse for Invocation {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut defs = Vec::new();
-        while !input.is_empty() {
-            defs.push(input.parse::<AstDef>()?);
-        }
-
-        Ok(Invocation { defs })
     }
 }
