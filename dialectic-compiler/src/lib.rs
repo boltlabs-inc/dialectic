@@ -28,7 +28,7 @@ pub struct AstDef {
 pub enum Ast {
     Recv(String),
     Send(String),
-    Call(String),
+    Call(Box<Ast>),
     Choose(Vec<Ast>),
     Offer(Vec<Ast>),
     Loop(Option<String>, Box<Ast>),
@@ -169,7 +169,10 @@ impl Soup {
         match ast {
             Ast::Recv(ty) => self.unit(Expr::Recv(ty.clone())),
             Ast::Send(ty) => self.unit(Expr::Send(ty.clone())),
-            Ast::Call(ty) => self.unit(Expr::Call(ty.clone())),
+            Ast::Call(callee) => {
+                let callee_node = self.to_cfg(callee);
+                self.unit(Expr::Call(callee_node))
+            }
             Ast::Choose(choices) => {
                 let choice_nodes = choices.iter().map(|choice| self.to_cfg(choice)).collect();
                 self.unit(Expr::Choose(choice_nodes))
@@ -332,6 +335,12 @@ impl Soup {
         let mut visited = HashSet::new();
         let mut env = Vec::new();
         for def in defs {
+            // These passes can be performed in sequence because the private def expansion will
+            // recursively expand any substituted-in private defs. As a result, if we wanted to,
+            // we could either stop recursively expanding private defs (and run all expansions
+            // before all eliminations) or we could skip performing any passes on private defs
+            // altogether (as they *must* be substituted in and cannot be named once compiled.)
+            // This as is may be a little wasteful but there is no logical error here.
             visited.clear();
             visited.insert(def.name.clone());
             self.expand_private_defs(&mut visited, def.node);
@@ -346,7 +355,7 @@ pub enum Expr {
     Done,
     Recv(String),
     Send(String),
-    Call(String),
+    Call(Index),
     Choose(Vec<Index>),
     Offer(Vec<Index>),
     Loop(Option<String>, Index),
@@ -392,14 +401,12 @@ impl Node {
                 Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
             }
             Expr::Call(s) => {
+                let callee = arena[*s].to_session(arena, env);
                 let cont = self
                     .next
                     .or_else(|| env.last().cloned())
                     .map(|i| arena[i].to_session(arena, env));
-                Session::Call(
-                    Box::new(Session::Type(s.clone())),
-                    Box::new(cont.unwrap_or(Session::Done)),
-                )
+                Session::Call(Box::new(callee), Box::new(cont.unwrap_or(Session::Done)))
             }
             Expr::Choose(is) => {
                 env.extend(self.next);
@@ -568,7 +575,8 @@ mod tests {
         let mut soup = Soup::new();
         let break_ = soup.unit(Expr::IndexedBreak(0));
         let send = soup.unit(Expr::Send("Operation".to_owned()));
-        let call = soup.unit(Expr::Call("ClientTally".to_owned()));
+        let callee = soup.unit(Expr::Type("ClientTally".to_owned()));
+        let call = soup.unit(Expr::Call(callee));
         soup[send].next = Some(call);
         let continue_ = soup.unit(Expr::IndexedContinue(0));
         soup[call].next = Some(continue_);
@@ -593,7 +601,7 @@ mod tests {
                 Ast::Break(None),
                 Ast::Block(vec![
                     Ast::Send("Operation".to_owned()),
-                    Ast::Call("ClientTally".to_owned()),
+                    Ast::Call(Box::new(Ast::Type("ClientTally".to_owned()))),
                 ]),
             ])),
         );
