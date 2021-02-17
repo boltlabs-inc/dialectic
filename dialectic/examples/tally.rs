@@ -17,7 +17,7 @@ async fn main() {
 
 /// The session from the client's perspective.
 // pub type Client = Loop<Choose<(Send<Operation, Call<ClientTally, Continue>>, Done)>>;
-pub type Client = session!(
+pub type Client = session! {
     loop {
         choose {
             _0 => {
@@ -27,7 +27,7 @@ pub type Client = session!(
             _1 => break,
         }
     }
-);
+};
 
 /// The implementation of the client.
 async fn client(
