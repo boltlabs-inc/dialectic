@@ -88,7 +88,7 @@ impl Parse for Ast {
                     return Err(Error::new(
                         choice_arm.span,
                         format!(
-                            "expected index {} in `choose` structure, found {}",
+                            "expected index {} in `choose` construct, found {}",
                             i, choice_arm.index
                         ),
                     ));
@@ -111,7 +111,7 @@ impl Parse for Ast {
                     return Err(Error::new(
                         choice_arm.span,
                         format!(
-                            "expected index {} in `offer` structure, found {}",
+                            "expected index {} in `offer` construct, found {}",
                             i, choice_arm.index
                         ),
                     ));
