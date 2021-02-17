@@ -115,6 +115,7 @@ pub mod prelude {
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
+    pub use dialectic_macro::session;
 }
 
 pub mod backend;
