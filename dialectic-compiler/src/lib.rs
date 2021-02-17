@@ -1,5 +1,11 @@
 use {
-    std::{fmt, ops},
+    std::{
+        borrow::Borrow,
+        collections::{HashMap, HashSet},
+        fmt,
+        hash::Hash,
+        ops,
+    },
     thunderdome::{Arena, Index},
 };
 
@@ -12,7 +18,7 @@ pub enum Modifier {
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionDef {
+pub struct AstDef {
     modifier: Option<Modifier>,
     lhs: String,
     rhs: Ast,
@@ -29,68 +35,26 @@ pub enum Ast {
     Break(Option<String>),
     Continue(Option<String>),
     Block(Vec<Ast>),
+    Type(String),
 }
 
-impl Ast {
-    pub fn to_cfg(&self, soup: &mut Soup) -> Index {
-        match self {
-            Ast::Recv(ty) => soup.unit(Expr::Recv(ty.clone())),
-            Ast::Send(ty) => soup.unit(Expr::Send(ty.clone())),
-            Ast::Call(ty) => soup.unit(Expr::Call(ty.clone())),
-            Ast::Choose(choices) => {
-                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(soup)).collect();
-                soup.unit(Expr::Choose(choice_nodes))
-            }
-            Ast::Offer(choices) => {
-                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(soup)).collect();
-                soup.unit(Expr::Offer(choice_nodes))
-            }
-            Ast::Loop(maybe_label, body) => {
-                let body_node = body.to_cfg(soup);
-
-                let mut last_node = body_node;
-                loop {
-                    if let Some(next) = soup[last_node].next {
-                        last_node = next;
-                    } else {
-                        break;
-                    }
-                }
-
-                match soup[last_node].expr {
-                    Expr::LabeledBreak(_)
-                    | Expr::LabeledContinue(_)
-                    | Expr::IndexedBreak(_)
-                    | Expr::IndexedContinue(_) => {}
-                    _ => {
-                        let continue_ = soup.unit(Expr::IndexedContinue(0));
-                        soup[last_node].next = Some(continue_);
-                    }
-                }
-
-                soup.unit(Expr::Loop(maybe_label.clone(), body_node))
-            }
-            Ast::Break(Some(label)) => soup.unit(Expr::LabeledBreak(label.clone())),
-            Ast::Break(None) => soup.unit(Expr::IndexedBreak(0)),
-            Ast::Continue(Some(label)) => soup.unit(Expr::LabeledContinue(label.clone())),
-            Ast::Continue(None) => soup.unit(Expr::IndexedContinue(0)),
-            Ast::Block(stmts) => {
-                let mut next = None;
-                for stmt in stmts.iter().rev() {
-                    let node = stmt.to_cfg(soup);
-                    soup[node].next = next;
-                    next = Some(node);
-                }
-
-                next.unwrap_or_else(|| soup.unit(Expr::Done))
-            }
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Invocation {
+    defs: Vec<AstDef>,
 }
 
-/// A soup of CFG nodes, acting as an arena with limited support for unification.
+#[derive(Debug, Clone)]
+pub struct SoupDef {
+    modifier: Option<Modifier>,
+    name: String,
+    node: Index,
+}
+
+/// A soup of CFG nodes acting as a context for a single compilation unit.
+/// Also tracks definitions for direct substitutions.
 #[derive(Debug)]
 pub struct Soup {
+    defs: HashMap<String, SoupDef>,
     arena: Arena<Result<Node, Index>>,
 }
 
@@ -114,11 +78,32 @@ impl ops::IndexMut<Index> for Soup {
     }
 }
 
+impl<'a, Q: ?Sized> ops::Index<&'a Q> for Soup
+where
+    String: Borrow<Q>,
+    Q: Eq + Hash,
+{
+    type Output = SoupDef;
+
+    fn index(&self, index: &'a Q) -> &Self::Output {
+        &self.defs[index]
+    }
+}
+
 impl Soup {
     pub fn new() -> Self {
         Self {
+            defs: HashMap::new(),
             arena: Arena::new(),
         }
+    }
+
+    pub fn count_defs(&self) -> usize {
+        self.defs.len()
+    }
+
+    pub fn len(&self) -> usize {
+        self.arena.len()
     }
 
     pub fn insert(&mut self, node: Node) -> Index {
@@ -153,6 +138,207 @@ impl Soup {
             }
         }
     }
+
+    fn insert_def(&mut self, modifier: Option<Modifier>, name: String, node: Index) {
+        self.defs.insert(
+            name.clone(),
+            SoupDef {
+                modifier,
+                name,
+                node,
+            },
+        );
+    }
+
+    pub fn add_defs(&mut self, invocation: &Invocation) {
+        for def in &invocation.defs {
+            let node = self.to_cfg(&def.rhs);
+            self.insert_def(def.modifier, def.lhs.clone(), node);
+        }
+    }
+
+    pub fn get_def<'a, Q: ?Sized>(&self, key: &'a Q) -> Option<&SoupDef>
+    where
+        String: Borrow<Q>,
+        Q: Eq + Hash,
+    {
+        self.defs.get(key)
+    }
+
+    pub fn to_cfg(&mut self, ast: &Ast) -> Index {
+        match ast {
+            Ast::Recv(ty) => self.unit(Expr::Recv(ty.clone())),
+            Ast::Send(ty) => self.unit(Expr::Send(ty.clone())),
+            Ast::Call(ty) => self.unit(Expr::Call(ty.clone())),
+            Ast::Choose(choices) => {
+                let choice_nodes = choices.iter().map(|choice| self.to_cfg(choice)).collect();
+                self.unit(Expr::Choose(choice_nodes))
+            }
+            Ast::Offer(choices) => {
+                let choice_nodes = choices.iter().map(|choice| self.to_cfg(choice)).collect();
+                self.unit(Expr::Offer(choice_nodes))
+            }
+            Ast::Loop(maybe_label, body) => {
+                let body_node = self.to_cfg(body);
+
+                let mut last_node = body_node;
+                loop {
+                    if let Some(next) = self[last_node].next {
+                        last_node = next;
+                    } else {
+                        break;
+                    }
+                }
+
+                match self[last_node].expr {
+                    Expr::LabeledBreak(_)
+                    | Expr::LabeledContinue(_)
+                    | Expr::IndexedBreak(_)
+                    | Expr::IndexedContinue(_) => {}
+                    _ => {
+                        let continue_ = self.unit(Expr::IndexedContinue(0));
+                        self[last_node].next = Some(continue_);
+                    }
+                }
+
+                self.unit(Expr::Loop(maybe_label.clone(), body_node))
+            }
+            Ast::Break(Some(label)) => self.unit(Expr::LabeledBreak(label.clone())),
+            Ast::Break(None) => self.unit(Expr::IndexedBreak(0)),
+            Ast::Continue(Some(label)) => self.unit(Expr::LabeledContinue(label.clone())),
+            Ast::Continue(None) => self.unit(Expr::IndexedContinue(0)),
+            Ast::Block(stmts) => {
+                let mut next = None;
+                for stmt in stmts.iter().rev() {
+                    let node = self.to_cfg(stmt);
+                    self[node].next = next;
+                    next = Some(node);
+                }
+
+                next.unwrap_or_else(|| self.unit(Expr::Done))
+            }
+            Ast::Type(s) => self.unit(Expr::Type(s.clone())),
+        }
+    }
+
+    /// Substitute private defs into their reference locations.
+    pub fn expand_private_defs(&mut self, visited: &mut HashSet<String>, node: Index) {
+        match &self[node].expr {
+            Expr::Recv(_)
+            | Expr::Send(_)
+            | Expr::IndexedBreak(_)
+            | Expr::IndexedContinue(_)
+            | Expr::LabeledBreak(_)
+            | Expr::LabeledContinue(_)
+            | Expr::Call(_)
+            | Expr::Done => {
+                if let Some(next) = self[node].next {
+                    self.expand_private_defs(visited, next);
+                }
+            }
+            Expr::Choose(is) | Expr::Offer(is) => {
+                let is = is.clone(); // pacify borrowck so self isn't borrowed
+                for i in is {
+                    self.expand_private_defs(visited, i);
+                }
+            }
+            Expr::Loop(_, i) => {
+                let i = *i; // pacify borrowck, or else it thinks self is borrowed
+                self.expand_private_defs(visited, i);
+            }
+            Expr::Type(s) => {
+                if let Some(def) = self
+                    .defs
+                    .get(s)
+                    .filter(|def| def.modifier == Some(Modifier::Priv))
+                {
+                    assert!(
+                        visited.insert(s.clone()),
+                        "infinite cycle found while expanding private defs"
+                    );
+                    let def_node = def.node; // Pacify borrowck.
+                    self.redirect(node, def_node);
+                } else {
+                    assert!(
+                        self[node].next.is_none(),
+                        "cannot substitute raw types anywhere but the end of a block"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
+    /// nodes they reference and effectively dereferencing the continuations they represent. In
+    /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
+    pub fn eliminate_breaks_and_labels(&mut self, env: &mut Vec<Scope>, node: Index) {
+        match &self[node].expr {
+            Expr::Recv(_)
+            | Expr::Send(_)
+            | Expr::IndexedContinue(_)
+            | Expr::Call(_)
+            | Expr::Done
+            | Expr::Type(_) => {
+                if let Some(next) = self[node].next {
+                    self.eliminate_breaks_and_labels(env, next);
+                }
+            }
+            Expr::Choose(is) | Expr::Offer(is) => {
+                let is = is.clone(); // pacify borrowck so self isn't borrowed
+                for i in is {
+                    self.eliminate_breaks_and_labels(env, i);
+                }
+            }
+            Expr::Loop(l, i) => {
+                let maybe_next = self[node].next;
+                let i = *i; // pacify borrowck, or else it thinks self is borrowed
+
+                let scope = Scope {
+                    label: l.clone(),
+                    cont: maybe_next.unwrap_or_else(|| self.insert(Node::unit(Expr::Done))),
+                };
+
+                env.push(scope);
+                self.eliminate_breaks_and_labels(env, i);
+                env.pop();
+            }
+            Expr::LabeledContinue(label) => {
+                let labeled_index = env
+                    .iter()
+                    .rev()
+                    .position(|s| s.label.as_ref() == Some(label));
+
+                if let Some(i) = labeled_index {
+                    self[node].expr = Expr::IndexedContinue(i as u8);
+                }
+            }
+            Expr::LabeledBreak(label) => {
+                let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
+
+                if let Some(cont) = labeled_scope.map(|s| s.cont) {
+                    self.redirect(node, cont);
+                }
+            }
+            Expr::IndexedBreak(debruijn_index) => {
+                let cont = env[env.len() - 1 - *debruijn_index as usize].cont;
+                self.redirect(node, cont);
+            }
+        }
+    }
+
+    pub fn perform_all_passes(&mut self) {
+        // Pacify borrowck, for now... FIXME(sdleffler) separate arena and defs so we don't need to clone?
+        let defs = self.defs.values().cloned().collect::<Vec<SoupDef>>();
+        let mut visited = HashSet::new();
+        let mut env = Vec::new();
+        for def in defs {
+            visited.clear();
+            visited.insert(def.name.clone());
+            self.expand_private_defs(&mut visited, def.node);
+            env.clear();
+            self.eliminate_breaks_and_labels(&mut env, def.node);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +354,7 @@ pub enum Expr {
     IndexedContinue(u8),
     LabeledBreak(String),
     LabeledContinue(String),
+    Type(String),
 }
 
 #[derive(Debug, Clone)]
@@ -185,63 +372,6 @@ pub struct Node {
 impl Node {
     pub fn unit(expr: Expr) -> Self {
         Self { expr, next: None }
-    }
-
-    /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
-    /// nodes they reference and effectively dereferencing the continuations they represent. In
-    /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
-    pub fn eliminate_breaks_and_labels(arena: &mut Soup, env: &mut Vec<Scope>, node: Index) {
-        match &arena[node].expr {
-            Expr::Recv(_)
-            | Expr::Send(_)
-            | Expr::IndexedContinue(_)
-            | Expr::Call(_)
-            | Expr::Done => {
-                if let Some(next) = arena[node].next {
-                    Node::eliminate_breaks_and_labels(arena, env, next);
-                }
-            }
-            Expr::Choose(is) | Expr::Offer(is) => {
-                let is = is.clone(); // pacify borrowck so arena isn't borrowed
-                for i in is {
-                    Node::eliminate_breaks_and_labels(arena, env, i);
-                }
-            }
-            Expr::Loop(l, i) => {
-                let maybe_next = arena[node].next;
-                let i = *i; // pacify borrowck, or else it thinks arena is borrowed
-
-                let scope = Scope {
-                    label: l.clone(),
-                    cont: maybe_next.unwrap_or_else(|| arena.insert(Node::unit(Expr::Done))),
-                };
-
-                env.push(scope);
-                Node::eliminate_breaks_and_labels(arena, env, i);
-                env.pop();
-            }
-            Expr::LabeledContinue(label) => {
-                let labeled_index = env
-                    .iter()
-                    .rev()
-                    .position(|s| s.label.as_ref() == Some(label));
-
-                if let Some(i) = labeled_index {
-                    arena[node].expr = Expr::IndexedContinue(i as u8);
-                }
-            }
-            Expr::LabeledBreak(label) => {
-                let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
-
-                if let Some(cont) = labeled_scope.map(|s| s.cont) {
-                    arena.redirect(node, cont);
-                }
-            }
-            Expr::IndexedBreak(debruijn_index) => {
-                let cont = env[env.len() - 1 - *debruijn_index as usize].cont;
-                arena.redirect(node, cont);
-            }
-        }
     }
 
     pub fn to_session(&self, arena: &Soup, env: &mut Vec<Index>) -> Session {
@@ -317,6 +447,21 @@ impl Node {
             Expr::IndexedContinue(i) => {
                 assert!(self.next.is_none(), "continue must be the end of a block");
                 Session::Continue(*i)
+            }
+            Expr::Type(s) => {
+                assert!(
+                    self.next.is_none(),
+                    "direct type substitution must be the end of a block"
+                );
+
+                if let Some(_) = arena
+                    .get_def(s)
+                    .filter(|def| def.modifier == Some(Modifier::Priv))
+                {
+                    panic!("uneliminated private def substitution present in CFG");
+                } else {
+                    Session::Type(s.clone())
+                }
             }
         }
     }
@@ -412,7 +557,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), client);
 
         let s = format!("{}", soup[client].to_session(&soup, &mut Vec::new()));
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
@@ -431,7 +576,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), client);
 
         let s = format!("{}", soup[client].to_session(&soup, &mut Vec::new()));
         assert_eq!(
@@ -454,8 +599,8 @@ mod tests {
         );
 
         let mut soup = Soup::new();
-        let client_cfg = client_ast.to_cfg(&mut soup);
-        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client_cfg);
+        let client_cfg = soup.to_cfg(&client_ast);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), client_cfg);
 
         let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
         assert_eq!(
@@ -476,15 +621,97 @@ mod tests {
             }
         };";
 
-        let session_def = syn::parse_str::<SessionDef>(to_parse).unwrap();
+        let session_def = syn::parse_str::<AstDef>(to_parse).unwrap();
         let mut soup = Soup::new();
-        let client_cfg = session_def.rhs.to_cfg(&mut soup);
-        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client_cfg);
+        let client_cfg = soup.to_cfg(&session_def.rhs);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), client_cfg);
 
         let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
         );
+    }
+
+    #[test]
+    fn tally_client_invocation_call_parse_string() {
+        let to_parse = "
+        type ClientTally =
+            loop {
+                choose {
+                    _0 => send(i64),
+                    _1 => {
+                        recv(i64);
+                        break;
+                    },
+                }
+            };
+
+        type Client =
+            loop {
+                choose {
+                    _0 => break,
+                    _1 => {
+                        send(Operation);
+                        call(ClientTally);
+                    },
+                }
+            };";
+
+        let invocation_ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+        let mut soup = Soup::new();
+        soup.add_defs(&invocation_ast);
+        assert_eq!(soup.count_defs(), 2);
+        soup.perform_all_passes();
+
+        let client_tally_cfg = soup["ClientTally"].node;
+        let s = format!(
+            "{}",
+            soup[client_tally_cfg].to_session(&soup, &mut Vec::new())
+        );
+        assert_eq!(s, "Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>");
+
+        let client_cfg = soup["Client"].node;
+        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        assert_eq!(
+            s,
+            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        );
+    }
+
+    #[test]
+    fn tally_client_invocation_direct_subst_parse_string() {
+        let to_parse = "
+        priv type ClientTally =
+            loop {
+                choose {
+                    _0 => send(i64),
+                    _1 => {
+                        recv(i64);
+                        continue 'client;
+                    },
+                }
+            };
+
+        type Client =
+            'client: loop {
+                choose {
+                    _0 => break,
+                    _1 => {
+                        send(Operation);
+                        ClientTally
+                    },
+                }
+            };";
+
+        let invocation_ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+        let mut soup = Soup::new();
+        soup.add_defs(&invocation_ast);
+        assert_eq!(soup.count_defs(), 2);
+        soup.perform_all_passes();
+
+        let client_cfg = soup["Client"].node;
+        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 }
