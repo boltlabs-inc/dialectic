@@ -8,7 +8,7 @@ use {
     },
 };
 
-use crate::{Ast, Modifier, SessionDef};
+use crate::{Ast, AstDef, Invocation, Modifier};
 
 mod kw {
     syn::custom_keyword!(recv);
@@ -42,28 +42,29 @@ impl Parse for ChoiceArm {
 
 impl Parse for Ast {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(kw::recv) {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(kw::recv) {
             // Ast::Recv: recv(<type>)
             input.parse::<kw::recv>()?;
             let content;
             parenthesized!(content in input);
             let ty = content.parse::<Type>()?;
             Ok(Ast::Recv(ty.into_token_stream().to_string()))
-        } else if input.peek(kw::send) {
+        } else if lookahead.peek(kw::send) {
             // Ast::Send: send(<type>)
             input.parse::<kw::send>()?;
             let content;
             parenthesized!(content in input);
             let ty = content.parse::<Type>()?;
             Ok(Ast::Send(ty.into_token_stream().to_string()))
-        } else if input.peek(kw::call) {
+        } else if lookahead.peek(kw::call) {
             // Ast::Call: call(<type>)
             input.parse::<kw::call>()?;
             let content;
             parenthesized!(content in input);
             let ty = content.parse::<Type>()?;
             Ok(Ast::Call(ty.into_token_stream().to_string()))
-        } else if input.peek(kw::choose) {
+        } else if lookahead.peek(kw::choose) {
             // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
             input.parse::<kw::choose>()?;
             let content;
@@ -83,7 +84,7 @@ impl Parse for Ast {
             }
 
             Ok(Ast::Choose(arm_asts))
-        } else if input.peek(kw::offer) {
+        } else if lookahead.peek(kw::offer) {
             // Ast::Offer: offer { _0 => <Ast>, _1 => <Ast>, ... }
             input.parse::<kw::offer>()?;
             let content;
@@ -103,7 +104,7 @@ impl Parse for Ast {
             }
 
             Ok(Ast::Offer(arm_asts))
-        } else if input.peek(Token![loop]) || input.peek(Lifetime) {
+        } else if lookahead.peek(Token![loop]) || lookahead.peek(Lifetime) {
             // Ast::Loop: 'label loop { ... }
             let label = if input.peek(Lifetime) {
                 let name = input.parse::<Lifetime>()?.ident.to_string();
@@ -121,7 +122,7 @@ impl Parse for Ast {
                 .into_iter()
                 .collect();
             Ok(Ast::Loop(label, Box::new(Ast::Block(nodes))))
-        } else if input.peek(Token![break]) {
+        } else if lookahead.peek(Token![break]) {
             // Ast::Break: break 'label
             input.parse::<Token![break]>()?;
             let label = if input.peek(Lifetime) {
@@ -130,16 +131,16 @@ impl Parse for Ast {
                 None
             };
             Ok(Ast::Break(label))
-        } else if input.peek(Token![continue]) {
+        } else if lookahead.peek(Token![continue]) {
             // Ast::Continue: continue 'label
-            input.parse::<Token![break]>()?;
+            input.parse::<Token![continue]>()?;
             let label = if input.peek(Lifetime) {
                 Some(input.parse::<Lifetime>()?.ident.to_string())
             } else {
                 None
             };
             Ok(Ast::Continue(label))
-        } else if input.peek(token::Brace) {
+        } else if lookahead.peek(token::Brace) {
             // Ast::Block: { <Ast>; <Ast>; ... }
             let content;
             braced!(content in input);
@@ -149,12 +150,23 @@ impl Parse for Ast {
                 .collect();
             Ok(Ast::Block(nodes))
         } else {
-            panic!("AAAAAAAAAAA (unexpected token, TODO: better error reporting here)");
+            // Attempt to parse as a direct type Ast::Type: <type>
+            // Otherwise, fail and report all other errors from the lookahead.
+            let ty = match input.parse::<Type>() {
+                Ok(ty) => ty,
+                Err(e) => {
+                    let mut combined = lookahead.error();
+                    combined.combine(input.error("parsing as a type failed"));
+                    combined.combine(e);
+                    return Err(combined);
+                }
+            };
+            Ok(Ast::Type(ty.to_token_stream().to_string()))
         }
     }
 }
 
-impl Parse for SessionDef {
+impl Parse for AstDef {
     fn parse(input: ParseStream) -> Result<Self> {
         let modifier = if input.peek(Token![priv]) {
             input.parse::<Token![priv]>()?;
@@ -172,10 +184,21 @@ impl Parse for SessionDef {
         let rhs = input.parse::<Ast>()?;
         input.parse::<Token![;]>()?;
 
-        Ok(SessionDef {
+        Ok(AstDef {
             modifier,
             lhs: lhs.to_token_stream().to_string(),
             rhs,
         })
+    }
+}
+
+impl Parse for Invocation {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut defs = Vec::new();
+        while !input.is_empty() {
+            defs.push(input.parse::<AstDef>()?);
+        }
+
+        Ok(Invocation { defs })
     }
 }
