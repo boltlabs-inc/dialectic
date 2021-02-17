@@ -19,8 +19,15 @@ pub enum Ast {
     Type(String),
 }
 
+impl Ast {
+    pub fn to_session(&self) -> Session {
+        let mut soup = Soup::new();
+        let cfg = soup.to_cfg(self);
+        soup.to_session(cfg)
+    }
+}
+
 /// A soup of CFG nodes acting as a context for a single compilation unit.
-/// Also tracks definitions for direct substitutions.
 #[derive(Debug)]
 pub struct Soup {
     arena: Arena<Result<Node, Index>>,
@@ -152,7 +159,7 @@ impl Soup {
     /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
     /// nodes they reference and effectively dereferencing the continuations they represent. In
     /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
-    pub fn eliminate_breaks_and_labels(&mut self, env: &mut Vec<Scope>, node: Index) {
+    fn eliminate_breaks_and_labels(&mut self, env: &mut Vec<Scope>, node: Index) {
         match &self[node].expr {
             Expr::Recv(_)
             | Expr::Send(_)
@@ -206,6 +213,97 @@ impl Soup {
             }
         }
     }
+
+    fn to_session_inner(&self, node_index: Index, env: &mut Vec<Index>) -> Session {
+        let node = &self[node_index];
+        match &node.expr {
+            Expr::Done => Session::Done,
+            Expr::Recv(s) => {
+                let cont = node
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| self.to_session_inner(i, env));
+                Session::Recv(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
+            }
+            Expr::Send(s) => {
+                let cont = node
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| self.to_session_inner(i, env));
+                Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
+            }
+            Expr::Call(s) => {
+                let callee = if let Expr::Type(ty) = &self[*s].expr {
+                    Session::Type(ty.clone())
+                } else {
+                    self.to_session_inner(*s, env)
+                };
+
+                let cont = node
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| self.to_session_inner(i, env));
+                Session::Call(Box::new(callee), Box::new(cont.unwrap_or(Session::Done)))
+            }
+            Expr::Choose(is) => {
+                env.extend(node.next);
+
+                let sessions = is.iter().map(|&i| self.to_session_inner(i, env)).collect();
+
+                if node.next.is_some() {
+                    env.pop();
+                }
+
+                Session::Choose(sessions)
+            }
+            Expr::Offer(is) => {
+                env.extend(node.next);
+
+                let sessions = is.iter().map(|&i| self.to_session_inner(i, env)).collect();
+
+                if node.next.is_some() {
+                    env.pop();
+                }
+
+                Session::Offer(sessions)
+            }
+            Expr::Loop(_, i) => {
+                env.extend(node.next);
+
+                let session = self.to_session_inner(*i, env);
+
+                if node.next.is_some() {
+                    env.pop();
+                }
+
+                Session::Loop(Box::new(session))
+            }
+            Expr::IndexedBreak(_) | Expr::LabeledBreak(_) => {
+                panic!("uneliminated break present in CFG")
+            }
+            Expr::LabeledContinue(_) => panic!("uneliminated labeled continue present in CFG"),
+            Expr::IndexedContinue(i) => {
+                assert!(node.next.is_none(), "continue must be the end of a block");
+                Session::Continue(*i)
+            }
+            Expr::Type(s) => {
+                let maybe_cont = node
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| self.to_session_inner(i, env));
+
+                match maybe_cont {
+                    Some(cont) => Session::Then(Box::new(Session::Type(s.clone())), Box::new(cont)),
+                    None => Session::Type(s.clone()),
+                }
+            }
+        }
+    }
+
+    pub fn to_session(&mut self, node: Index) -> Session {
+        self.eliminate_breaks_and_labels(&mut Vec::new(), node);
+        self.to_session_inner(node, &mut Vec::new())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -239,97 +337,6 @@ pub struct Node {
 impl Node {
     pub fn unit(expr: Expr) -> Self {
         Self { expr, next: None }
-    }
-
-    pub fn to_session(&self, arena: &Soup, env: &mut Vec<Index>) -> Session {
-        match &self.expr {
-            Expr::Done => Session::Done,
-            Expr::Recv(s) => {
-                let cont = self
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| arena[i].to_session(arena, env));
-                Session::Recv(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Send(s) => {
-                let cont = self
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| arena[i].to_session(arena, env));
-                Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Call(s) => {
-                let callee = if let Expr::Type(ty) = &arena[*s].expr {
-                    Session::Type(ty.clone())
-                } else {
-                    arena[*s].to_session(arena, env)
-                };
-
-                let cont = self
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| arena[i].to_session(arena, env));
-                Session::Call(Box::new(callee), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Choose(is) => {
-                env.extend(self.next);
-
-                let sessions = is
-                    .iter()
-                    .map(|&i| arena[i].to_session(arena, env))
-                    .collect();
-
-                if self.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Choose(sessions)
-            }
-            Expr::Offer(is) => {
-                env.extend(self.next);
-
-                let sessions = is
-                    .iter()
-                    .map(|&i| arena[i].to_session(arena, env))
-                    .collect();
-
-                if self.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Offer(sessions)
-            }
-            Expr::Loop(_, i) => {
-                env.extend(self.next);
-
-                let session = arena[*i].to_session(arena, env);
-
-                if self.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Loop(Box::new(session))
-            }
-            Expr::IndexedBreak(_) | Expr::LabeledBreak(_) => {
-                panic!("uneliminated break present in CFG")
-            }
-            Expr::LabeledContinue(_) => panic!("uneliminated labeled continue present in CFG"),
-            Expr::IndexedContinue(i) => {
-                assert!(self.next.is_none(), "continue must be the end of a block");
-                Session::Continue(*i)
-            }
-            Expr::Type(s) => {
-                let maybe_cont = self
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| arena[i].to_session(arena, env));
-
-                match maybe_cont {
-                    Some(cont) => Session::Then(Box::new(Session::Type(s.clone())), Box::new(cont)),
-                    None => Session::Type(s.clone()),
-                }
-            }
-        }
     }
 }
 
@@ -425,9 +432,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), client);
-
-        let s = format!("{}", soup[client].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup.to_session(client));
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 
@@ -445,9 +450,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), client);
-
-        let s = format!("{}", soup[client].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup.to_session(client));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -467,11 +470,7 @@ mod tests {
             ])),
         );
 
-        let mut soup = Soup::new();
-        let client_cfg = soup.to_cfg(&client_ast);
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), client_cfg);
-
-        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", client_ast.to_session());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -495,7 +494,7 @@ mod tests {
         let root = soup.to_cfg(&ast);
         soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup.to_session(root));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -519,7 +518,7 @@ mod tests {
         let root = soup.to_cfg(&ast);
         soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup.to_session(root));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -543,7 +542,7 @@ mod tests {
         let root = soup.to_cfg(&ast);
         soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup.to_session(root));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Then<ClientTally, Continue>>)>>"
