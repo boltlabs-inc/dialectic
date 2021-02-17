@@ -11,7 +11,10 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-type Client = Send<String, Recv<String, Done>>;
+type Client = session!({
+    send String;
+    recv String;
+});
 
 /// The implementation of the client.
 async fn client(
