@@ -1,28 +1,9 @@
 use {
-    std::{
-        borrow::Borrow,
-        collections::{HashMap, HashSet},
-        fmt,
-        hash::Hash,
-        ops,
-    },
+    std::{fmt, ops},
     thunderdome::{Arena, Index},
 };
 
 pub mod parse;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Modifier {
-    Priv,
-    Pub,
-}
-
-#[derive(Debug, Clone)]
-pub struct AstDef {
-    modifier: Option<Modifier>,
-    lhs: String,
-    rhs: Ast,
-}
 
 #[derive(Debug, Clone)]
 pub enum Ast {
@@ -38,23 +19,10 @@ pub enum Ast {
     Type(String),
 }
 
-#[derive(Debug, Clone)]
-pub struct Invocation {
-    defs: Vec<AstDef>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SoupDef {
-    modifier: Option<Modifier>,
-    name: String,
-    node: Index,
-}
-
 /// A soup of CFG nodes acting as a context for a single compilation unit.
 /// Also tracks definitions for direct substitutions.
 #[derive(Debug)]
 pub struct Soup {
-    defs: HashMap<String, SoupDef>,
     arena: Arena<Result<Node, Index>>,
 }
 
@@ -78,28 +46,11 @@ impl ops::IndexMut<Index> for Soup {
     }
 }
 
-impl<'a, Q: ?Sized> ops::Index<&'a Q> for Soup
-where
-    String: Borrow<Q>,
-    Q: Eq + Hash,
-{
-    type Output = SoupDef;
-
-    fn index(&self, index: &'a Q) -> &Self::Output {
-        &self.defs[index]
-    }
-}
-
 impl Soup {
     pub fn new() -> Self {
         Self {
-            defs: HashMap::new(),
             arena: Arena::new(),
         }
-    }
-
-    pub fn count_defs(&self) -> usize {
-        self.defs.len()
     }
 
     pub fn len(&self) -> usize {
@@ -137,32 +88,6 @@ impl Soup {
                 s
             }
         }
-    }
-
-    fn insert_def(&mut self, modifier: Option<Modifier>, name: String, node: Index) {
-        self.defs.insert(
-            name.clone(),
-            SoupDef {
-                modifier,
-                name,
-                node,
-            },
-        );
-    }
-
-    pub fn add_defs(&mut self, invocation: &Invocation) {
-        for def in &invocation.defs {
-            let node = self.to_cfg(&def.rhs);
-            self.insert_def(def.modifier, def.lhs.clone(), node);
-        }
-    }
-
-    pub fn get_def<'a, Q: ?Sized>(&self, key: &'a Q) -> Option<&SoupDef>
-    where
-        String: Borrow<Q>,
-        Q: Eq + Hash,
-    {
-        self.defs.get(key)
     }
 
     pub fn to_cfg(&mut self, ast: &Ast) -> Index {
@@ -224,53 +149,6 @@ impl Soup {
         }
     }
 
-    /// Substitute private defs into their reference locations.
-    pub fn expand_private_defs(&mut self, visited: &mut HashSet<String>, node: Index) {
-        match &self[node].expr {
-            Expr::Recv(_)
-            | Expr::Send(_)
-            | Expr::IndexedBreak(_)
-            | Expr::IndexedContinue(_)
-            | Expr::LabeledBreak(_)
-            | Expr::LabeledContinue(_)
-            | Expr::Call(_)
-            | Expr::Done => {
-                if let Some(next) = self[node].next {
-                    self.expand_private_defs(visited, next);
-                }
-            }
-            Expr::Choose(is) | Expr::Offer(is) => {
-                let is = is.clone(); // pacify borrowck so self isn't borrowed
-                for i in is {
-                    self.expand_private_defs(visited, i);
-                }
-            }
-            Expr::Loop(_, i) => {
-                let i = *i; // pacify borrowck, or else it thinks self is borrowed
-                self.expand_private_defs(visited, i);
-            }
-            Expr::Type(s) => {
-                if let Some(def) = self
-                    .defs
-                    .get(s)
-                    .filter(|def| def.modifier == Some(Modifier::Priv))
-                {
-                    assert!(
-                        visited.insert(s.clone()),
-                        "infinite cycle found while expanding private defs"
-                    );
-                    let def_node = def.node; // Pacify borrowck.
-                    self.redirect(node, def_node);
-                } else {
-                    assert!(
-                        self[node].next.is_none(),
-                        "cannot substitute raw types anywhere but the end of a block"
-                    );
-                }
-            }
-        }
-    }
-
     /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
     /// nodes they reference and effectively dereferencing the continuations they represent. In
     /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
@@ -328,26 +206,6 @@ impl Soup {
             }
         }
     }
-
-    pub fn perform_all_passes(&mut self) {
-        // Pacify borrowck, for now... FIXME(sdleffler) separate arena and defs so we don't need to clone?
-        let defs = self.defs.values().cloned().collect::<Vec<SoupDef>>();
-        let mut visited = HashSet::new();
-        let mut env = Vec::new();
-        for def in defs {
-            // These passes can be performed in sequence because the private def expansion will
-            // recursively expand any substituted-in private defs. As a result, if we wanted to,
-            // we could either stop recursively expanding private defs (and run all expansions
-            // before all eliminations) or we could skip performing any passes on private defs
-            // altogether (as they *must* be substituted in and cannot be named once compiled.)
-            // This as is may be a little wasteful but there is no logical error here.
-            visited.clear();
-            visited.insert(def.name.clone());
-            self.expand_private_defs(&mut visited, def.node);
-            env.clear();
-            self.eliminate_breaks_and_labels(&mut env, def.node);
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -401,7 +259,12 @@ impl Node {
                 Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
             }
             Expr::Call(s) => {
-                let callee = arena[*s].to_session(arena, env);
+                let callee = if let Expr::Type(ty) = &arena[*s].expr {
+                    Session::Type(ty.clone())
+                } else {
+                    arena[*s].to_session(arena, env)
+                };
+
                 let cont = self
                     .next
                     .or_else(|| env.last().cloned())
@@ -456,18 +319,14 @@ impl Node {
                 Session::Continue(*i)
             }
             Expr::Type(s) => {
-                assert!(
-                    self.next.is_none(),
-                    "direct type substitution must be the end of a block"
-                );
+                let maybe_cont = self
+                    .next
+                    .or_else(|| env.last().cloned())
+                    .map(|i| arena[i].to_session(arena, env));
 
-                if let Some(_) = arena
-                    .get_def(s)
-                    .filter(|def| def.modifier == Some(Modifier::Priv))
-                {
-                    panic!("uneliminated private def substitution present in CFG");
-                } else {
-                    Session::Type(s.clone())
+                match maybe_cont {
+                    Some(cont) => Session::Then(Box::new(Session::Type(s.clone())), Box::new(cont)),
+                    None => Session::Type(s.clone()),
                 }
             }
         }
@@ -485,6 +344,7 @@ pub enum Session {
     Continue(u8),
     Split(Box<Session>, Box<Session>),
     Call(Box<Session>, Box<Session>),
+    Then(Box<Session>, Box<Session>),
     Type(String),
 }
 
@@ -498,6 +358,7 @@ impl fmt::Display for Session {
             Loop(s) => write!(f, "Loop<{}>", s)?,
             Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
+            Then(s, p) => write!(f, "Then<{}, {}>", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
                 write!(f, "Choose<(")?;
@@ -619,7 +480,7 @@ mod tests {
 
     #[test]
     fn tally_client_expr_call_parse_string() {
-        let to_parse = "type Client = loop {
+        let to_parse = "loop {
             choose {
                 _0 => break,
                 _1 => {
@@ -627,14 +488,14 @@ mod tests {
                     call ClientTally;
                 },
             }
-        };";
+        }";
 
-        let session_def = syn::parse_str::<AstDef>(to_parse).unwrap();
+        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
         let mut soup = Soup::new();
-        let client_cfg = soup.to_cfg(&session_def.rhs);
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), client_cfg);
+        let root = soup.to_cfg(&ast);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -643,20 +504,7 @@ mod tests {
 
     #[test]
     fn tally_client_invocation_call_parse_string() {
-        let to_parse = "
-        type ClientTally =
-            loop {
-                choose {
-                    _0 => send i64,
-                    _1 => {
-                        recv i64;
-                        break;
-                    },
-                }
-            };
-
-        type Client =
-            loop {
+        let to_parse = "loop {
                 choose {
                     _0 => break,
                     _1 => {
@@ -664,23 +512,14 @@ mod tests {
                         call ClientTally;
                     },
                 }
-            };";
+            }";
 
-        let invocation_ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
         let mut soup = Soup::new();
-        soup.add_defs(&invocation_ast);
-        assert_eq!(soup.count_defs(), 2);
-        soup.perform_all_passes();
+        let root = soup.to_cfg(&ast);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let client_tally_cfg = soup["ClientTally"].node;
-        let s = format!(
-            "{}",
-            soup[client_tally_cfg].to_session(&soup, &mut Vec::new())
-        );
-        assert_eq!(s, "Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>");
-
-        let client_cfg = soup["Client"].node;
-        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -689,20 +528,7 @@ mod tests {
 
     #[test]
     fn tally_client_invocation_direct_subst_parse_string() {
-        let to_parse = "
-        priv type ClientTally =
-            loop {
-                choose {
-                    _0 => send i64,
-                    _1 => {
-                        recv i64;
-                        continue 'client;
-                    },
-                }
-            };
-
-        type Client =
-            'client: loop {
+        let to_parse = "'client: loop {
                 choose {
                     _0 => break,
                     _1 => {
@@ -710,16 +536,17 @@ mod tests {
                         ClientTally;
                     },
                 }
-            };";
+            }";
 
-        let invocation_ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
         let mut soup = Soup::new();
-        soup.add_defs(&invocation_ast);
-        assert_eq!(soup.count_defs(), 2);
-        soup.perform_all_passes();
+        let root = soup.to_cfg(&ast);
+        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
 
-        let client_cfg = soup["Client"].node;
-        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
-        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
+        let s = format!("{}", soup[root].to_session(&soup, &mut Vec::new()));
+        assert_eq!(
+            s,
+            "Loop<Choose<(Done, Send<Operation, Then<ClientTally, Continue>>)>>"
+        );
     }
 }
