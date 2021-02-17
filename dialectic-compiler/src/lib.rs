@@ -5,6 +5,14 @@ use {
 
 pub mod parse;
 
+/// A shim for parsing the root level of a macro invocation, so
+/// that a session type may be written as a block w/o an extra
+/// layer of braces.
+#[derive(Debug, Clone)]
+pub struct Invocation {
+    pub ast: Ast,
+}
+
 #[derive(Debug, Clone)]
 pub enum Ast {
     Recv(String),
@@ -23,7 +31,22 @@ impl Ast {
     pub fn to_session(&self) -> Session {
         let mut soup = Soup::new();
         let cfg = soup.to_cfg(self);
-        soup.to_session(cfg)
+        soup.to_session(cfg.head)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CfgSlice {
+    pub head: Index,
+    pub tail: Index,
+}
+
+impl CfgSlice {
+    pub fn new(unit: Index) -> Self {
+        Self {
+            head: unit,
+            tail: unit,
+        }
     }
 }
 
@@ -97,62 +120,66 @@ impl Soup {
         }
     }
 
-    pub fn to_cfg(&mut self, ast: &Ast) -> Index {
+    pub fn to_cfg(&mut self, ast: &Ast) -> CfgSlice {
         match ast {
-            Ast::Recv(ty) => self.unit(Expr::Recv(ty.clone())),
-            Ast::Send(ty) => self.unit(Expr::Send(ty.clone())),
+            Ast::Recv(ty) => CfgSlice::new(self.unit(Expr::Recv(ty.clone()))),
+            Ast::Send(ty) => CfgSlice::new(self.unit(Expr::Send(ty.clone()))),
             Ast::Call(callee) => {
-                let callee_node = self.to_cfg(callee);
-                self.unit(Expr::Call(callee_node))
+                let callee_node = self.to_cfg(callee).head;
+                CfgSlice::new(self.unit(Expr::Call(callee_node)))
             }
             Ast::Choose(choices) => {
-                let choice_nodes = choices.iter().map(|choice| self.to_cfg(choice)).collect();
-                self.unit(Expr::Choose(choice_nodes))
+                let choice_nodes = choices
+                    .iter()
+                    .map(|choice| self.to_cfg(choice).head)
+                    .collect();
+                CfgSlice::new(self.unit(Expr::Choose(choice_nodes)))
             }
             Ast::Offer(choices) => {
-                let choice_nodes = choices.iter().map(|choice| self.to_cfg(choice)).collect();
-                self.unit(Expr::Offer(choice_nodes))
+                let choice_nodes = choices
+                    .iter()
+                    .map(|choice| self.to_cfg(choice).head)
+                    .collect();
+                CfgSlice::new(self.unit(Expr::Offer(choice_nodes)))
             }
             Ast::Loop(maybe_label, body) => {
-                let body_node = self.to_cfg(body);
+                let body_cfg = self.to_cfg(body);
 
-                let mut last_node = body_node;
-                loop {
-                    if let Some(next) = self[last_node].next {
-                        last_node = next;
-                    } else {
-                        break;
-                    }
-                }
-
-                match self[last_node].expr {
+                match self[body_cfg.tail].expr {
                     Expr::LabeledBreak(_)
                     | Expr::LabeledContinue(_)
                     | Expr::IndexedBreak(_)
                     | Expr::IndexedContinue(_) => {}
                     _ => {
                         let continue_ = self.unit(Expr::IndexedContinue(0));
-                        self[last_node].next = Some(continue_);
+                        self[body_cfg.tail].next = Some(continue_);
                     }
                 }
 
-                self.unit(Expr::Loop(maybe_label.clone(), body_node))
+                CfgSlice::new(self.unit(Expr::Loop(maybe_label.clone(), body_cfg.head)))
             }
-            Ast::Break(Some(label)) => self.unit(Expr::LabeledBreak(label.clone())),
-            Ast::Break(None) => self.unit(Expr::IndexedBreak(0)),
-            Ast::Continue(Some(label)) => self.unit(Expr::LabeledContinue(label.clone())),
-            Ast::Continue(None) => self.unit(Expr::IndexedContinue(0)),
+            Ast::Break(Some(label)) => CfgSlice::new(self.unit(Expr::LabeledBreak(label.clone()))),
+            Ast::Break(None) => CfgSlice::new(self.unit(Expr::IndexedBreak(0))),
+            Ast::Continue(Some(label)) => {
+                CfgSlice::new(self.unit(Expr::LabeledContinue(label.clone())))
+            }
+            Ast::Continue(None) => CfgSlice::new(self.unit(Expr::IndexedContinue(0))),
             Ast::Block(stmts) => {
-                let mut next = None;
+                let mut next_head = None;
+                let mut next_tail = None;
                 for stmt in stmts.iter().rev() {
-                    let node = self.to_cfg(stmt);
-                    self[node].next = next;
-                    next = Some(node);
+                    let cfg = self.to_cfg(stmt);
+                    next_tail = next_tail.or(Some(cfg.tail));
+                    self[cfg.tail].next = next_head;
+                    next_head = Some(cfg.head);
                 }
 
-                next.unwrap_or_else(|| self.unit(Expr::Done))
+                let head = next_head.unwrap_or_else(|| self.unit(Expr::Done));
+                let tail = next_tail.unwrap_or(head);
+
+                CfgSlice { head, tail }
             }
-            Ast::Type(s) => self.unit(Expr::Type(s.clone())),
+            Ast::Type(s) => CfgSlice::new(self.unit(Expr::Type(s.clone()))),
         }
     }
 
@@ -490,11 +517,7 @@ mod tests {
         }";
 
         let ast = syn::parse_str::<Ast>(to_parse).unwrap();
-        let mut soup = Soup::new();
-        let root = soup.to_cfg(&ast);
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
-
-        let s = format!("{}", soup.to_session(root));
+        let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -514,11 +537,7 @@ mod tests {
             }";
 
         let ast = syn::parse_str::<Ast>(to_parse).unwrap();
-        let mut soup = Soup::new();
-        let root = soup.to_cfg(&ast);
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
-
-        let s = format!("{}", soup.to_session(root));
+        let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -538,14 +557,34 @@ mod tests {
             }";
 
         let ast = syn::parse_str::<Ast>(to_parse).unwrap();
-        let mut soup = Soup::new();
-        let root = soup.to_cfg(&ast);
-        soup.eliminate_breaks_and_labels(&mut Vec::new(), root);
-
-        let s = format!("{}", soup.to_session(root));
+        let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Then<ClientTally, Continue>>)>>"
         );
+    }
+
+    #[test]
+    fn hello_invocation() {
+        let to_parse = "
+                send String;
+                recv String;
+            ";
+
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let s = format!("{}", ast.to_session());
+        assert_eq!(s, "Send<String, Recv<String, Done>>");
+    }
+
+    #[test]
+    fn hello_invocation_double_block() {
+        let to_parse = "{
+                send String;
+                recv String;
+            }";
+
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let s = format!("{}", ast.to_session());
+        assert_eq!(s, "Send<String, Recv<String, Done>>");
     }
 }
