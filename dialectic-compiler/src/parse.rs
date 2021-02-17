@@ -8,7 +8,7 @@ use {
     },
 };
 
-use crate::Ast;
+use crate::{Ast, Invocation};
 
 mod kw {
     syn::custom_keyword!(recv);
@@ -180,5 +180,16 @@ impl Parse for Ast {
             };
             Ok(Ast::Type(ty.to_token_stream().to_string()))
         }
+    }
+}
+
+impl Parse for Invocation {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let nodes = input
+            .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+            .into_iter()
+            .collect::<Vec<_>>();
+        let ast = Ast::Block(nodes);
+        Ok(Invocation { ast })
     }
 }
