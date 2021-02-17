@@ -5,6 +5,19 @@ use {
 
 pub mod parse;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modifier {
+    Priv,
+    Pub,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionDef {
+    modifier: Option<Modifier>,
+    lhs: String,
+    rhs: Ast,
+}
+
 #[derive(Debug, Clone)]
 pub enum Ast {
     Recv(String),
@@ -442,6 +455,30 @@ mod tests {
 
         let mut soup = Soup::new();
         let client_cfg = client_ast.to_cfg(&mut soup);
+        Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client_cfg);
+
+        let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
+        assert_eq!(
+            s,
+            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        );
+    }
+
+    #[test]
+    fn tally_client_expr_call_parse_string() {
+        let to_parse = "type Client = loop {
+            choose {
+                _0 => break,
+                _1 => {
+                    send(Operation);
+                    call(ClientTally);
+                },
+            }
+        };";
+
+        let session_def = syn::parse_str::<SessionDef>(to_parse).unwrap();
+        let mut soup = Soup::new();
+        let client_cfg = session_def.rhs.to_cfg(&mut soup);
         Node::eliminate_breaks_and_labels(&mut soup, &mut Vec::new(), client_cfg);
 
         let s = format!("{}", soup[client_cfg].to_session(&soup, &mut Vec::new()));
