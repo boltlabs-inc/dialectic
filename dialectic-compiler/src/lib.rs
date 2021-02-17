@@ -623,8 +623,8 @@ mod tests {
             choose {
                 _0 => break,
                 _1 => {
-                    send(Operation);
-                    call(ClientTally);
+                    send Operation;
+                    call ClientTally;
                 },
             }
         };";
@@ -647,9 +647,9 @@ mod tests {
         type ClientTally =
             loop {
                 choose {
-                    _0 => send(i64),
+                    _0 => send i64,
                     _1 => {
-                        recv(i64);
+                        recv i64;
                         break;
                     },
                 }
@@ -660,8 +660,8 @@ mod tests {
                 choose {
                     _0 => break,
                     _1 => {
-                        send(Operation);
-                        call(ClientTally);
+                        send Operation;
+                        call ClientTally;
                     },
                 }
             };";
@@ -693,9 +693,9 @@ mod tests {
         priv type ClientTally =
             loop {
                 choose {
-                    _0 => send(i64),
+                    _0 => send i64,
                     _1 => {
-                        recv(i64);
+                        recv i64;
                         continue 'client;
                     },
                 }
@@ -706,8 +706,8 @@ mod tests {
                 choose {
                     _0 => break,
                     _1 => {
-                        send(Operation);
-                        ClientTally
+                        send Operation;
+                        ClientTally;
                     },
                 }
             };";
