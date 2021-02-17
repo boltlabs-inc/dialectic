@@ -8,7 +8,7 @@ use {
     },
 };
 
-use super::Ast;
+use crate::{Ast, Modifier, SessionDef};
 
 mod kw {
     syn::custom_keyword!(recv);
@@ -151,5 +151,31 @@ impl Parse for Ast {
         } else {
             panic!("AAAAAAAAAAA (unexpected token, TODO: better error reporting here)");
         }
+    }
+}
+
+impl Parse for SessionDef {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let modifier = if input.peek(Token![priv]) {
+            input.parse::<Token![priv]>()?;
+            Some(Modifier::Priv)
+        } else if input.peek(Token![pub]) {
+            input.parse::<Token![pub]>()?;
+            Some(Modifier::Pub)
+        } else {
+            None
+        };
+
+        input.parse::<Token![type]>()?;
+        let lhs = input.parse::<Type>()?;
+        input.parse::<Token![=]>()?;
+        let rhs = input.parse::<Ast>()?;
+        input.parse::<Token![;]>()?;
+
+        Ok(SessionDef {
+            modifier,
+            lhs: lhs.to_token_stream().to_string(),
+            rhs,
+        })
     }
 }
