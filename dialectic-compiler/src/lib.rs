@@ -1,5 +1,8 @@
 use {
+    proc_macro2::TokenStream,
+    quote::{format_ident, quote, ToTokens},
     std::{fmt, ops},
+    syn::{parse_quote, Type},
     thunderdome::{Arena, Index},
 };
 
@@ -15,8 +18,8 @@ pub struct Invocation {
 
 #[derive(Debug, Clone)]
 pub enum Ast {
-    Recv(String),
-    Send(String),
+    Recv(Type),
+    Send(Type),
     Call(Box<Ast>),
     Choose(Vec<Ast>),
     Offer(Vec<Ast>),
@@ -24,7 +27,7 @@ pub enum Ast {
     Break(Option<String>),
     Continue(Option<String>),
     Block(Vec<Ast>),
-    Type(String),
+    Type(Type),
 }
 
 impl Ast {
@@ -32,6 +35,26 @@ impl Ast {
         let mut soup = Soup::new();
         let cfg = soup.to_cfg(self);
         soup.to_session(cfg.head)
+    }
+
+    pub fn recv(ty: &str) -> Self {
+        Ast::Recv(parse_quote!(#ty))
+    }
+
+    pub fn send(ty: &str) -> Self {
+        Ast::Send(parse_quote!(#ty))
+    }
+
+    pub fn call(callee: Ast) -> Self {
+        Ast::Call(Box::new(callee))
+    }
+
+    pub fn loop_(label: Option<String>, body: Ast) -> Self {
+        Ast::Loop(label, Box::new(body))
+    }
+
+    pub fn type_(ty: &str) -> Self {
+        Ast::Type(parse_quote!(#ty))
     }
 }
 
@@ -99,6 +122,18 @@ impl Soup {
 
     pub fn unit(&mut self, expr: Expr) -> Index {
         self.insert(Node::unit(expr))
+    }
+
+    pub fn send(&mut self, ty: &str) -> Index {
+        self.unit(Expr::Send(parse_quote!(#ty)))
+    }
+
+    pub fn recv(&mut self, ty: &str) -> Index {
+        self.unit(Expr::Recv(parse_quote!(#ty)))
+    }
+
+    pub fn type_(&mut self, ty: &str) -> Index {
+        self.unit(Expr::Type(parse_quote!(#ty)))
     }
 
     /// Follow all redirections of an index.
@@ -224,7 +259,7 @@ impl Soup {
                     .position(|s| s.label.as_ref() == Some(label));
 
                 if let Some(i) = labeled_index {
-                    self[node].expr = Expr::IndexedContinue(i as u8);
+                    self[node].expr = Expr::IndexedContinue(i);
                 }
             }
             Expr::LabeledBreak(label) => {
@@ -336,17 +371,17 @@ impl Soup {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Done,
-    Recv(String),
-    Send(String),
+    Recv(Type),
+    Send(Type),
     Call(Index),
     Choose(Vec<Index>),
     Offer(Vec<Index>),
     Loop(Option<String>, Index),
-    IndexedBreak(u8),
-    IndexedContinue(u8),
+    IndexedBreak(usize),
+    IndexedContinue(usize),
     LabeledBreak(String),
     LabeledContinue(String),
-    Type(String),
+    Type(Type),
 }
 
 #[derive(Debug, Clone)]
@@ -370,16 +405,16 @@ impl Node {
 #[derive(Clone, Debug)]
 pub enum Session {
     Done,
-    Recv(String, Box<Session>),
-    Send(String, Box<Session>),
+    Recv(Type, Box<Session>),
+    Send(Type, Box<Session>),
     Choose(Vec<Session>),
     Offer(Vec<Session>),
     Loop(Box<Session>),
-    Continue(u8),
+    Continue(usize),
     Split(Box<Session>, Box<Session>),
     Call(Box<Session>, Box<Session>),
     Then(Box<Session>, Box<Session>),
-    Type(String),
+    Type(Type),
 }
 
 impl fmt::Display for Session {
@@ -387,8 +422,8 @@ impl fmt::Display for Session {
         use Session::*;
         match self {
             Done => write!(f, "Done")?,
-            Recv(t, s) => write!(f, "Recv<{}, {}>", t, s)?,
-            Send(t, s) => write!(f, "Send<{}, {}>", t, s)?,
+            Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s.to_token_stream())?,
+            Send(t, s) => write!(f, "Send<{}, {}>", t.to_token_stream(), s.to_token_stream())?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
             Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
@@ -427,9 +462,35 @@ impl fmt::Display for Session {
                     write!(f, "<_{}>", n)?;
                 }
             }
-            Type(s) => write!(f, "{}", s)?,
+            Type(s) => write!(f, "{}", s.to_token_stream())?,
         }
         Ok(())
+    }
+}
+
+impl ToTokens for Session {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        use Session::*;
+        match self {
+            Done => quote! { Done }.to_tokens(tokens),
+            Recv(t, s) => quote! { Recv<#t, #s> }.to_tokens(tokens),
+            Send(t, s) => quote! { Send<#t, #s> }.to_tokens(tokens),
+            Loop(s) => quote! { Loop<#s> }.to_tokens(tokens),
+            Split(s, p) => quote! { Split<#s, #p> }.to_tokens(tokens),
+            Call(s, p) => quote! { Call<#s, #p> }.to_tokens(tokens),
+            Then(s, p) => quote! { Then<#s, #p> }.to_tokens(tokens),
+            Choose(cs) => quote! { Choose<(#(#cs,)*)> }.to_tokens(tokens),
+            Offer(cs) => quote! { Offer<(#(#cs,)*)> }.to_tokens(tokens),
+            Continue(n) => {
+                if *n > 0 {
+                    let n_ident = format_ident!("_{}", n);
+                    (quote! { Continue<#n_ident> }).to_tokens(tokens);
+                } else {
+                    (quote! { Continue }).to_tokens(tokens);
+                }
+            }
+            Type(s) => quote! { #s }.to_tokens(tokens),
+        }
     }
 }
 
@@ -440,8 +501,8 @@ mod tests {
     #[test]
     fn tally_client_expr_direct_subst() {
         let mut soup = Soup::new();
-        let send = soup.unit(Expr::Send("i64".to_owned()));
-        let recv = soup.unit(Expr::Recv("i64".to_owned()));
+        let send = soup.send("i64");
+        let recv = soup.recv("i64");
         let continue_ = soup.unit(Expr::IndexedContinue(0));
         soup[send].next = Some(continue_);
         let break_ = soup.unit(Expr::IndexedBreak(0));
@@ -453,7 +514,7 @@ mod tests {
         soup[client_tally].next = Some(continue1);
 
         let break_ = soup.unit(Expr::IndexedBreak(0));
-        let send = soup.unit(Expr::Send("Operation".to_owned()));
+        let send = soup.send("Operation");
         soup[send].next = Some(client_tally);
         let choose_opts = vec![break_, send];
         let choose = soup.unit(Expr::Choose(choose_opts));
@@ -467,8 +528,8 @@ mod tests {
     fn tally_client_expr_call() {
         let mut soup = Soup::new();
         let break_ = soup.unit(Expr::IndexedBreak(0));
-        let send = soup.unit(Expr::Send("Operation".to_owned()));
-        let callee = soup.unit(Expr::Type("ClientTally".to_owned()));
+        let send = soup.send("Operation");
+        let callee = soup.type_("ClientTally");
         let call = soup.unit(Expr::Call(callee));
         soup[send].next = Some(call);
         let continue_ = soup.unit(Expr::IndexedContinue(0));
@@ -486,15 +547,15 @@ mod tests {
 
     #[test]
     fn tally_client_expr_call_ast() {
-        let client_ast = Ast::Loop(
+        let client_ast = Ast::loop_(
             None,
-            Box::new(Ast::Choose(vec![
+            Ast::Choose(vec![
                 Ast::Break(None),
                 Ast::Block(vec![
-                    Ast::Send("Operation".to_owned()),
-                    Ast::Call(Box::new(Ast::Type("ClientTally".to_owned()))),
+                    Ast::send("Operation"),
+                    Ast::call(Ast::type_("ClientTally")),
                 ]),
-            ])),
+            ]),
         );
 
         let s = format!("{}", client_ast.to_session());
