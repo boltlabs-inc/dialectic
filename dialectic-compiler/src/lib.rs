@@ -1,6 +1,6 @@
 use {
     proc_macro2::TokenStream,
-    quote::{format_ident, quote, ToTokens},
+    quote::{quote, ToTokens},
     std::{fmt, ops},
     syn::Type,
     thunderdome::{Arena, Index},
@@ -483,8 +483,10 @@ impl ToTokens for Session {
             Offer(cs) => quote! { Offer<(#(#cs,)*)> }.to_tokens(tokens),
             Continue(n) => {
                 if *n > 0 {
-                    let n_ident = format_ident!("_{}", n);
-                    (quote! { Continue<#n_ident> }).to_tokens(tokens);
+                    (quote! { Continue< }).to_tokens(tokens);
+                    (0..*n).for_each(|_| (quote! { S< }).to_tokens(tokens));
+                    (quote! { Z }).to_tokens(tokens);
+                    (0..=*n).for_each(|_| (quote! { > }).to_tokens(tokens));
                 } else {
                     (quote! { Continue }).to_tokens(tokens);
                 }
@@ -496,6 +498,8 @@ impl ToTokens for Session {
 
 #[cfg(test)]
 mod tests {
+    use syn::parse_quote;
+
     use super::*;
 
     #[test]
@@ -647,5 +651,50 @@ mod tests {
         let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
         let s = format!("{}", ast.to_session());
         assert_eq!(s, "Send<String, Recv<String, Done>>");
+    }
+
+    #[test]
+    fn tally_client_direct_subst_nested_loop_break() {
+        let to_parse = "'client: loop {
+            choose {
+                _0 => break,
+                _1 => {
+                    send Operation;
+                    loop {
+                        choose {
+                            _0 => send i64,
+                            _1 => {
+                                recv i64;
+                                continue 'client;
+                            }
+                        }
+                    }
+                },
+            }
+        }";
+
+        let lhs: Type = syn::parse2(
+            syn::parse_str::<Invocation>(to_parse)
+                .unwrap()
+                .ast
+                .to_session()
+                .into_token_stream(),
+        )
+        .unwrap();
+
+        #[rustfmt::skip]
+        let rhs: Type = parse_quote!(
+            Loop<
+                Choose<(
+                    Done,
+                    Send<
+                        Operation,
+                        Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<S<Z>>>,)>>
+                    >,
+                )>
+            >
+        );
+
+        assert_eq!(lhs, rhs);
     }
 }
