@@ -103,6 +103,8 @@ use futures::Future;
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::backend::{Choice, Receive, Transmit};
+    #[doc(no_inline)]
+    pub use crate::session::Session;
     pub use crate::tuple::{List, Tuple};
     #[doc(no_inline)]
     pub use crate::types::{Call, Choose, Continue, Done, Loop, Offer, Recv, Send, Split};
@@ -110,12 +112,10 @@ pub mod prelude {
     pub use crate::unary::types::*;
     pub use crate::unary::{Compare, LessThan, Unary, S, Z};
     #[doc(no_inline)]
-    pub use crate::Session;
-    #[doc(no_inline)]
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
-    pub use dialectic_macro::session;
+    pub use dialectic_macro::Session;
 }
 
 pub mod backend;
