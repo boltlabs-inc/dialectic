@@ -498,8 +498,6 @@ impl ToTokens for Session {
 
 #[cfg(test)]
 mod tests {
-    use syn::parse_quote;
-
     use super::*;
 
     #[test]
@@ -682,9 +680,8 @@ mod tests {
         )
         .unwrap();
 
-        #[rustfmt::skip]
-        let rhs: Type = parse_quote!(
-            Loop<
+        let rhs: Type = syn::parse_str(
+            "Loop<
                 Choose<(
                     Done,
                     Send<
@@ -692,8 +689,9 @@ mod tests {
                         Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<S<Z>>>,)>>
                     >,
                 )>
-            >
-        );
+            >",
+        )
+        .unwrap();
 
         assert_eq!(lhs, rhs);
     }
