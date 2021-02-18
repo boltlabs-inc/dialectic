@@ -469,15 +469,17 @@ impl fmt::Display for Session {
     }
 }
 
-lazy_static! {
-    static ref CRATE_NAME: String =
-        proc_macro_crate::crate_name("dialectic").unwrap_or("dialectic".to_owned());
-}
-
 impl ToTokens for Session {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         use Session::*;
+
+        lazy_static! {
+            static ref CRATE_NAME: String =
+                proc_macro_crate::crate_name("dialectic").unwrap_or("dialectic".to_owned());
+        }
+
         let c = Ident::new(&**CRATE_NAME, Span::call_site());
+
         match self {
             Done => quote! { #c::types::Done }.to_tokens(tokens),
             Recv(t, s) => quote! { #c::types::Recv<#t, #s> }.to_tokens(tokens),
