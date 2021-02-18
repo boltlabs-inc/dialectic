@@ -22,6 +22,17 @@ impl<P, N: Unary> Subst<P, N> for Done {
     type Substituted = Done;
 }
 
+impl<P, N: Unary> Then<P, N> for Done
+where
+    P: Lift<N>,
+{
+    type Combined = P::Lifted;
+}
+
+impl<N: Unary, Level: Unary> Lift<N, Level> for Done {
+    type Lifted = Done;
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused)]

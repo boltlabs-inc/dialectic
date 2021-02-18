@@ -22,3 +22,11 @@ impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Call<P, Q> {}
 impl<N: Unary, P: Subst<R, N>, Q: Subst<R, N>, R> Subst<R, N> for Call<P, Q> {
     type Substituted = Call<P::Substituted, Q::Substituted>;
 }
+
+impl<N: Unary, P: Then<R, N>, Q: Then<R, N>, R> Then<R, N> for Call<P, Q> {
+    type Combined = Call<P::Combined, Q::Combined>;
+}
+
+impl<N: Unary, Level: Unary, P: Lift<N, Level>, Q: Lift<N, Level>> Lift<N, Level> for Call<P, Q> {
+    type Lifted = Call<P::Lifted, Q::Lifted>;
+}

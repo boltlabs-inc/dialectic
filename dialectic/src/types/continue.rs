@@ -2,7 +2,7 @@ use std::any::Any;
 
 use super::sealed::IsSession;
 use super::*;
-use crate::unary::Compare;
+use crate::unary::{self, Compare};
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at [`Z`].
@@ -24,4 +24,24 @@ where
     <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result: 'static,
 {
     type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
+}
+
+impl<P, M: Unary, N: Unary> Then<P, N> for Continue<M> {
+    type Combined = Continue<M>;
+}
+
+impl<N: Unary, M: Unary, Level: Unary> Lift<N, Level> for Continue<M>
+where
+    (M, Level): Compare<
+        Continue<M>,
+        Continue<<(M, N) as unary::Add>::Result>,
+        Continue<<(M, N) as unary::Add>::Result>,
+    >,
+    (M, N): unary::Add,
+{
+    type Lifted = <(M, Level) as Compare<
+        Continue<M>,
+        Continue<<(M, N) as unary::Add>::Result>,
+        Continue<<(M, N) as unary::Add>::Result>,
+    >>::Result;
 }
