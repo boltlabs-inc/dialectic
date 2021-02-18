@@ -485,7 +485,7 @@ impl ToTokens for Session {
             Loop(s) => quote! { #c::types::Loop<#s> }.to_tokens(tokens),
             Split(s, p) => quote! { #c::types::Split<#s, #p> }.to_tokens(tokens),
             Call(s, p) => quote! { #c::types::Call<#s, #p> }.to_tokens(tokens),
-            Then(s, p) => quote! { <#s as #c::types::Then<#p>>::Result }.to_tokens(tokens),
+            Then(s, p) => quote! { <#s as #c::types::Then<#p>>::Combined }.to_tokens(tokens),
             Choose(cs) => quote! { #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
             Offer(cs) => quote! { #c::types::Offer<(#(#cs,)*)> }.to_tokens(tokens),
             Continue(n) => {
