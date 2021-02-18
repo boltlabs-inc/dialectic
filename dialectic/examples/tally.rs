@@ -64,7 +64,18 @@ async fn client(
 }
 
 /// A sub-routine to tally a sequence of numbers.
-pub type ClientTally = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
+// pub type ClientTally = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
+pub type ClientTally = Session! {
+    loop {
+        choose {
+            _0 => send i64,
+            _1 => {
+                recv i64;
+                break;
+            }
+        }
+    }
+};
 
 /// The implementation of the client's tally subroutine.
 async fn client_tally(
