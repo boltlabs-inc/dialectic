@@ -1,8 +1,9 @@
 use {
-    proc_macro2::TokenStream,
+    lazy_static::lazy_static,
+    proc_macro2::{Span, TokenStream},
     quote::{quote, ToTokens},
     std::{fmt, ops},
-    syn::Type,
+    syn::{Ident, Type},
     thunderdome::{Arena, Index},
 };
 
@@ -468,27 +469,33 @@ impl fmt::Display for Session {
     }
 }
 
+lazy_static! {
+    static ref CRATE_NAME: String =
+        proc_macro_crate::crate_name("dialectic").unwrap_or("dialectic".to_owned());
+}
+
 impl ToTokens for Session {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         use Session::*;
+        let c = Ident::new(&**CRATE_NAME, Span::call_site());
         match self {
-            Done => quote! { Done }.to_tokens(tokens),
-            Recv(t, s) => quote! { Recv<#t, #s> }.to_tokens(tokens),
-            Send(t, s) => quote! { Send<#t, #s> }.to_tokens(tokens),
-            Loop(s) => quote! { Loop<#s> }.to_tokens(tokens),
-            Split(s, p) => quote! { Split<#s, #p> }.to_tokens(tokens),
-            Call(s, p) => quote! { Call<#s, #p> }.to_tokens(tokens),
-            Then(s, p) => quote! { <#s as Then<#p>>::Combined }.to_tokens(tokens),
-            Choose(cs) => quote! { Choose<(#(#cs,)*)> }.to_tokens(tokens),
-            Offer(cs) => quote! { Offer<(#(#cs,)*)> }.to_tokens(tokens),
+            Done => quote! { #c::types::Done }.to_tokens(tokens),
+            Recv(t, s) => quote! { #c::types::Recv<#t, #s> }.to_tokens(tokens),
+            Send(t, s) => quote! { #c::types::Send<#t, #s> }.to_tokens(tokens),
+            Loop(s) => quote! { #c::types::Loop<#s> }.to_tokens(tokens),
+            Split(s, p) => quote! { #c::types::Split<#s, #p> }.to_tokens(tokens),
+            Call(s, p) => quote! { #c::types::Call<#s, #p> }.to_tokens(tokens),
+            Then(s, p) => quote! { <#s as #c::types::Then<#p>>::Result }.to_tokens(tokens),
+            Choose(cs) => quote! { #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
+            Offer(cs) => quote! { #c::types::Offer<(#(#cs,)*)> }.to_tokens(tokens),
             Continue(n) => {
                 if *n > 0 {
-                    (quote! { Continue< }).to_tokens(tokens);
-                    (0..*n).for_each(|_| (quote! { S< }).to_tokens(tokens));
-                    (quote! { Z }).to_tokens(tokens);
+                    (quote! { #c::types::Continue< }).to_tokens(tokens);
+                    (0..*n).for_each(|_| (quote! { #c::types::S< }).to_tokens(tokens));
+                    (quote! { #c::types::Z }).to_tokens(tokens);
                     (0..=*n).for_each(|_| (quote! { > }).to_tokens(tokens));
                 } else {
-                    (quote! { Continue }).to_tokens(tokens);
+                    (quote! { #c::types::Continue }).to_tokens(tokens);
                 }
             }
             Type(s) => quote! { #s }.to_tokens(tokens),
@@ -681,18 +688,26 @@ mod tests {
         .unwrap();
 
         let rhs: Type = syn::parse_str(
-            "Loop<
-                Choose<(
-                    Done,
-                    Send<
+            "dialectic::types::Loop<
+                dialectic::types::Choose<(
+                    dialectic::types::Done,
+                    dialectic::types::Send<
                         Operation,
-                        Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<S<Z>>>,)>>
+                        dialectic::types::Loop<
+                            dialectic::types::Choose<(
+                                dialectic::types::Send<i64, dialectic::types::Continue>,
+                                dialectic::types::Recv<i64, dialectic::types::Continue<dialectic::types::S<dialectic::types::Z>>>,
+                            )>
+                        >
                     >,
                 )>
             >",
         )
         .unwrap();
 
-        assert_eq!(lhs, rhs);
+        assert_eq!(
+            lhs.to_token_stream().to_string(),
+            rhs.to_token_stream().to_string()
+        );
     }
 }
