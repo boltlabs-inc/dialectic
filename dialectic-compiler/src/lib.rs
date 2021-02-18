@@ -748,4 +748,16 @@ mod tests {
             rhs.to_token_stream().to_string()
         );
     }
+
+    #[test]
+    fn basic_split() {
+        let to_parse = "split {
+                -> send String,
+                <- recv String,
+            }";
+
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let s = format!("{}", ast.to_session());
+        assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>>");
+    }
 }
