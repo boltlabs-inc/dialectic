@@ -98,6 +98,7 @@ impl<N: Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::unary::*;
 /// use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(<(_0, _1) as Compare<u8, u16, u32>>::Result, u8);
@@ -135,6 +136,7 @@ impl<N: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> f
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::unary::*;
 /// use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(<(_1, _1) as Add>::Result, _2);

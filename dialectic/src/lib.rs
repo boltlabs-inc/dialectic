@@ -110,7 +110,7 @@ pub mod prelude {
     pub use crate::types::{Call, Choose, Continue, Done, Loop, Offer, Recv, Send, Split};
     pub use crate::unary::constants::*;
     pub use crate::unary::types::*;
-    pub use crate::unary::{Compare, LessThan, Unary, S, Z};
+    pub use crate::unary::{LessThan, Unary, S, Z};
     #[doc(no_inline)]
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
