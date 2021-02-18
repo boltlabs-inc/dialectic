@@ -18,7 +18,7 @@ mod kw {
 }
 
 struct ChoiceArm {
-    index: u8,
+    index: usize,
     arm: Ast,
     span: Span,
 }
@@ -31,7 +31,7 @@ impl Parse for ChoiceArm {
             .to_string()
             .strip_prefix("_")
             .ok_or_else(|| input.error("expected index identifier starting with an underscore"))
-            .and_then(|s| s.parse::<u8>().map_err(|e| input.error(e)))?;
+            .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
         input.parse::<Token![=>]>()?;
         span = span.join(input.span()).unwrap_or(span);
         let arm = input.parse::<Ast>()?;
