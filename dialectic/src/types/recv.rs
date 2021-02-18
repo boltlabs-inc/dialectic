@@ -23,3 +23,11 @@ impl<T: 'static, N: Unary, P: Scoped<N>> Scoped<N> for Recv<T, P> {}
 impl<N: Unary, T: 'static, P: Subst<Q, N>, Q> Subst<Q, N> for Recv<T, P> {
     type Substituted = Recv<T, P::Substituted>;
 }
+
+impl<N: Unary, T: 'static, P: Then<Q, N>, Q> Then<Q, N> for Recv<T, P> {
+    type Combined = Recv<T, P::Combined>;
+}
+
+impl<N: Unary, T: 'static, P: Lift<N, Level>, Level: Unary> Lift<N, Level> for Recv<T, P> {
+    type Lifted = Recv<T, P::Lifted>;
+}

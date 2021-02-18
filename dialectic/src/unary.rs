@@ -82,15 +82,15 @@ impl<N: Unary> Unary for S<N> {
 /// #
 /// fn bad() where _100: LessThan<_100> {}
 /// ```
-pub trait LessThan<N: sealed::Unary>
+pub trait LessThan<N: Unary>
 where
-    Self: sealed::Unary,
+    Self: Unary,
 {
 }
 
-impl<N: sealed::Unary> LessThan<S<N>> for Z {}
+impl<N: Unary> LessThan<S<N>> for Z {}
 
-impl<N: sealed::Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
+impl<N: Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
 
 /// Compare two unary numbers and branch on their comparison, at the type level.
 ///
@@ -109,8 +109,8 @@ pub trait Compare<IfLess, IfEqual, IfGreater>: sealed::Compare {
     type Result;
 }
 
-impl<N: sealed::Unary, M: sealed::Unary, IfLess, IfEqual, IfGreater>
-    Compare<IfLess, IfEqual, IfGreater> for (S<N>, S<M>)
+impl<N: Unary, M: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater>
+    for (S<N>, S<M>)
 where
     (N, M): Compare<IfLess, IfEqual, IfGreater>,
 {
@@ -121,16 +121,39 @@ impl<IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> for (Z, Z) 
     type Result = IfEqual;
 }
 
-impl<N: sealed::Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater>
-    for (S<N>, Z)
-{
+impl<N: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> for (S<N>, Z) {
     type Result = IfGreater;
 }
 
-impl<N: sealed::Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater>
-    for (Z, S<N>)
-{
+impl<N: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> for (Z, S<N>) {
     type Result = IfLess;
+}
+
+/// Add two unary numbers at the type level.
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use static_assertions::assert_type_eq_all;
+///
+/// assert_type_eq_all!(<(_1, _1) as Add>::Result, _2);
+/// assert_type_eq_all!(<(_5, _7) as Add>::Result, _12);
+/// ```
+pub trait Add: sealed::Add {
+    /// The result of the addition.
+    type Result: Unary;
+}
+
+impl<N: Unary> Add for (N, Z) {
+    type Result = N;
+}
+
+impl<N: Unary, M: Unary> Add for (N, S<M>)
+where
+    (N, M): Add,
+{
+    type Result = S<<(N, M) as Add>::Result>;
 }
 
 mod sealed {
@@ -141,4 +164,7 @@ mod sealed {
 
     pub trait Compare {}
     impl<N: Unary, M: Unary> Compare for (N, M) {}
+
+    pub trait Add {}
+    impl<N: Unary, M: Unary> Add for (N, M) {}
 }

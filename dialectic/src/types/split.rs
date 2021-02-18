@@ -26,3 +26,11 @@ impl<N: Unary, P: Scoped<N>, Q: Scoped<N>> Scoped<N> for Split<P, Q> {}
 impl<N: Unary, P: Subst<R, N>, Q: Subst<R, N>, R> Subst<R, N> for Split<P, Q> {
     type Substituted = Split<P::Substituted, Q::Substituted>;
 }
+
+impl<N: Unary, P: Then<R, N>, Q: Then<R, N>, R> Then<R, N> for Split<P, Q> {
+    type Combined = Split<P::Combined, Q::Combined>;
+}
+
+impl<N: Unary, Level: Unary, P: Lift<N, Level>, Q: Lift<N, Level>> Lift<N, Level> for Split<P, Q> {
+    type Lifted = Split<P::Lifted, Q::Lifted>;
+}
