@@ -1,6 +1,5 @@
 use {
     proc_macro2::Span,
-    quote::ToTokens,
     syn::{
         braced,
         parse::{Error, Parse, ParseStream, Result},
@@ -46,13 +45,11 @@ impl Parse for Ast {
         if lookahead.peek(kw::recv) {
             // Ast::Recv: recv <type>
             input.parse::<kw::recv>()?;
-            let ty = input.parse::<Type>()?;
-            Ok(Ast::Recv(ty.into_token_stream().to_string()))
+            Ok(Ast::Recv(input.parse::<Type>()?))
         } else if lookahead.peek(kw::send) {
             // Ast::Send: send <type>
             input.parse::<kw::send>()?;
-            let ty = input.parse::<Type>()?;
-            Ok(Ast::Send(ty.into_token_stream().to_string()))
+            Ok(Ast::Send(input.parse::<Type>()?))
         } else if lookahead.peek(kw::call) {
             // Ast::Call: call <type> or call <block>
             input.parse::<kw::call>()?;
@@ -71,9 +68,7 @@ impl Parse for Ast {
                     e.combine(lookahead.error());
                     e
                 })?;
-                Ok(Ast::Call(Box::new(Ast::Type(
-                    ty.into_token_stream().to_string(),
-                ))))
+                Ok(Ast::call(Ast::Type(ty)))
             }
         } else if lookahead.peek(kw::choose) {
             // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
@@ -178,7 +173,7 @@ impl Parse for Ast {
                     return Err(combined);
                 }
             };
-            Ok(Ast::Type(ty.to_token_stream().to_string()))
+            Ok(Ast::Type(ty))
         }
     }
 }
