@@ -15,6 +15,35 @@ mod kw {
     syn::custom_keyword!(call);
     syn::custom_keyword!(choose);
     syn::custom_keyword!(offer);
+    syn::custom_keyword!(split);
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Direction {
+    Outbound,
+    Inbound,
+}
+
+struct SplitArm {
+    dir: Direction,
+    arm: Ast,
+}
+
+impl Parse for SplitArm {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        let dir = if lookahead.peek(Token![->]) {
+            input.parse::<Token![->]>()?;
+            Direction::Outbound
+        } else if lookahead.peek(Token![<-]) {
+            input.parse::<Token![<-]>()?;
+            Direction::Inbound
+        } else {
+            return Err(lookahead.error());
+        };
+        let arm = input.parse::<Ast>()?;
+        Ok(SplitArm { dir, arm })
+    }
 }
 
 struct ChoiceArm {
@@ -116,6 +145,29 @@ impl Parse for Ast {
             }
 
             Ok(Ast::Offer(arm_asts))
+        } else if lookahead.peek(kw::split) {
+            input.parse::<kw::split>()?;
+            let content;
+            braced!(content in input);
+            let mut split_arms = content
+                .parse_terminated::<SplitArm, Token![,]>(SplitArm::parse)?
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            if split_arms.len() != 2 || split_arms[0].dir == split_arms[1].dir {
+                return Err(input.error(
+                    "split constructs must have exactly two arms, one outbound and one inbound",
+                ));
+            }
+
+            if split_arms[0].dir == Direction::Inbound {
+                split_arms.swap(0, 1);
+            }
+
+            Ok(Ast::Split(
+                Box::new(split_arms[0].arm.clone()),
+                Box::new(split_arms[1].arm.clone()),
+            ))
         } else if lookahead.peek(Token![loop]) || lookahead.peek(Lifetime) {
             // Ast::Loop: 'label loop { ... }
             let label = if input.peek(Lifetime) {
