@@ -24,6 +24,7 @@ pub enum Ast {
     Call(Box<Ast>),
     Choose(Vec<Ast>),
     Offer(Vec<Ast>),
+    Split(Box<Ast>, Box<Ast>),
     Loop(Option<String>, Box<Ast>),
     Break(Option<String>),
     Continue(Option<String>),
@@ -164,6 +165,10 @@ impl Soup {
                 let callee_node = self.to_cfg(callee).head;
                 CfgSlice::new(self.unit(Expr::Call(callee_node)))
             }
+            Ast::Split(tx, rx) => {
+                let (tx_node, rx_node) = (self.to_cfg(tx).head, self.to_cfg(rx).head);
+                CfgSlice::new(self.unit(Expr::Split(tx_node, rx_node)))
+            }
             Ast::Choose(choices) => {
                 let choice_nodes = choices
                     .iter()
@@ -227,9 +232,23 @@ impl Soup {
             Expr::Recv(_)
             | Expr::Send(_)
             | Expr::IndexedContinue(_)
-            | Expr::Call(_)
             | Expr::Done
             | Expr::Type(_) => {
+                if let Some(next) = self[node].next {
+                    self.eliminate_breaks_and_labels(env, next);
+                }
+            }
+            Expr::Call(callee) => {
+                let callee = *callee;
+                self.eliminate_breaks_and_labels(env, callee);
+                if let Some(next) = self[node].next {
+                    self.eliminate_breaks_and_labels(env, next);
+                }
+            }
+            Expr::Split(tx, rx) => {
+                let (tx, rx) = (*tx, *rx);
+                self.eliminate_breaks_and_labels(env, tx);
+                self.eliminate_breaks_and_labels(env, rx);
                 if let Some(next) = self[node].next {
                     self.eliminate_breaks_and_labels(env, next);
                 }
@@ -308,6 +327,22 @@ impl Soup {
                     .map(|i| self.to_session_inner(i, env));
                 Session::Call(Box::new(callee), Box::new(cont.unwrap_or(Session::Done)))
             }
+            Expr::Split(tx, rx) => {
+                let (tx, rx) = (*tx, *rx);
+
+                env.extend(node.next);
+
+                let (tx_sess, rx_sess) = (
+                    self.to_session_inner(tx, env),
+                    self.to_session_inner(rx, env),
+                );
+
+                if node.next.is_some() {
+                    env.pop();
+                }
+
+                Session::Split(Box::new(tx_sess), Box::new(rx_sess))
+            }
             Expr::Choose(is) => {
                 env.extend(node.next);
 
@@ -377,6 +412,7 @@ pub enum Expr {
     Call(Index),
     Choose(Vec<Index>),
     Offer(Vec<Index>),
+    Split(Index, Index),
     Loop(Option<String>, Index),
     IndexedBreak(usize),
     IndexedContinue(usize),
