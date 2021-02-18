@@ -11,7 +11,7 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-type Client = session! {
+type Client = Session! {
     send String;
     recv String;
 };
