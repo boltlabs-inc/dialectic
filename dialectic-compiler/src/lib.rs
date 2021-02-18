@@ -427,7 +427,7 @@ impl fmt::Display for Session {
             Loop(s) => write!(f, "Loop<{}>", s)?,
             Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
-            Then(s, p) => write!(f, "Then<{}, {}>", s, p)?,
+            Then(s, p) => write!(f, "<{} as Then<{}>>::Combined", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
                 write!(f, "Choose<(")?;
@@ -478,7 +478,7 @@ impl ToTokens for Session {
             Loop(s) => quote! { Loop<#s> }.to_tokens(tokens),
             Split(s, p) => quote! { Split<#s, #p> }.to_tokens(tokens),
             Call(s, p) => quote! { Call<#s, #p> }.to_tokens(tokens),
-            Then(s, p) => quote! { Then<#s, #p> }.to_tokens(tokens),
+            Then(s, p) => quote! { <#s as Then<#p>>::Combined }.to_tokens(tokens),
             Choose(cs) => quote! { Choose<(#(#cs,)*)> }.to_tokens(tokens),
             Offer(cs) => quote! { Offer<(#(#cs,)*)> }.to_tokens(tokens),
             Continue(n) => {
@@ -623,7 +623,7 @@ mod tests {
         let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
-            "Loop<Choose<(Done, Send<Operation, Then<ClientTally, Continue>>)>>"
+            "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue>>::Combined>)>>"
         );
     }
 
