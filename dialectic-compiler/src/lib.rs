@@ -2,7 +2,7 @@ use {
     proc_macro2::TokenStream,
     quote::{format_ident, quote, ToTokens},
     std::{fmt, ops},
-    syn::{parse_quote, Type},
+    syn::Type,
     thunderdome::{Arena, Index},
 };
 
@@ -38,11 +38,11 @@ impl Ast {
     }
 
     pub fn recv(ty: &str) -> Self {
-        Ast::Recv(parse_quote!(#ty))
+        Ast::Recv(syn::parse_str(ty).unwrap())
     }
 
     pub fn send(ty: &str) -> Self {
-        Ast::Send(parse_quote!(#ty))
+        Ast::Send(syn::parse_str(ty).unwrap())
     }
 
     pub fn call(callee: Ast) -> Self {
@@ -54,7 +54,7 @@ impl Ast {
     }
 
     pub fn type_(ty: &str) -> Self {
-        Ast::Type(parse_quote!(#ty))
+        Ast::Type(syn::parse_str(ty).unwrap())
     }
 }
 
@@ -125,15 +125,15 @@ impl Soup {
     }
 
     pub fn send(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Send(parse_quote!(#ty)))
+        self.unit(Expr::Send(syn::parse_str(ty).unwrap()))
     }
 
     pub fn recv(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Recv(parse_quote!(#ty)))
+        self.unit(Expr::Recv(syn::parse_str(ty).unwrap()))
     }
 
     pub fn type_(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Type(parse_quote!(#ty)))
+        self.unit(Expr::Type(syn::parse_str(ty).unwrap()))
     }
 
     /// Follow all redirections of an index.
@@ -422,8 +422,8 @@ impl fmt::Display for Session {
         use Session::*;
         match self {
             Done => write!(f, "Done")?,
-            Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s.to_token_stream())?,
-            Send(t, s) => write!(f, "Send<{}, {}>", t.to_token_stream(), s.to_token_stream())?,
+            Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s)?,
+            Send(t, s) => write!(f, "Send<{}, {}>", t.to_token_stream(), s)?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
             Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
