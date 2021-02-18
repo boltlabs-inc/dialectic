@@ -28,7 +28,20 @@ where
 impl<P, Q, N: Unary> Subst<Q, N> for Loop<P>
 where
     P: Subst<Q, S<N>>,
-    <P as Subst<Q, S<N>>>::Substituted: HasDual,
 {
     type Substituted = Loop<<P as Subst<Q, S<N>>>::Substituted>;
+}
+
+impl<P, Q, N: Unary> Then<Q, N> for Loop<P>
+where
+    P: Then<Q, S<N>>,
+{
+    type Combined = Loop<<P as Then<Q, S<N>>>::Combined>;
+}
+
+impl<N: Unary, Level: Unary, P> Lift<N, Level> for Loop<P>
+where
+    P: Lift<N, S<Level>>,
+{
+    type Lifted = Loop<<P as Lift<N, S<Level>>>::Lifted>;
 }

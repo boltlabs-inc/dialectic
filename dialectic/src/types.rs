@@ -135,6 +135,26 @@ pub trait Subst<P, N: Unary = Z>: sealed::IsSession {
     type Substituted: 'static;
 }
 
+/// Substitute `P` for every [`Done`] in `Self`, thus concatenating the session `P` to `Self`.
+///
+/// This does not require `P` to be a closed session type; it is reasonable to use open session
+/// types (those with [`Continue`]s that refer outside of themselves) as `P`. [`Then`] is careful to
+/// adjust the indices of such open types so that they refer correctly outside of `Self` even when
+/// `Self` contains [`Loop`]s.
+pub trait Then<P, N: Unary = Z>: sealed::IsSession {
+    /// The combined type resulting from substituting `P` for [`Done`] in `Self`.
+    type Combined: 'static;
+}
+
+/// For every "open" [`Continue`] (i.e. with an index larger than the number of [`Loop`]s that
+/// contain it), increment its index by `N`.
+///
+/// This is used internally in the [`Then`] implementation for [`Done`].
+pub trait Lift<N: Unary, Level: Unary = Z>: sealed::IsSession {
+    /// The result of the lifting operation.
+    type Lifted: 'static;
+}
+
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of
 /// protocols. The sealed [`EachSubst`] trait ensures that every protocol in a type level list of
 /// protocols can [`Subst`].
@@ -153,6 +173,44 @@ where
     Ps: EachSubst<Q, N>,
 {
     type Substituted = (P::Substituted, Ps::Substituted);
+}
+
+/// Analogously to [`EachSubst`], this trait allows iteration/mapping of the [`Then`] transform
+/// over a type level list.
+pub trait EachThen<P, N: Unary = Z>: sealed::EachSession {
+    /// The result of the map.
+    type Combined: 'static;
+}
+
+impl<N: Unary, Q> EachThen<Q, N> for () {
+    type Combined = ();
+}
+
+impl<N: Unary, Q, P, Ps> EachThen<Q, N> for (P, Ps)
+where
+    P: Then<Q, N>,
+    Ps: EachThen<Q, N>,
+{
+    type Combined = (P::Combined, Ps::Combined);
+}
+
+/// Analogously to [`EachSubst`], this trait allows iteration/mapping of the [`Then`] transform
+/// over a type level list.
+pub trait EachLift<N: Unary, Level: Unary = Z>: sealed::EachSession {
+    /// The result of the map.
+    type Lifted: 'static;
+}
+
+impl<N: Unary, Level: Unary> EachLift<N, Level> for () {
+    type Lifted = ();
+}
+
+impl<N: Unary, Level: Unary, P, Ps> EachLift<N, Level> for (P, Ps)
+where
+    P: Lift<N, Level>,
+    Ps: EachLift<N, Level>,
+{
+    type Lifted = (P::Lifted, Ps::Lifted);
 }
 
 /// Select by index from a type level list.

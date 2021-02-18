@@ -23,3 +23,11 @@ impl<T: 'static, N: Unary, P: Scoped<N>> Scoped<N> for Send<T, P> {}
 impl<N: Unary, T: 'static, P: Subst<Q, N>, Q> Subst<Q, N> for Send<T, P> {
     type Substituted = Send<T, P::Substituted>;
 }
+
+impl<N: Unary, T: 'static, P: Then<Q, N>, Q> Then<Q, N> for Send<T, P> {
+    type Combined = Send<T, P::Combined>;
+}
+
+impl<N: Unary, T: 'static, P: Lift<N, Level>, Level: Unary> Lift<N, Level> for Send<T, P> {
+    type Lifted = Send<T, P::Lifted>;
+}
