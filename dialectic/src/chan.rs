@@ -24,9 +24,9 @@ use futures::Future;
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
 /// `Rx`.
 ///
-/// # Creating new `Chan`s: use [`Session`](crate::Session)
+/// # Creating new `Chan`s: use [`Session`]
 ///
-/// The [`Session`](crate::Session) trait is implemented for all valid session types. To create a
+/// The [`Session`] trait is implemented for all valid session types. To create a
 /// new [`Chan`] for some session type, use one of the provided static methods. Here, we create two
 /// `Chan`s with the session type `Send<String, Done>` and its dual `Recv<String, Done>`, wrapping
 /// an underlying bidirectional transport built from a pair of [`tokio::sync::mpsc::channel`]s:
@@ -62,6 +62,8 @@ use futures::Future;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// [`Session`]: trait@crate::Session
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
