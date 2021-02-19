@@ -7,7 +7,7 @@ use {
     },
 };
 
-use crate::{Ast, Invocation};
+use crate::{Invocation, Syntax};
 
 mod kw {
     syn::custom_keyword!(recv);
@@ -26,7 +26,7 @@ enum Direction {
 
 struct SplitArm {
     dir: Direction,
-    arm: Ast,
+    arm: Syntax,
 }
 
 impl Parse for SplitArm {
@@ -41,14 +41,14 @@ impl Parse for SplitArm {
         } else {
             return Err(lookahead.error());
         };
-        let arm = input.parse::<Ast>()?;
+        let arm = input.parse::<Syntax>()?;
         Ok(SplitArm { dir, arm })
     }
 }
 
 struct ChoiceArm {
     index: usize,
-    arm: Ast,
+    arm: Syntax,
     span: Span,
 }
 
@@ -63,22 +63,22 @@ impl Parse for ChoiceArm {
             .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
         input.parse::<Token![=>]>()?;
         span = span.join(input.span()).unwrap_or(span);
-        let arm = input.parse::<Ast>()?;
+        let arm = input.parse::<Syntax>()?;
         Ok(ChoiceArm { index, arm, span })
     }
 }
 
-impl Parse for Ast {
+impl Parse for Syntax {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
         if lookahead.peek(kw::recv) {
             // Ast::Recv: recv <type>
             input.parse::<kw::recv>()?;
-            Ok(Ast::Recv(input.parse::<Type>()?))
+            Ok(Syntax::Recv(input.parse::<Type>()?))
         } else if lookahead.peek(kw::send) {
             // Ast::Send: send <type>
             input.parse::<kw::send>()?;
-            Ok(Ast::Send(input.parse::<Type>()?))
+            Ok(Syntax::Send(input.parse::<Type>()?))
         } else if lookahead.peek(kw::call) {
             // Ast::Call: call <type> or call <block>
             input.parse::<kw::call>()?;
@@ -88,16 +88,16 @@ impl Parse for Ast {
                 let content;
                 braced!(content in input);
                 let nodes = content
-                    .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+                    .parse_terminated::<Syntax, Token![;]>(Syntax::parse)?
                     .into_iter()
                     .collect();
-                Ok(Ast::Call(Box::new(Ast::Block(nodes))))
+                Ok(Syntax::Call(Box::new(Syntax::Block(nodes))))
             } else {
                 let ty = input.parse::<Type>().map_err(|mut e| {
                     e.combine(lookahead.error());
                     e
                 })?;
-                Ok(Ast::call(Ast::Type(ty)))
+                Ok(Syntax::call(Syntax::Type(ty)))
             }
         } else if lookahead.peek(kw::choose) {
             // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
@@ -121,7 +121,7 @@ impl Parse for Ast {
                 arm_asts.push(choice_arm.arm);
             }
 
-            Ok(Ast::Choose(arm_asts))
+            Ok(Syntax::Choose(arm_asts))
         } else if lookahead.peek(kw::offer) {
             // Ast::Offer: offer { _0 => <Ast>, _1 => <Ast>, ... }
             input.parse::<kw::offer>()?;
@@ -144,7 +144,7 @@ impl Parse for Ast {
                 arm_asts.push(choice_arm.arm);
             }
 
-            Ok(Ast::Offer(arm_asts))
+            Ok(Syntax::Offer(arm_asts))
         } else if lookahead.peek(kw::split) {
             input.parse::<kw::split>()?;
             let content;
@@ -164,7 +164,7 @@ impl Parse for Ast {
                 split_arms.swap(0, 1);
             }
 
-            Ok(Ast::Split(
+            Ok(Syntax::Split(
                 Box::new(split_arms[0].arm.clone()),
                 Box::new(split_arms[1].arm.clone()),
             ))
@@ -182,10 +182,10 @@ impl Parse for Ast {
             let content;
             braced!(content in input);
             let nodes = content
-                .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+                .parse_terminated::<Syntax, Token![;]>(Syntax::parse)?
                 .into_iter()
                 .collect();
-            Ok(Ast::Loop(label, Box::new(Ast::Block(nodes))))
+            Ok(Syntax::Loop(label, Box::new(Syntax::Block(nodes))))
         } else if lookahead.peek(Token![break]) {
             // Ast::Break: break 'label
             input.parse::<Token![break]>()?;
@@ -194,7 +194,7 @@ impl Parse for Ast {
             } else {
                 None
             };
-            Ok(Ast::Break(label))
+            Ok(Syntax::Break(label))
         } else if lookahead.peek(Token![continue]) {
             // Ast::Continue: continue 'label
             input.parse::<Token![continue]>()?;
@@ -203,16 +203,16 @@ impl Parse for Ast {
             } else {
                 None
             };
-            Ok(Ast::Continue(label))
+            Ok(Syntax::Continue(label))
         } else if lookahead.peek(token::Brace) {
             // Ast::Block: { <Ast>; <Ast>; ... }
             let content;
             braced!(content in input);
             let nodes = content
-                .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+                .parse_terminated::<Syntax, Token![;]>(Syntax::parse)?
                 .into_iter()
                 .collect();
-            Ok(Ast::Block(nodes))
+            Ok(Syntax::Block(nodes))
         } else {
             // Attempt to parse as a direct type Ast::Type: <type>
             // Otherwise, fail and report all other errors from the lookahead.
@@ -225,7 +225,7 @@ impl Parse for Ast {
                     return Err(combined);
                 }
             };
-            Ok(Ast::Type(ty))
+            Ok(Syntax::Type(ty))
         }
     }
 }
@@ -233,10 +233,10 @@ impl Parse for Ast {
 impl Parse for Invocation {
     fn parse(input: ParseStream) -> Result<Self> {
         let nodes = input
-            .parse_terminated::<Ast, Token![;]>(Ast::parse)?
+            .parse_terminated::<Syntax, Token![;]>(Syntax::parse)?
             .into_iter()
             .collect::<Vec<_>>();
-        let ast = Ast::Block(nodes);
-        Ok(Invocation { ast })
+        let ast = Syntax::Block(nodes);
+        Ok(Invocation { syntax: ast })
     }
 }

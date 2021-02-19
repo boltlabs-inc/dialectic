@@ -2,7 +2,7 @@ use {
     lazy_static::lazy_static,
     proc_macro2::{Span, TokenStream},
     quote::{quote, ToTokens},
-    std::{fmt, ops},
+    std::{fmt, ops, rc::Rc},
     syn::{Ident, Type},
     thunderdome::{Arena, Index},
 };
@@ -14,408 +14,26 @@ pub mod parse;
 /// layer of braces.
 #[derive(Debug, Clone)]
 pub struct Invocation {
-    pub ast: Ast,
+    pub syntax: Syntax,
 }
 
 #[derive(Debug, Clone)]
-pub enum Ast {
+pub enum Syntax {
     Recv(Type),
     Send(Type),
-    Call(Box<Ast>),
-    Choose(Vec<Ast>),
-    Offer(Vec<Ast>),
-    Split(Box<Ast>, Box<Ast>),
-    Loop(Option<String>, Box<Ast>),
+    Call(Box<Syntax>),
+    Choose(Vec<Syntax>),
+    Offer(Vec<Syntax>),
+    Split(Box<Syntax>, Box<Syntax>),
+    Loop(Option<String>, Box<Syntax>),
     Break(Option<String>),
     Continue(Option<String>),
-    Block(Vec<Ast>),
+    Block(Vec<Syntax>),
     Type(Type),
 }
 
-impl Ast {
-    pub fn to_session(&self) -> Session {
-        let mut soup = Soup::new();
-        let cfg = soup.lower_to_cfg(self);
-        soup.compile_node_to_session(cfg.head)
-    }
-
-    pub fn recv(ty: &str) -> Self {
-        Ast::Recv(syn::parse_str(ty).unwrap())
-    }
-
-    pub fn send(ty: &str) -> Self {
-        Ast::Send(syn::parse_str(ty).unwrap())
-    }
-
-    pub fn call(callee: Ast) -> Self {
-        Ast::Call(Box::new(callee))
-    }
-
-    pub fn loop_(label: Option<String>, body: Ast) -> Self {
-        Ast::Loop(label, Box::new(body))
-    }
-
-    pub fn type_(ty: &str) -> Self {
-        Ast::Type(syn::parse_str(ty).unwrap())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CfgSlice {
-    pub head: Index,
-    pub tail: Index,
-}
-
-impl CfgSlice {
-    pub fn new(unit: Index) -> Self {
-        Self {
-            head: unit,
-            tail: unit,
-        }
-    }
-}
-
-/// A soup of CFG nodes acting as a context for a single compilation unit.
-#[derive(Debug)]
-pub struct Soup {
-    arena: Arena<Result<Node, Index>>,
-}
-
-impl ops::Index<Index> for Soup {
-    type Output = Node;
-
-    fn index(&self, index: Index) -> &Self::Output {
-        match &self.arena[index] {
-            Ok(node) => node,
-            Err(i) => &self[*i],
-        }
-    }
-}
-
-impl ops::IndexMut<Index> for Soup {
-    fn index_mut(&mut self, index: Index) -> &mut Self::Output {
-        match self.arena[index] {
-            Ok(_) => self.arena[index].as_mut().unwrap(),
-            Err(redirected) => &mut self[redirected],
-        }
-    }
-}
-
-impl Default for Soup {
-    fn default() -> Self {
-        Soup::new()
-    }
-}
-
-impl Soup {
-    pub fn new() -> Self {
-        Self {
-            arena: Arena::new(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.arena.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.arena.is_empty()
-    }
-
-    pub fn insert(&mut self, node: Node) -> Index {
-        self.arena.insert(Ok(node))
-    }
-
-    /// Cause any access to the `from` index to be redirected to the
-    /// `to` index.
-    pub fn redirect(&mut self, from: Index, to: Index) {
-        self.arena[from] = Err(to);
-    }
-
-    pub fn unit(&mut self, expr: Expr) -> Index {
-        self.insert(Node::unit(expr))
-    }
-
-    pub fn send(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Send(syn::parse_str(ty).unwrap()))
-    }
-
-    pub fn recv(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Recv(syn::parse_str(ty).unwrap()))
-    }
-
-    pub fn type_(&mut self, ty: &str) -> Index {
-        self.unit(Expr::Type(syn::parse_str(ty).unwrap()))
-    }
-
-    /// Follow all redirections of an index.
-    pub fn find(&self, i: Index) -> Index {
-        match self.arena[i] {
-            Ok(_) => i,
-            Err(r) => self.find(r),
-        }
-    }
-
-    pub fn find_shorten(&mut self, i: Index) -> Index {
-        match self.arena[i] {
-            Ok(_) => i,
-            Err(r) => {
-                let s = self.find_shorten(r);
-                self.arena[i] = Err(s);
-                s
-            }
-        }
-    }
-
-    pub fn lower_to_cfg(&mut self, ast: &Ast) -> CfgSlice {
-        match ast {
-            Ast::Recv(ty) => CfgSlice::new(self.unit(Expr::Recv(ty.clone()))),
-            Ast::Send(ty) => CfgSlice::new(self.unit(Expr::Send(ty.clone()))),
-            Ast::Call(callee) => {
-                let callee_node = self.lower_to_cfg(callee).head;
-                CfgSlice::new(self.unit(Expr::Call(callee_node)))
-            }
-            Ast::Split(tx, rx) => {
-                let (tx_node, rx_node) = (self.lower_to_cfg(tx).head, self.lower_to_cfg(rx).head);
-                CfgSlice::new(self.unit(Expr::Split(tx_node, rx_node)))
-            }
-            Ast::Choose(choices) => {
-                let choice_nodes = choices
-                    .iter()
-                    .map(|choice| self.lower_to_cfg(choice).head)
-                    .collect();
-                CfgSlice::new(self.unit(Expr::Choose(choice_nodes)))
-            }
-            Ast::Offer(choices) => {
-                let choice_nodes = choices
-                    .iter()
-                    .map(|choice| self.lower_to_cfg(choice).head)
-                    .collect();
-                CfgSlice::new(self.unit(Expr::Offer(choice_nodes)))
-            }
-            Ast::Loop(maybe_label, body) => {
-                let body_cfg = self.lower_to_cfg(body);
-
-                match self[body_cfg.tail].expr {
-                    Expr::LabeledBreak(_)
-                    | Expr::LabeledContinue(_)
-                    | Expr::IndexedBreak(_)
-                    | Expr::IndexedContinue(_) => {}
-                    _ => {
-                        let continue_ = self.unit(Expr::IndexedContinue(0));
-                        self[body_cfg.tail].next = Some(continue_);
-                    }
-                }
-
-                CfgSlice::new(self.unit(Expr::Loop(maybe_label.clone(), body_cfg.head)))
-            }
-            Ast::Break(Some(label)) => CfgSlice::new(self.unit(Expr::LabeledBreak(label.clone()))),
-            Ast::Break(None) => CfgSlice::new(self.unit(Expr::IndexedBreak(0))),
-            Ast::Continue(Some(label)) => {
-                CfgSlice::new(self.unit(Expr::LabeledContinue(label.clone())))
-            }
-            Ast::Continue(None) => CfgSlice::new(self.unit(Expr::IndexedContinue(0))),
-            Ast::Block(stmts) => {
-                let mut next_head = None;
-                let mut next_tail = None;
-                for stmt in stmts.iter().rev() {
-                    let cfg = self.lower_to_cfg(stmt);
-                    next_tail = next_tail.or(Some(cfg.tail));
-                    self[cfg.tail].next = next_head;
-                    next_head = Some(cfg.head);
-                }
-
-                let head = next_head.unwrap_or_else(|| self.unit(Expr::Done));
-                let tail = next_tail.unwrap_or(head);
-
-                CfgSlice { head, tail }
-            }
-            Ast::Type(s) => CfgSlice::new(self.unit(Expr::Type(s.clone()))),
-        }
-    }
-
-    /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
-    /// nodes they reference and effectively dereferencing the continuations they represent. In
-    /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
-    fn eliminate_breaks_and_labels(&mut self, env: &mut Vec<Scope>, node: Index) {
-        match &self[node].expr {
-            Expr::Recv(_)
-            | Expr::Send(_)
-            | Expr::IndexedContinue(_)
-            | Expr::Done
-            | Expr::Type(_) => {
-                if let Some(next) = self[node].next {
-                    self.eliminate_breaks_and_labels(env, next);
-                }
-            }
-            Expr::Call(callee) => {
-                let callee = *callee;
-                self.eliminate_breaks_and_labels(env, callee);
-                if let Some(next) = self[node].next {
-                    self.eliminate_breaks_and_labels(env, next);
-                }
-            }
-            Expr::Split(tx, rx) => {
-                let (tx, rx) = (*tx, *rx);
-                self.eliminate_breaks_and_labels(env, tx);
-                self.eliminate_breaks_and_labels(env, rx);
-                if let Some(next) = self[node].next {
-                    self.eliminate_breaks_and_labels(env, next);
-                }
-            }
-            Expr::Choose(is) | Expr::Offer(is) => {
-                let is = is.clone(); // pacify borrowck so self isn't borrowed
-                for i in is {
-                    self.eliminate_breaks_and_labels(env, i);
-                }
-            }
-            Expr::Loop(l, i) => {
-                let maybe_next = self[node].next;
-                let i = *i; // pacify borrowck, or else it thinks self is borrowed
-
-                let scope = Scope {
-                    label: l.clone(),
-                    cont: maybe_next.unwrap_or_else(|| self.insert(Node::unit(Expr::Done))),
-                };
-
-                env.push(scope);
-                self.eliminate_breaks_and_labels(env, i);
-                env.pop();
-            }
-            Expr::LabeledContinue(label) => {
-                let labeled_index = env
-                    .iter()
-                    .rev()
-                    .position(|s| s.label.as_ref() == Some(label));
-
-                if let Some(i) = labeled_index {
-                    self[node].expr = Expr::IndexedContinue(i);
-                }
-            }
-            Expr::LabeledBreak(label) => {
-                let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
-
-                if let Some(cont) = labeled_scope.map(|s| s.cont) {
-                    self.redirect(node, cont);
-                }
-            }
-            Expr::IndexedBreak(debruijn_index) => {
-                let cont = env[env.len() - 1 - *debruijn_index as usize].cont;
-                self.redirect(node, cont);
-            }
-        }
-    }
-
-    fn to_session_inner(&self, node_index: Index, env: &mut Vec<Index>) -> Session {
-        let node = &self[node_index];
-        match &node.expr {
-            Expr::Done => Session::Done,
-            Expr::Recv(s) => {
-                let cont = node
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| self.to_session_inner(i, env));
-                Session::Recv(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Send(s) => {
-                let cont = node
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| self.to_session_inner(i, env));
-                Session::Send(s.clone(), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Call(s) => {
-                let callee = if let Expr::Type(ty) = &self[*s].expr {
-                    Session::Type(ty.clone())
-                } else {
-                    self.to_session_inner(*s, env)
-                };
-
-                let cont = node
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| self.to_session_inner(i, env));
-                Session::Call(Box::new(callee), Box::new(cont.unwrap_or(Session::Done)))
-            }
-            Expr::Split(tx, rx) => {
-                let (tx, rx) = (*tx, *rx);
-
-                env.extend(node.next);
-
-                let (tx_sess, rx_sess) = (
-                    self.to_session_inner(tx, env),
-                    self.to_session_inner(rx, env),
-                );
-
-                if node.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Split(Box::new(tx_sess), Box::new(rx_sess))
-            }
-            Expr::Choose(is) => {
-                env.extend(node.next);
-
-                let sessions = is.iter().map(|&i| self.to_session_inner(i, env)).collect();
-
-                if node.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Choose(sessions)
-            }
-            Expr::Offer(is) => {
-                env.extend(node.next);
-
-                let sessions = is.iter().map(|&i| self.to_session_inner(i, env)).collect();
-
-                if node.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Offer(sessions)
-            }
-            Expr::Loop(_, i) => {
-                env.extend(node.next);
-
-                let session = self.to_session_inner(*i, env);
-
-                if node.next.is_some() {
-                    env.pop();
-                }
-
-                Session::Loop(Box::new(session))
-            }
-            Expr::IndexedBreak(_) | Expr::LabeledBreak(_) => {
-                panic!("uneliminated break present in CFG")
-            }
-            Expr::LabeledContinue(_) => panic!("uneliminated labeled continue present in CFG"),
-            Expr::IndexedContinue(i) => {
-                assert!(node.next.is_none(), "continue must be the end of a block");
-                Session::Continue(*i)
-            }
-            Expr::Type(s) => {
-                let maybe_cont = node
-                    .next
-                    .or_else(|| env.last().cloned())
-                    .map(|i| self.to_session_inner(i, env));
-
-                match maybe_cont {
-                    Some(cont) => Session::Then(Box::new(Session::Type(s.clone())), Box::new(cont)),
-                    None => Session::Type(s.clone()),
-                }
-            }
-        }
-    }
-
-    pub fn compile_node_to_session(&mut self, node: Index) -> Session {
-        self.eliminate_breaks_and_labels(&mut Vec::new(), node);
-        self.to_session_inner(node, &mut Vec::new())
-    }
-}
-
 #[derive(Debug, Clone)]
-pub enum Expr {
+enum Ir {
     Done,
     Recv(Type),
     Send(Type),
@@ -431,42 +49,331 @@ pub enum Expr {
     Type(Type),
 }
 
+#[derive(Clone, Debug)]
+pub enum Target {
+    Done,
+    Recv(Type, Rc<Target>),
+    Send(Type, Rc<Target>),
+    Choose(Vec<Target>),
+    Offer(Vec<Target>),
+    Loop(Rc<Target>),
+    Continue(usize),
+    Split(Rc<Target>, Rc<Target>),
+    Call(Rc<Target>, Rc<Target>),
+    Then(Rc<Target>, Rc<Target>),
+    Type(Type),
+}
+
+impl Syntax {
+    pub fn to_session(&self) -> Target {
+        let mut cfg = Cfg::new();
+        let head = self.to_cfg(&mut cfg).0;
+        cfg.eliminate_breaks_and_labels(head);
+        cfg.to_target(head)
+    }
+
+    pub fn recv(ty: &str) -> Self {
+        Syntax::Recv(syn::parse_str(ty).unwrap())
+    }
+
+    pub fn send(ty: &str) -> Self {
+        Syntax::Send(syn::parse_str(ty).unwrap())
+    }
+
+    pub fn call(callee: Syntax) -> Self {
+        Syntax::Call(Box::new(callee))
+    }
+
+    pub fn loop_(label: Option<String>, body: Syntax) -> Self {
+        Syntax::Loop(label, Box::new(body))
+    }
+
+    pub fn type_(ty: &str) -> Self {
+        Syntax::Type(syn::parse_str(ty).unwrap())
+    }
+
+    fn to_cfg(&self, cfg: &mut Cfg) -> (Index, Index) {
+        let node = match self {
+            Syntax::Recv(ty) => cfg.singleton(Ir::Recv(ty.clone())),
+            Syntax::Send(ty) => cfg.singleton(Ir::Send(ty.clone())),
+            Syntax::Break(Some(label)) => cfg.singleton(Ir::LabeledBreak(label.clone())),
+            Syntax::Break(None) => cfg.singleton(Ir::IndexedBreak(0)),
+            Syntax::Continue(Some(label)) => cfg.singleton(Ir::LabeledContinue(label.clone())),
+            Syntax::Continue(None) => cfg.singleton(Ir::IndexedContinue(0)),
+            Syntax::Type(s) => cfg.singleton(Ir::Type(s.clone())),
+            Syntax::Call(callee) => {
+                let callee_node = callee.to_cfg(cfg).0;
+                cfg.singleton(Ir::Call(callee_node))
+            }
+            Syntax::Split(tx, rx) => {
+                let tx_node = tx.to_cfg(cfg).0;
+                let rx_node = rx.to_cfg(cfg).0;
+                cfg.singleton(Ir::Split(tx_node, rx_node))
+            }
+            Syntax::Choose(choices) => {
+                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
+                cfg.singleton(Ir::Choose(choice_nodes))
+            }
+            Syntax::Offer(choices) => {
+                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
+                cfg.singleton(Ir::Offer(choice_nodes))
+            }
+            Syntax::Loop(maybe_label, body) => {
+                let body_cfg = body.to_cfg(cfg);
+
+                match cfg[body_cfg.1].expr {
+                    Ir::LabeledBreak(_)
+                    | Ir::LabeledContinue(_)
+                    | Ir::IndexedBreak(_)
+                    | Ir::IndexedContinue(_) => {}
+                    _ => {
+                        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
+                        cfg[body_cfg.1].next = Some(continue_);
+                    }
+                }
+
+                cfg.singleton(Ir::Loop(maybe_label.clone(), body_cfg.0))
+            }
+            Syntax::Block(stmts) => {
+                let mut next_head = None;
+                let mut next_tail = None;
+                for stmt in stmts.iter().rev() {
+                    let (head, tail) = stmt.to_cfg(cfg);
+                    next_tail = next_tail.or(Some(tail));
+                    cfg[tail].next = next_head;
+                    next_head = Some(head);
+                }
+
+                let head = next_head.unwrap_or_else(|| cfg.singleton(Ir::Done));
+                let tail = next_tail.unwrap_or(head);
+
+                // Only case where we return a differing head and tail, since a `Block` is the only
+                // expression to be compiled into multiple nodes
+                return (head, tail);
+            }
+        };
+
+        (node, node)
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct Scope {
+struct Scope {
     label: Option<String>,
     cont: Index,
 }
 
 #[derive(Debug, Clone)]
-pub struct Node {
-    expr: Expr,
+struct Node {
+    expr: Ir,
     next: Option<Index>,
 }
 
 impl Node {
-    pub fn unit(expr: Expr) -> Self {
+    fn unit(expr: Ir) -> Self {
         Self { expr, next: None }
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Session {
-    Done,
-    Recv(Type, Box<Session>),
-    Send(Type, Box<Session>),
-    Choose(Vec<Session>),
-    Offer(Vec<Session>),
-    Loop(Box<Session>),
-    Continue(usize),
-    Split(Box<Session>, Box<Session>),
-    Call(Box<Session>, Box<Session>),
-    Then(Box<Session>, Box<Session>),
-    Type(Type),
+/// A soup of CFG nodes acting as a context for a single compilation unit.
+#[derive(Debug)]
+struct Cfg {
+    arena: Arena<Result<Node, Index>>,
 }
 
-impl fmt::Display for Session {
+impl ops::Index<Index> for Cfg {
+    type Output = Node;
+
+    fn index(&self, index: Index) -> &Self::Output {
+        match &self.arena[index] {
+            Ok(node) => node,
+            Err(i) => &self[*i],
+        }
+    }
+}
+
+impl ops::IndexMut<Index> for Cfg {
+    fn index_mut(&mut self, index: Index) -> &mut Self::Output {
+        match self.arena[index] {
+            Ok(_) => self.arena[index].as_mut().unwrap(),
+            Err(redirected) => &mut self[redirected],
+        }
+    }
+}
+
+impl Default for Cfg {
+    fn default() -> Self {
+        Cfg::new()
+    }
+}
+
+impl Cfg {
+    fn new() -> Self {
+        Self {
+            arena: Arena::new(),
+        }
+    }
+
+    fn insert(&mut self, node: Node) -> Index {
+        self.arena.insert(Ok(node))
+    }
+
+    /// Cause any access to the `from` index to be redirected to the
+    /// `to` index.
+    fn redirect(&mut self, from: Index, to: Index) {
+        self.arena[from] = Err(to);
+    }
+
+    /// Create a new node containing only this expression with no next-node link.
+    fn singleton(&mut self, expr: Ir) -> Index {
+        self.insert(Node::unit(expr))
+    }
+
+    /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
+    /// nodes they reference and effectively dereferencing the continuations they represent. In
+    /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation`
+    /// nodes.
+    fn eliminate_breaks_and_labels(&mut self, node: Index) {
+        let mut env = Vec::new();
+        eliminate_inner(self, &mut env, node);
+        debug_assert!(
+            env.is_empty(),
+            "mismatched number of push/pop in `eliminate_breaks_and_labels`"
+        );
+
+        fn eliminate_inner(cfg: &mut Cfg, env: &mut Vec<Scope>, node: Index) {
+            match &cfg[node].expr {
+                Ir::Recv(_) | Ir::Send(_) | Ir::IndexedContinue(_) | Ir::Done | Ir::Type(_) => {
+                    if let Some(next) = cfg[node].next {
+                        eliminate_inner(cfg, env, next);
+                    }
+                }
+                Ir::Call(callee) => {
+                    let callee = *callee;
+                    eliminate_inner(cfg, env, callee);
+                    if let Some(next) = cfg[node].next {
+                        eliminate_inner(cfg, env, next);
+                    }
+                }
+                Ir::Split(tx_only, rx_only) => {
+                    let (tx_only, rx_only) = (*tx_only, *rx_only);
+                    eliminate_inner(cfg, env, tx_only);
+                    eliminate_inner(cfg, env, rx_only);
+                    if let Some(next) = cfg[node].next {
+                        eliminate_inner(cfg, env, next);
+                    }
+                }
+                Ir::Choose(choices) | Ir::Offer(choices) => {
+                    let choices = choices.clone(); // pacify borrowck so cfg isn't borrowed
+                    for choice in choices {
+                        eliminate_inner(cfg, env, choice);
+                    }
+
+                    if let Some(next) = cfg[node].next {
+                        eliminate_inner(cfg, env, next);
+                    }
+                }
+                Ir::Loop(label, body) => {
+                    let maybe_next = cfg[node].next;
+                    let body = *body; // pacify borrowck, or else it thinks cfg is borrowed
+
+                    let scope = Scope {
+                        label: label.clone(),
+                        cont: maybe_next.unwrap_or_else(|| cfg.insert(Node::unit(Ir::Done))),
+                    };
+
+                    env.push(scope);
+                    eliminate_inner(cfg, env, body);
+                    env.pop();
+                }
+                Ir::LabeledContinue(label) => {
+                    let labeled_index = env
+                        .iter()
+                        .rev()
+                        .position(|s| s.label.as_ref() == Some(label));
+
+                    if let Some(i) = labeled_index {
+                        cfg[node].expr = Ir::IndexedContinue(i);
+                    }
+                }
+                Ir::LabeledBreak(label) => {
+                    let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
+
+                    if let Some(cont) = labeled_scope.map(|s| s.cont) {
+                        cfg.redirect(node, cont);
+                    }
+                }
+                Ir::IndexedBreak(debruijn_index) => {
+                    let cont = env[env.len() - 1 - *debruijn_index as usize].cont;
+                    cfg.redirect(node, cont);
+                }
+            }
+        }
+    }
+
+    fn to_target_inner(&self, parent_cont: Target, node: Index) -> Target {
+        let node = &self[node];
+        let cont = match node.next {
+            Some(i) => self.to_target_inner(parent_cont, i),
+            None => parent_cont,
+        };
+
+        match &node.expr {
+            Ir::Done => Target::Done,
+            Ir::Recv(t) => Target::Recv(t.clone(), Rc::new(cont)),
+            Ir::Send(t) => Target::Send(t.clone(), Rc::new(cont)),
+            Ir::Call(callee) => {
+                let callee = self.to_target_inner(Target::Done, *callee);
+                Target::Call(Rc::new(callee), Rc::new(cont))
+            }
+            Ir::Split(tx_only, rx_only) => {
+                let (tx_only, rx_only) = (*tx_only, *rx_only);
+                let tx_target = self.to_target_inner(cont.clone(), tx_only);
+                let rx_target = self.to_target_inner(cont, rx_only);
+                Target::Split(Rc::new(tx_target), Rc::new(rx_target))
+            }
+            Ir::Choose(choices) => {
+                let targets = choices
+                    .iter()
+                    .map(|&choice| self.to_target_inner(cont.clone(), choice))
+                    .collect();
+                Target::Choose(targets)
+            }
+            Ir::Offer(choices) => {
+                let targets = choices
+                    .iter()
+                    .map(|&choice| self.to_target_inner(cont.clone(), choice))
+                    .collect();
+                Target::Offer(targets)
+            }
+            Ir::Loop(_, body) => Target::Loop(Rc::new(self.to_target_inner(cont, *body))),
+            Ir::IndexedBreak(_) | Ir::LabeledBreak(_) => {
+                panic!("uneliminated break in CFG")
+            }
+            Ir::LabeledContinue(_) => panic!("uneliminated labeled continue in CFG"),
+            Ir::IndexedContinue(i) => {
+                debug_assert!(node.next.is_none(), "continue must be the end of a block");
+                Target::Continue(*i)
+            }
+            Ir::Type(t) => {
+                // Optimize a little bit by doing the `Then` transform ourselves if the next
+                // continuation is a `Done`.
+                match cont {
+                    Target::Done => Target::Type(t.clone()),
+                    _ => Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont)),
+                }
+            }
+        }
+    }
+
+    fn to_target(&self, node: Index) -> Target {
+        self.to_target_inner(Target::Done, node)
+    }
+}
+
+impl fmt::Display for Target {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Session::*;
+        use Target::*;
         match self {
             Done => write!(f, "Done")?,
             Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s)?,
@@ -515,9 +422,9 @@ impl fmt::Display for Session {
     }
 }
 
-impl ToTokens for Session {
+impl ToTokens for Target {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        use Session::*;
+        use Target::*;
 
         lazy_static! {
             static ref CRATE_NAME: String = proc_macro_crate::crate_name("dialectic")
@@ -555,47 +462,63 @@ impl ToTokens for Session {
 mod tests {
     use super::*;
 
+    impl Cfg {
+        fn send(&mut self, ty: &str) -> Index {
+            self.singleton(Ir::Send(syn::parse_str(ty).unwrap()))
+        }
+
+        fn recv(&mut self, ty: &str) -> Index {
+            self.singleton(Ir::Recv(syn::parse_str(ty).unwrap()))
+        }
+
+        fn type_(&mut self, ty: &str) -> Index {
+            self.singleton(Ir::Type(syn::parse_str(ty).unwrap()))
+        }
+    }
+
     #[test]
     fn tally_client_expr_direct_subst() {
-        let mut soup = Soup::new();
+        let mut soup = Cfg::new();
         let send = soup.send("i64");
         let recv = soup.recv("i64");
-        let continue_ = soup.unit(Expr::IndexedContinue(0));
+        let continue_ = soup.singleton(Ir::IndexedContinue(0));
         soup[send].next = Some(continue_);
-        let break_ = soup.unit(Expr::IndexedBreak(0));
+        let break_ = soup.singleton(Ir::IndexedBreak(0));
         soup[recv].next = Some(break_);
         let choose_opts = vec![send, recv];
-        let choose = soup.unit(Expr::Choose(choose_opts));
-        let client_tally = soup.unit(Expr::Loop(None, choose));
-        let continue1 = soup.unit(Expr::IndexedContinue(1));
+        let choose = soup.singleton(Ir::Choose(choose_opts));
+        let client_tally = soup.singleton(Ir::Loop(None, choose));
+        let continue1 = soup.singleton(Ir::IndexedContinue(1));
         soup[client_tally].next = Some(continue1);
 
-        let break_ = soup.unit(Expr::IndexedBreak(0));
+        let break_ = soup.singleton(Ir::IndexedBreak(0));
         let send = soup.send("Operation");
         soup[send].next = Some(client_tally);
         let choose_opts = vec![break_, send];
-        let choose = soup.unit(Expr::Choose(choose_opts));
-        let client = soup.unit(Expr::Loop(None, choose));
+        let choose = soup.singleton(Ir::Choose(choose_opts));
+        let client = soup.singleton(Ir::Loop(None, choose));
 
-        let s = format!("{}", soup.compile_node_to_session(client));
+        soup.eliminate_breaks_and_labels(client);
+        let s = format!("{}", soup.to_target(client));
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 
     #[test]
     fn tally_client_expr_call() {
-        let mut soup = Soup::new();
-        let break_ = soup.unit(Expr::IndexedBreak(0));
+        let mut soup = Cfg::new();
+        let break_ = soup.singleton(Ir::IndexedBreak(0));
         let send = soup.send("Operation");
         let callee = soup.type_("ClientTally");
-        let call = soup.unit(Expr::Call(callee));
+        let call = soup.singleton(Ir::Call(callee));
         soup[send].next = Some(call);
-        let continue_ = soup.unit(Expr::IndexedContinue(0));
+        let continue_ = soup.singleton(Ir::IndexedContinue(0));
         soup[call].next = Some(continue_);
         let choose_opts = vec![break_, send];
-        let choose = soup.unit(Expr::Choose(choose_opts));
-        let client = soup.unit(Expr::Loop(None, choose));
+        let choose = soup.singleton(Ir::Choose(choose_opts));
+        let client = soup.singleton(Ir::Loop(None, choose));
 
-        let s = format!("{}", soup.compile_node_to_session(client));
+        soup.eliminate_breaks_and_labels(client);
+        let s = format!("{}", soup.to_target(client));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -604,13 +527,13 @@ mod tests {
 
     #[test]
     fn tally_client_expr_call_ast() {
-        let client_ast = Ast::loop_(
+        let client_ast = Syntax::loop_(
             None,
-            Ast::Choose(vec![
-                Ast::Break(None),
-                Ast::Block(vec![
-                    Ast::send("Operation"),
-                    Ast::call(Ast::type_("ClientTally")),
+            Syntax::Choose(vec![
+                Syntax::Break(None),
+                Syntax::Block(vec![
+                    Syntax::send("Operation"),
+                    Syntax::call(Syntax::type_("ClientTally")),
                 ]),
             ]),
         );
@@ -634,7 +557,7 @@ mod tests {
             }
         }";
 
-        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
+        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
         let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
@@ -654,7 +577,7 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
+        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
         let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
@@ -674,7 +597,7 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<Ast>(to_parse).unwrap();
+        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
         let s = format!("{}", ast.to_session());
         assert_eq!(
             s,
@@ -689,7 +612,7 @@ mod tests {
                 recv String;
             ";
 
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
         let s = format!("{}", ast.to_session());
         assert_eq!(s, "Send<String, Recv<String, Done>>");
     }
@@ -701,7 +624,7 @@ mod tests {
                 recv String;
             }";
 
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
         let s = format!("{}", ast.to_session());
         assert_eq!(s, "Send<String, Recv<String, Done>>");
     }
@@ -729,7 +652,7 @@ mod tests {
         let lhs: Type = syn::parse2(
             syn::parse_str::<Invocation>(to_parse)
                 .unwrap()
-                .ast
+                .syntax
                 .to_session()
                 .into_token_stream(),
         )
@@ -766,7 +689,7 @@ mod tests {
                 <- recv String,
             }";
 
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().ast;
+        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
         let s = format!("{}", ast.to_session());
         assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>>");
     }
