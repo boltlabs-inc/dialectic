@@ -35,8 +35,8 @@ pub enum Ast {
 impl Ast {
     pub fn to_session(&self) -> Session {
         let mut soup = Soup::new();
-        let cfg = soup.to_cfg(self);
-        soup.to_session(cfg.head)
+        let cfg = soup.lower_to_cfg(self);
+        soup.compile_node_to_session(cfg.head)
     }
 
     pub fn recv(ty: &str) -> Self {
@@ -101,6 +101,12 @@ impl ops::IndexMut<Index> for Soup {
     }
 }
 
+impl Default for Soup {
+    fn default() -> Self {
+        Soup::new()
+    }
+}
+
 impl Soup {
     pub fn new() -> Self {
         Self {
@@ -110,6 +116,10 @@ impl Soup {
 
     pub fn len(&self) -> usize {
         self.arena.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.arena.is_empty()
     }
 
     pub fn insert(&mut self, node: Node) -> Index {
@@ -157,34 +167,34 @@ impl Soup {
         }
     }
 
-    pub fn to_cfg(&mut self, ast: &Ast) -> CfgSlice {
+    pub fn lower_to_cfg(&mut self, ast: &Ast) -> CfgSlice {
         match ast {
             Ast::Recv(ty) => CfgSlice::new(self.unit(Expr::Recv(ty.clone()))),
             Ast::Send(ty) => CfgSlice::new(self.unit(Expr::Send(ty.clone()))),
             Ast::Call(callee) => {
-                let callee_node = self.to_cfg(callee).head;
+                let callee_node = self.lower_to_cfg(callee).head;
                 CfgSlice::new(self.unit(Expr::Call(callee_node)))
             }
             Ast::Split(tx, rx) => {
-                let (tx_node, rx_node) = (self.to_cfg(tx).head, self.to_cfg(rx).head);
+                let (tx_node, rx_node) = (self.lower_to_cfg(tx).head, self.lower_to_cfg(rx).head);
                 CfgSlice::new(self.unit(Expr::Split(tx_node, rx_node)))
             }
             Ast::Choose(choices) => {
                 let choice_nodes = choices
                     .iter()
-                    .map(|choice| self.to_cfg(choice).head)
+                    .map(|choice| self.lower_to_cfg(choice).head)
                     .collect();
                 CfgSlice::new(self.unit(Expr::Choose(choice_nodes)))
             }
             Ast::Offer(choices) => {
                 let choice_nodes = choices
                     .iter()
-                    .map(|choice| self.to_cfg(choice).head)
+                    .map(|choice| self.lower_to_cfg(choice).head)
                     .collect();
                 CfgSlice::new(self.unit(Expr::Offer(choice_nodes)))
             }
             Ast::Loop(maybe_label, body) => {
-                let body_cfg = self.to_cfg(body);
+                let body_cfg = self.lower_to_cfg(body);
 
                 match self[body_cfg.tail].expr {
                     Expr::LabeledBreak(_)
@@ -209,7 +219,7 @@ impl Soup {
                 let mut next_head = None;
                 let mut next_tail = None;
                 for stmt in stmts.iter().rev() {
-                    let cfg = self.to_cfg(stmt);
+                    let cfg = self.lower_to_cfg(stmt);
                     next_tail = next_tail.or(Some(cfg.tail));
                     self[cfg.tail].next = next_head;
                     next_head = Some(cfg.head);
@@ -398,7 +408,7 @@ impl Soup {
         }
     }
 
-    pub fn to_session(&mut self, node: Index) -> Session {
+    pub fn compile_node_to_session(&mut self, node: Index) -> Session {
         self.eliminate_breaks_and_labels(&mut Vec::new(), node);
         self.to_session_inner(node, &mut Vec::new())
     }
@@ -510,8 +520,8 @@ impl ToTokens for Session {
         use Session::*;
 
         lazy_static! {
-            static ref CRATE_NAME: String =
-                proc_macro_crate::crate_name("dialectic").unwrap_or("dialectic".to_owned());
+            static ref CRATE_NAME: String = proc_macro_crate::crate_name("dialectic")
+                .unwrap_or_else(|_| "dialectic".to_owned());
         }
 
         let c = Ident::new(&**CRATE_NAME, Span::call_site());
@@ -567,7 +577,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        let s = format!("{}", soup.to_session(client));
+        let s = format!("{}", soup.compile_node_to_session(client));
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 
@@ -585,7 +595,7 @@ mod tests {
         let choose = soup.unit(Expr::Choose(choose_opts));
         let client = soup.unit(Expr::Loop(None, choose));
 
-        let s = format!("{}", soup.to_session(client));
+        let s = format!("{}", soup.compile_node_to_session(client));
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
