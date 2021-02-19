@@ -33,7 +33,7 @@ pub use split::*;
 /// other side of the channel. The sealed trait `HasDual` enumerates these types, and provides the
 /// dual of each.
 ///
-/// 💡 In general, you should prefer the [`Session`] trait to the [`HasDual`] trait, since
+/// 💡 In general, you should prefer the [`Session`]() trait to the [`HasDual`] trait, since
 /// [`Session`] also ensures that a given type is a valid session type and provides other
 /// functionality.
 ///
@@ -51,6 +51,8 @@ pub use split::*;
 ///
 /// assert_type_eq_all!(Client, <Server as HasDual>::DualSession);
 /// ```
+///
+/// [`Session`]: trait@crate::Session
 pub trait HasDual: sealed::IsSession + Sized + 'static {
     /// The dual to this session type, i.e. the session type required of the other end of the
     /// channel.
@@ -64,6 +66,8 @@ pub trait HasDual: sealed::IsSession + Sized + 'static {
 /// 💡 In general, you should prefer the [`Session`] trait to the [`Actionable`] trait, since
 /// [`Session`] also ensures that a given type is a valid session type and provides other
 /// functionality.
+///
+/// [`Session`]: trait@crate::Session
 pub trait Actionable: sealed::IsSession {
     /// The next actual channel action, which must be one of [`Send`], [`Recv`], [`Offer`],
     /// [`Choose`], [`Split`], [`Call`], or [`Done`].
@@ -79,6 +83,8 @@ pub trait Actionable: sealed::IsSession {
 /// 💡 In general, you should prefer the [`Session`] trait to the [`Scoped`] trait, since
 /// [`Session`] also ensures that a given type is a valid session type and provides other
 /// functionality.
+///
+/// [`Session`]: trait@crate::Session
 pub trait Scoped<N: Unary = Z>: sealed::IsSession {}
 
 /// In the [`Choose`] and [`Offer`] session types, we provide the ability to choose/offer a list of

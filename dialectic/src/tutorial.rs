@@ -644,6 +644,8 @@ You might now want to...
 - Jump back to the top of **[reference documentation](crate#quick-reference)**?
 
 Thanks for following along, and enjoy!
+
+[`Session`]: trait@crate::Session
 */
 
 // Import the whole crate so the docs above can link appropriately.
