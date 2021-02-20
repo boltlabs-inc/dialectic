@@ -58,6 +58,13 @@ pub enum Syntax {
 }
 
 #[derive(Debug, Clone)]
+struct CfgNode {
+    expr: Ir,
+    next: Option<Index>,
+    span: Span,
+}
+
+#[derive(Debug, Clone)]
 enum Ir {
     Done,
     Recv(Type),
@@ -213,13 +220,6 @@ impl SyntaxNode {
 struct Scope {
     label: Option<String>,
     cont: Index,
-}
-
-#[derive(Debug, Clone)]
-struct CfgNode {
-    expr: Ir,
-    next: Option<Index>,
-    span: Span,
 }
 
 impl CfgNode {
@@ -876,6 +876,34 @@ mod tests {
         assert_eq!(
             error.to_string(),
             CompileError::ContinueOutsideLoop.to_string()
+        );
+    }
+
+    #[test]
+    fn shadowed_label() {
+        let to_parse = "'foo: loop { 'foo: loop {} }";
+        let error = syn::parse_str::<Invocation>(to_parse)
+            .unwrap()
+            .syntax
+            .to_session()
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            CompileError::ShadowedLabel("foo".to_owned()).to_string()
+        );
+    }
+
+    #[test]
+    fn undeclared_label() {
+        let to_parse = "{ continue 'foo; }";
+        let error = syn::parse_str::<Invocation>(to_parse)
+            .unwrap()
+            .syntax
+            .to_session()
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            CompileError::UndeclaredLabel("foo".to_owned()).to_string()
         );
     }
 }
