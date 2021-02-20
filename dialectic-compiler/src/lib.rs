@@ -3,32 +3,57 @@ use {
     proc_macro2::{Span, TokenStream},
     quote::{quote, ToTokens},
     std::{fmt, ops, rc::Rc},
-    syn::{Ident, Type},
+    syn::{spanned::Spanned, Error, Ident, Type},
+    thiserror::Error,
     thunderdome::{Arena, Index},
 };
 
 pub mod parse;
+
+#[derive(Error, Debug, Clone)]
+pub enum CompileError {
+    #[error("label name `'{0}` shadows a label name that is already in scope")]
+    ShadowedLabel(String),
+    #[error("undeclared label `'{0}`")]
+    UndeclaredLabel(String),
+    #[error("cannot `continue` outside of a loop")]
+    ContinueOutsideLoop,
+    #[error("cannot `break` outside of a loop")]
+    BreakOutsideLoop,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpannedCompileError {
+    span: Span,
+    kind: CompileError,
+}
 
 /// A shim for parsing the root level of a macro invocation, so
 /// that a session type may be written as a block w/o an extra
 /// layer of braces.
 #[derive(Debug, Clone)]
 pub struct Invocation {
-    pub syntax: Syntax,
+    pub syntax: SyntaxNode,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyntaxNode {
+    pub expr: Syntax,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub enum Syntax {
     Recv(Type),
     Send(Type),
-    Call(Box<Syntax>),
-    Choose(Vec<Syntax>),
-    Offer(Vec<Syntax>),
-    Split(Box<Syntax>, Box<Syntax>),
-    Loop(Option<String>, Box<Syntax>),
+    Call(Box<SyntaxNode>),
+    Choose(Vec<SyntaxNode>),
+    Offer(Vec<SyntaxNode>),
+    Split(Box<SyntaxNode>, Box<SyntaxNode>),
+    Loop(Option<String>, Box<SyntaxNode>),
     Break(Option<String>),
     Continue(Option<String>),
-    Block(Vec<Syntax>),
+    Block(Vec<SyntaxNode>),
     Type(Type),
 }
 
@@ -47,6 +72,7 @@ enum Ir {
     LabeledBreak(String),
     LabeledContinue(String),
     Type(Type),
+    Error,
 }
 
 #[derive(Clone, Debug)]
@@ -62,16 +88,10 @@ pub enum Target {
     Call(Rc<Target>, Rc<Target>),
     Then(Rc<Target>, Rc<Target>),
     Type(Type),
+    Error,
 }
 
 impl Syntax {
-    pub fn to_session(&self) -> Target {
-        let mut cfg = Cfg::new();
-        let head = self.to_cfg(&mut cfg).0;
-        cfg.eliminate_breaks_and_labels(head);
-        cfg.to_target(head)
-    }
-
     pub fn recv(ty: &str) -> Self {
         Syntax::Recv(syn::parse_str(ty).unwrap())
     }
@@ -80,45 +100,77 @@ impl Syntax {
         Syntax::Send(syn::parse_str(ty).unwrap())
     }
 
-    pub fn call(callee: Syntax) -> Self {
-        Syntax::Call(Box::new(callee))
+    pub fn call(callee: impl Into<SyntaxNode>) -> Self {
+        Syntax::Call(Box::new(callee.into()))
     }
 
-    pub fn loop_(label: Option<String>, body: Syntax) -> Self {
-        Syntax::Loop(label, Box::new(body))
+    pub fn loop_(label: Option<String>, body: impl Into<SyntaxNode>) -> Self {
+        Syntax::Loop(label, Box::new(body.into()))
     }
 
     pub fn type_(ty: &str) -> Self {
         Syntax::Type(syn::parse_str(ty).unwrap())
     }
+}
+
+impl From<Syntax> for SyntaxNode {
+    fn from(expr: Syntax) -> Self {
+        Self {
+            expr,
+            span: Span::call_site(),
+        }
+    }
+}
+
+impl SyntaxNode {
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn to_session(&self) -> Result<Target, Error> {
+        let mut cfg = Cfg::new();
+        let head = self.to_cfg(&mut cfg).0;
+        cfg.eliminate_breaks_and_labels(head);
+        let target = cfg.to_target(head);
+
+        match cfg.drain_errors() {
+            Some(errors) => Err(errors),
+            None => Ok(target),
+        }
+    }
+
+    pub fn new(syntax: Syntax) -> Self {
+        Self::from(syntax)
+    }
 
     fn to_cfg(&self, cfg: &mut Cfg) -> (Index, Index) {
-        let node = match self {
-            Syntax::Recv(ty) => cfg.singleton(Ir::Recv(ty.clone())),
-            Syntax::Send(ty) => cfg.singleton(Ir::Send(ty.clone())),
-            Syntax::Break(Some(label)) => cfg.singleton(Ir::LabeledBreak(label.clone())),
-            Syntax::Break(None) => cfg.singleton(Ir::IndexedBreak(0)),
-            Syntax::Continue(Some(label)) => cfg.singleton(Ir::LabeledContinue(label.clone())),
-            Syntax::Continue(None) => cfg.singleton(Ir::IndexedContinue(0)),
-            Syntax::Type(s) => cfg.singleton(Ir::Type(s.clone())),
-            Syntax::Call(callee) => {
+        use Syntax::*;
+        let node = match &self.expr {
+            Recv(ty) => cfg.spanned(Ir::Recv(ty.clone()), self.span),
+            Send(ty) => cfg.spanned(Ir::Send(ty.clone()), self.span),
+            Break(Some(label)) => cfg.spanned(Ir::LabeledBreak(label.clone()), self.span),
+            Break(None) => cfg.spanned(Ir::IndexedBreak(0), self.span),
+            Continue(Some(label)) => cfg.spanned(Ir::LabeledContinue(label.clone()), self.span),
+            Continue(None) => cfg.spanned(Ir::IndexedContinue(0), self.span),
+            Type(s) => cfg.spanned(Ir::Type(s.clone()), s.span()),
+            Call(callee) => {
                 let callee_node = callee.to_cfg(cfg).0;
-                cfg.singleton(Ir::Call(callee_node))
+                cfg.spanned(Ir::Call(callee_node), self.span)
             }
-            Syntax::Split(tx, rx) => {
+            Split(tx, rx) => {
                 let tx_node = tx.to_cfg(cfg).0;
                 let rx_node = rx.to_cfg(cfg).0;
-                cfg.singleton(Ir::Split(tx_node, rx_node))
+                cfg.spanned(Ir::Split(tx_node, rx_node), self.span)
             }
-            Syntax::Choose(choices) => {
+            Choose(choices) => {
                 let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
-                cfg.singleton(Ir::Choose(choice_nodes))
+                cfg.spanned(Ir::Choose(choice_nodes), self.span)
             }
-            Syntax::Offer(choices) => {
+            Offer(choices) => {
                 let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
-                cfg.singleton(Ir::Offer(choice_nodes))
+                cfg.spanned(Ir::Offer(choice_nodes), self.span)
             }
-            Syntax::Loop(maybe_label, body) => {
+            Loop(maybe_label, body) => {
                 let (head, tail) = body.to_cfg(cfg);
 
                 match cfg[tail].expr {
@@ -132,9 +184,9 @@ impl Syntax {
                     }
                 }
 
-                cfg.singleton(Ir::Loop(maybe_label.clone(), head))
+                cfg.spanned(Ir::Loop(maybe_label.clone(), head), self.span)
             }
-            Syntax::Block(stmts) => {
+            Block(stmts) => {
                 let mut next_head = None;
                 let mut next_tail = None;
                 for stmt in stmts.iter().rev() {
@@ -144,7 +196,7 @@ impl Syntax {
                     next_head = Some(head);
                 }
 
-                let head = next_head.unwrap_or_else(|| cfg.singleton(Ir::Done));
+                let head = next_head.unwrap_or_else(|| cfg.spanned(Ir::Done, self.span));
                 let tail = next_tail.unwrap_or(head);
 
                 // Only case where we return a differing head and tail, since a `Block` is the only
@@ -164,25 +216,39 @@ struct Scope {
 }
 
 #[derive(Debug, Clone)]
-struct Node {
+struct CfgNode {
     expr: Ir,
     next: Option<Index>,
+    span: Span,
 }
 
-impl Node {
-    fn unit(expr: Ir) -> Self {
-        Self { expr, next: None }
+impl CfgNode {
+    fn singleton(expr: Ir) -> Self {
+        Self {
+            expr,
+            next: None,
+            span: Span::call_site(),
+        }
+    }
+
+    fn spanned(expr: Ir, span: Span) -> Self {
+        Self {
+            expr,
+            next: None,
+            span,
+        }
     }
 }
 
 /// A soup of CFG nodes acting as a context for a single compilation unit.
 #[derive(Debug)]
 struct Cfg {
-    arena: Arena<Result<Node, Index>>,
+    arena: Arena<Result<CfgNode, Index>>,
+    errors: Vec<SpannedCompileError>,
 }
 
 impl ops::Index<Index> for Cfg {
-    type Output = Node;
+    type Output = CfgNode;
 
     fn index(&self, index: Index) -> &Self::Output {
         match &self.arena[index] {
@@ -211,10 +277,11 @@ impl Cfg {
     fn new() -> Self {
         Self {
             arena: Arena::new(),
+            errors: Vec::new(),
         }
     }
 
-    fn insert(&mut self, node: Node) -> Index {
+    fn insert(&mut self, node: CfgNode) -> Index {
         self.arena.insert(Ok(node))
     }
 
@@ -224,9 +291,24 @@ impl Cfg {
         self.arena[from] = Err(to);
     }
 
+    /// Turn a node into an error.
+    fn error_at(&mut self, node: Index, kind: CompileError) {
+        let spanned_err = SpannedCompileError {
+            span: self[node].span,
+            kind,
+        };
+        self.errors.push(spanned_err);
+    }
+
     /// Create a new node containing only this expression with no next-node link.
     fn singleton(&mut self, expr: Ir) -> Index {
-        self.insert(Node::unit(expr))
+        self.insert(CfgNode::singleton(expr))
+    }
+
+    /// Create a new node w/ an assigned span containing only this expression with no next-node
+    /// link.
+    fn spanned(&mut self, expr: Ir, span: Span) -> Index {
+        self.insert(CfgNode::spanned(expr, span))
     }
 
     /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
@@ -243,7 +325,7 @@ impl Cfg {
 
         fn eliminate_inner(cfg: &mut Cfg, env: &mut Vec<Scope>, node: Index) {
             match &cfg[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) => {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) | Ir::Error => {
                     if let Some(next) = cfg[node].next {
                         eliminate_inner(cfg, env, next);
                     }
@@ -277,14 +359,18 @@ impl Cfg {
                     let maybe_next = cfg[node].next;
                     let body = *body; // pacify borrowck, or else it thinks cfg is borrowed
 
-                    if env.iter().any(|scope| &scope.label == label) {
-                        todo!("generate ambiguous loop label error");
-                    }
-
                     let scope = Scope {
                         label: label.clone(),
-                        cont: maybe_next.unwrap_or_else(|| cfg.insert(Node::unit(Ir::Done))),
+                        cont: maybe_next
+                            .unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done))),
                     };
+
+                    if scope.label.is_some()
+                        && env.iter().any(|ancestor| ancestor.label == scope.label)
+                    {
+                        let label_name = scope.label.as_ref().unwrap().clone();
+                        cfg.error_at(node, CompileError::ShadowedLabel(label_name));
+                    }
 
                     env.push(scope);
                     eliminate_inner(cfg, env, body);
@@ -299,7 +385,14 @@ impl Cfg {
                     if let Some(i) = labeled_index {
                         cfg[node].expr = Ir::IndexedContinue(i);
                     } else {
-                        todo!("generate missing label error");
+                        let compile_error = CompileError::UndeclaredLabel(label.clone());
+                        cfg.error_at(node, compile_error);
+
+                        // Similar to the break elimination cases, we want to eliminate this even
+                        // though we can't figure out the exact continuation of it so that we don't
+                        // blow up when lowering to the target language. We can do this by just
+                        // replacing it with an `Ir::Error` node.
+                        cfg[node].expr = Ir::Error;
                     }
                 }
                 Ir::LabeledBreak(label) => {
@@ -308,7 +401,13 @@ impl Cfg {
                     if let Some(cont) = labeled_scope.map(|s| s.cont) {
                         cfg.redirect(node, cont);
                     } else {
-                        todo!("generate missing label error");
+                        let compile_error = CompileError::UndeclaredLabel(label.clone());
+                        cfg.error_at(node, compile_error);
+
+                        // Eliminate the break, but replace it with an error node instead. This way,
+                        // the CFG can still get by conversion to a session type without panicking
+                        // on an uneliminated break.
+                        cfg[node].expr = Ir::Error;
                     }
                 }
                 Ir::IndexedContinue(debruijn_index) => {
@@ -325,19 +424,21 @@ impl Cfg {
                     // make this pass idempotent. However, as the architecture of the compiler is
                     // currently, this should never happen.
                     if *debruijn_index >= env.len() {
-                        todo!("generate out-of-scope error (you wrote a continue where there is no loop)");
+                        cfg.error_at(node, CompileError::ContinueOutsideLoop);
                     }
                 }
                 Ir::IndexedBreak(debruijn_index) => {
                     // The same caveats as in the above `IndexedContinue` case also apply to the
                     // `IndexedBreak` variant.
-                    let cont = match env.get(env.len() - 1 - *debruijn_index as usize) {
-                        Some(scope) => scope.cont,
-                        None => todo!(
-                            "generate out-of-scope error (you wrote a break where there is no loop)"
-                        ),
-                    };
-                    cfg.redirect(node, cont);
+                    if *debruijn_index >= env.len() {
+                        cfg.error_at(node, CompileError::BreakOutsideLoop);
+
+                        // See rationale for this same construct in `Ir::LabeledBreak` arm.
+                        cfg[node].expr = Ir::Error;
+                    } else {
+                        let cont = env[env.len() - 1 - *debruijn_index].cont;
+                        cfg.redirect(node, cont);
+                    }
                 }
             }
         }
@@ -395,11 +496,27 @@ impl Cfg {
                     _ => Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont)),
                 }
             }
+            Ir::Error => match cont {
+                Target::Done => Target::Error,
+                _ => Target::Then(Rc::new(Target::Error), Rc::new(cont)),
+            },
         }
     }
 
     fn to_target(&self, node: Index) -> Target {
         self.to_target_inner(Target::Done, node)
+    }
+
+    fn drain_errors(&mut self) -> Option<syn::Error> {
+        let mut maybe_error = None;
+        for reported_error in self.errors.drain(..) {
+            let new_error = Error::new(reported_error.span, reported_error.kind.to_string());
+            match maybe_error.as_mut() {
+                None => maybe_error = Some(new_error),
+                Some(accumulated_errors) => accumulated_errors.combine(new_error),
+            }
+        }
+        maybe_error
     }
 }
 
@@ -449,6 +566,7 @@ impl fmt::Display for Target {
                 }
             }
             Type(s) => write!(f, "{}", s.to_token_stream())?,
+            Error => write!(f, "!")?,
         }
         Ok(())
     }
@@ -486,6 +604,7 @@ impl ToTokens for Target {
                 }
             }
             Type(s) => quote! { #s }.to_tokens(tokens),
+            Error => quote! { ! }.to_tokens(tokens),
         }
     }
 }
@@ -559,18 +678,23 @@ mod tests {
 
     #[test]
     fn tally_client_expr_call_ast() {
-        let client_ast = Syntax::loop_(
+        let client_ast: SyntaxNode = Syntax::Loop(
             None,
-            Syntax::Choose(vec![
-                Syntax::Break(None),
-                Syntax::Block(vec![
-                    Syntax::send("Operation"),
-                    Syntax::call(Syntax::type_("ClientTally")),
-                ]),
-            ]),
-        );
+            Box::new(
+                Syntax::Choose(vec![
+                    Syntax::Break(None).into(),
+                    Syntax::Block(vec![
+                        Syntax::send("Operation").into(),
+                        Syntax::call(Syntax::type_("ClientTally")).into(),
+                    ])
+                    .into(),
+                ])
+                .into(),
+            ),
+        )
+        .into();
 
-        let s = format!("{}", client_ast.to_session());
+        let s = format!("{}", client_ast.to_session().unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -589,8 +713,8 @@ mod tests {
             }
         }";
 
-        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session());
+        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -609,8 +733,8 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session());
+        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -629,8 +753,8 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<Syntax>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session());
+        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue>>::Combined>)>>"
@@ -645,7 +769,7 @@ mod tests {
             ";
 
         let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session());
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(s, "Send<String, Recv<String, Done>>");
     }
 
@@ -657,7 +781,7 @@ mod tests {
             }";
 
         let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session());
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(s, "Send<String, Recv<String, Done>>");
     }
 
@@ -686,6 +810,7 @@ mod tests {
                 .unwrap()
                 .syntax
                 .to_session()
+                .unwrap()
                 .into_token_stream(),
         )
         .unwrap();
@@ -722,7 +847,35 @@ mod tests {
             }";
 
         let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session());
+        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>>");
+    }
+
+    #[test]
+    fn simple_break_outside_of_loop() {
+        let to_parse = "break";
+        let error = syn::parse_str::<Invocation>(to_parse)
+            .unwrap()
+            .syntax
+            .to_session()
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            CompileError::BreakOutsideLoop.to_string()
+        );
+    }
+
+    #[test]
+    fn simple_continue_outside_of_loop() {
+        let to_parse = "continue";
+        let error = syn::parse_str::<Invocation>(to_parse)
+            .unwrap()
+            .syntax
+            .to_session()
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            CompileError::ContinueOutsideLoop.to_string()
+        );
     }
 }
