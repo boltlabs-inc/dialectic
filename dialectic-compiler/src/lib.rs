@@ -3,7 +3,7 @@ use {
     proc_macro2::{Span, TokenStream},
     quote::{quote, ToTokens},
     std::{fmt, ops, rc::Rc},
-    syn::{spanned::Spanned, Error, Ident, Type},
+    syn::{Error, Ident, Type},
     thiserror::Error,
     thunderdome::{Arena, Index},
 };
@@ -22,10 +22,19 @@ pub enum CompileError {
     BreakOutsideLoop,
 }
 
-#[derive(Debug, Clone)]
-pub struct SpannedCompileError {
-    span: Span,
-    kind: CompileError,
+#[derive(Debug, Clone, Copy)]
+pub struct Spanned<T> {
+    pub inner: T,
+    pub span: Span,
+}
+
+impl<T> From<T> for Spanned<T> {
+    fn from(inner: T) -> Self {
+        Self {
+            inner,
+            span: Span::call_site(),
+        }
+    }
 }
 
 /// A shim for parsing the root level of a macro invocation, so
@@ -33,27 +42,21 @@ pub struct SpannedCompileError {
 /// layer of braces.
 #[derive(Debug, Clone)]
 pub struct Invocation {
-    pub syntax: SyntaxNode,
-}
-
-#[derive(Debug, Clone)]
-pub struct SyntaxNode {
-    pub expr: Syntax,
-    pub span: Span,
+    pub syntax: Spanned<Syntax>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Syntax {
     Recv(Type),
     Send(Type),
-    Call(Box<SyntaxNode>),
-    Choose(Vec<SyntaxNode>),
-    Offer(Vec<SyntaxNode>),
-    Split(Box<SyntaxNode>, Box<SyntaxNode>),
-    Loop(Option<String>, Box<SyntaxNode>),
+    Call(Box<Spanned<Syntax>>),
+    Choose(Vec<Spanned<Syntax>>),
+    Offer(Vec<Spanned<Syntax>>),
+    Split(Box<Spanned<Syntax>>, Box<Spanned<Syntax>>),
+    Loop(Option<String>, Box<Spanned<Syntax>>),
     Break(Option<String>),
     Continue(Option<String>),
-    Block(Vec<SyntaxNode>),
+    Block(Vec<Spanned<Syntax>>),
     Type(Type),
 }
 
@@ -107,11 +110,11 @@ impl Syntax {
         Syntax::Send(syn::parse_str(ty).unwrap())
     }
 
-    pub fn call(callee: impl Into<SyntaxNode>) -> Self {
+    pub fn call(callee: impl Into<Spanned<Syntax>>) -> Self {
         Syntax::Call(Box::new(callee.into()))
     }
 
-    pub fn loop_(label: Option<String>, body: impl Into<SyntaxNode>) -> Self {
+    pub fn loop_(label: Option<String>, body: impl Into<Spanned<Syntax>>) -> Self {
         Syntax::Loop(label, Box::new(body.into()))
     }
 
@@ -120,16 +123,7 @@ impl Syntax {
     }
 }
 
-impl From<Syntax> for SyntaxNode {
-    fn from(expr: Syntax) -> Self {
-        Self {
-            expr,
-            span: Span::call_site(),
-        }
-    }
-}
-
-impl SyntaxNode {
+impl Spanned<Syntax> {
     pub fn span(&self) -> Span {
         self.span
     }
@@ -151,8 +145,8 @@ impl SyntaxNode {
     }
 
     fn to_cfg(&self, cfg: &mut Cfg) -> (Index, Index) {
-        use Syntax::*;
-        let node = match &self.expr {
+        use {syn::spanned::Spanned, Syntax::*};
+        let node = match &self.inner {
             Recv(ty) => cfg.spanned(Ir::Recv(ty.clone()), self.span),
             Send(ty) => cfg.spanned(Ir::Send(ty.clone()), self.span),
             Break(Some(label)) => cfg.spanned(Ir::LabeledBreak(label.clone()), self.span),
@@ -244,7 +238,7 @@ impl CfgNode {
 #[derive(Debug)]
 struct Cfg {
     arena: Arena<Result<CfgNode, Index>>,
-    errors: Vec<SpannedCompileError>,
+    errors: Vec<Spanned<CompileError>>,
 }
 
 impl ops::Index<Index> for Cfg {
@@ -293,9 +287,9 @@ impl Cfg {
 
     /// Turn a node into an error.
     fn error_at(&mut self, node: Index, kind: CompileError) {
-        let spanned_err = SpannedCompileError {
+        let spanned_err = Spanned {
             span: self[node].span,
-            kind,
+            inner: kind,
         };
         self.errors.push(spanned_err);
     }
@@ -510,7 +504,7 @@ impl Cfg {
     fn drain_errors(&mut self) -> Option<syn::Error> {
         let mut maybe_error = None;
         for reported_error in self.errors.drain(..) {
-            let new_error = Error::new(reported_error.span, reported_error.kind.to_string());
+            let new_error = Error::new(reported_error.span, reported_error.inner.to_string());
             match maybe_error.as_mut() {
                 None => maybe_error = Some(new_error),
                 Some(accumulated_errors) => accumulated_errors.combine(new_error),
@@ -678,7 +672,7 @@ mod tests {
 
     #[test]
     fn tally_client_expr_call_ast() {
-        let client_ast: SyntaxNode = Syntax::Loop(
+        let client_ast: Spanned<Syntax> = Syntax::Loop(
             None,
             Box::new(
                 Syntax::Choose(vec![
@@ -713,7 +707,7 @@ mod tests {
             }
         }";
 
-        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
         let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
@@ -733,7 +727,7 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
         let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
@@ -753,7 +747,7 @@ mod tests {
                 }
             }";
 
-        let ast = syn::parse_str::<SyntaxNode>(to_parse).unwrap();
+        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
         let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(
             s,
