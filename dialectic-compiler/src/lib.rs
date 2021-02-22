@@ -2,7 +2,7 @@ use {
     lazy_static::lazy_static,
     proc_macro2::{Span, TokenStream},
     quote::{quote, ToTokens},
-    std::{fmt, ops, rc::Rc},
+    std::{fmt, mem, ops, rc::Rc},
     syn::{Error, Ident, Type},
     thiserror::Error,
     thunderdome::{Arena, Index},
@@ -82,7 +82,7 @@ enum Ir {
     LabeledBreak(String),
     LabeledContinue(String),
     Type(Type),
-    Error,
+    Error(CompileError, Option<Index>),
 }
 
 #[derive(Clone, Debug)]
@@ -98,7 +98,6 @@ pub enum Target {
     Call(Rc<Target>, Rc<Target>),
     Then(Rc<Target>, Rc<Target>),
     Type(Type),
-    Error,
 }
 
 impl Syntax {
@@ -132,12 +131,7 @@ impl Spanned<Syntax> {
         let mut cfg = Cfg::new();
         let head = self.to_cfg(&mut cfg).0;
         cfg.eliminate_breaks_and_labels(head);
-        let target = cfg.to_target(head);
-
-        match cfg.drain_errors() {
-            Some(errors) => Err(errors),
-            None => Ok(target),
-        }
+        cfg.to_target(head)
     }
 
     pub fn new(syntax: Syntax) -> Self {
@@ -234,11 +228,10 @@ impl CfgNode {
     }
 }
 
-/// A soup of CFG nodes acting as a context for a single compilation unit.
+/// A cfg of CFG nodes acting as a context for a single compilation unit.
 #[derive(Debug)]
 struct Cfg {
     arena: Arena<Result<CfgNode, Index>>,
-    errors: Vec<Spanned<CompileError>>,
 }
 
 impl ops::Index<Index> for Cfg {
@@ -271,7 +264,6 @@ impl Cfg {
     fn new() -> Self {
         Self {
             arena: Arena::new(),
-            errors: Vec::new(),
         }
     }
 
@@ -285,13 +277,26 @@ impl Cfg {
         self.arena[from] = Err(to);
     }
 
-    /// Turn a node into an error.
-    fn error_at(&mut self, node: Index, kind: CompileError) {
-        let spanned_err = Spanned {
-            span: self[node].span,
-            inner: kind,
+    /// Insert an `Error` node as a shim.
+    fn insert_error_at(&mut self, node: Index, kind: CompileError) {
+        // Temporarily move the body out of the node.
+        let (child, span) = {
+            let mut_node = &mut self[node];
+            let child = mem::replace(&mut mut_node.expr, Ir::Done);
+            let span = mut_node.span;
+            (child, span)
         };
-        self.errors.push(spanned_err);
+
+        let new_child = self.insert(CfgNode::spanned(child, span));
+        self[node].expr = Ir::Error(kind, Some(new_child));
+    }
+
+    /// Replace the given node with an error node. This is useful when the node
+    /// in question is malformed such that it will cause an assertion failure or
+    /// additional spurious error further down the compilation process, and
+    /// removing it is necessary in order to try and generate any more errors.
+    fn replace_error_at(&mut self, node: Index, kind: CompileError) {
+        self[node].expr = Ir::Error(kind, None);
     }
 
     /// Create a new node containing only this expression with no next-node link.
@@ -319,14 +324,14 @@ impl Cfg {
 
         fn eliminate_inner(cfg: &mut Cfg, env: &mut Vec<Scope>, node: Index) {
             match &cfg[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) | Ir::Error => {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) | Ir::Error(_, None) => {
                     if let Some(next) = cfg[node].next {
                         eliminate_inner(cfg, env, next);
                     }
                 }
-                Ir::Call(callee) => {
-                    let callee = *callee;
-                    eliminate_inner(cfg, env, callee);
+                Ir::Call(child) | Ir::Error(_, Some(child)) => {
+                    let child = *child;
+                    eliminate_inner(cfg, env, child);
                     if let Some(next) = cfg[node].next {
                         eliminate_inner(cfg, env, next);
                     }
@@ -363,7 +368,7 @@ impl Cfg {
                         && env.iter().any(|ancestor| ancestor.label == scope.label)
                     {
                         let label_name = scope.label.as_ref().unwrap().clone();
-                        cfg.error_at(node, CompileError::ShadowedLabel(label_name));
+                        cfg.insert_error_at(node, CompileError::ShadowedLabel(label_name));
                     }
 
                     env.push(scope);
@@ -380,13 +385,12 @@ impl Cfg {
                         cfg[node].expr = Ir::IndexedContinue(i);
                     } else {
                         let compile_error = CompileError::UndeclaredLabel(label.clone());
-                        cfg.error_at(node, compile_error);
 
                         // Similar to the break elimination cases, we want to eliminate this even
                         // though we can't figure out the exact continuation of it so that we don't
                         // blow up when lowering to the target language. We can do this by just
                         // replacing it with an `Ir::Error` node.
-                        cfg[node].expr = Ir::Error;
+                        cfg.replace_error_at(node, compile_error);
                     }
                 }
                 Ir::LabeledBreak(label) => {
@@ -396,12 +400,11 @@ impl Cfg {
                         cfg.redirect(node, cont);
                     } else {
                         let compile_error = CompileError::UndeclaredLabel(label.clone());
-                        cfg.error_at(node, compile_error);
 
                         // Eliminate the break, but replace it with an error node instead. This way,
                         // the CFG can still get by conversion to a session type without panicking
                         // on an uneliminated break.
-                        cfg[node].expr = Ir::Error;
+                        cfg.replace_error_at(node, compile_error);
                     }
                 }
                 Ir::IndexedContinue(debruijn_index) => {
@@ -418,17 +421,17 @@ impl Cfg {
                     // make this pass idempotent. However, as the architecture of the compiler is
                     // currently, this should never happen.
                     if *debruijn_index >= env.len() {
-                        cfg.error_at(node, CompileError::ContinueOutsideLoop);
+                        // This could be a `replace_error_at`, but we can use `insert` here because
+                        // this won't blow up later.
+                        cfg.insert_error_at(node, CompileError::ContinueOutsideLoop);
                     }
                 }
                 Ir::IndexedBreak(debruijn_index) => {
                     // The same caveats as in the above `IndexedContinue` case also apply to the
                     // `IndexedBreak` variant.
                     if *debruijn_index >= env.len() {
-                        cfg.error_at(node, CompileError::BreakOutsideLoop);
-
                         // See rationale for this same construct in `Ir::LabeledBreak` arm.
-                        cfg[node].expr = Ir::Error;
+                        cfg.replace_error_at(node, CompileError::BreakOutsideLoop);
                     } else {
                         let cont = env[env.len() - 1 - *debruijn_index].cont;
                         cfg.redirect(node, cont);
@@ -438,10 +441,15 @@ impl Cfg {
         }
     }
 
-    fn to_target_inner(&self, parent_cont: Target, node: Index) -> Target {
+    fn to_target_inner(
+        &self,
+        errors: &mut Vec<Spanned<CompileError>>,
+        parent_cont: Target,
+        node: Index,
+    ) -> Target {
         let node = &self[node];
         let cont = match node.next {
-            Some(i) => self.to_target_inner(parent_cont, i),
+            Some(i) => self.to_target_inner(errors, parent_cont, i),
             None => parent_cont,
         };
 
@@ -450,30 +458,30 @@ impl Cfg {
             Ir::Recv(t) => Target::Recv(t.clone(), Rc::new(cont)),
             Ir::Send(t) => Target::Send(t.clone(), Rc::new(cont)),
             Ir::Call(callee) => {
-                let callee = self.to_target_inner(Target::Done, *callee);
+                let callee = self.to_target_inner(errors, Target::Done, *callee);
                 Target::Call(Rc::new(callee), Rc::new(cont))
             }
             Ir::Split(tx_only, rx_only) => {
                 let (tx_only, rx_only) = (*tx_only, *rx_only);
-                let tx_target = self.to_target_inner(cont.clone(), tx_only);
-                let rx_target = self.to_target_inner(cont, rx_only);
+                let tx_target = self.to_target_inner(errors, cont.clone(), tx_only);
+                let rx_target = self.to_target_inner(errors, cont, rx_only);
                 Target::Split(Rc::new(tx_target), Rc::new(rx_target))
             }
             Ir::Choose(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(cont.clone(), choice))
+                    .map(|&choice| self.to_target_inner(errors, cont.clone(), choice))
                     .collect();
                 Target::Choose(targets)
             }
             Ir::Offer(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(cont.clone(), choice))
+                    .map(|&choice| self.to_target_inner(errors, cont.clone(), choice))
                     .collect();
                 Target::Offer(targets)
             }
-            Ir::Loop(_, body) => Target::Loop(Rc::new(self.to_target_inner(cont, *body))),
+            Ir::Loop(_, body) => Target::Loop(Rc::new(self.to_target_inner(errors, cont, *body))),
             Ir::IndexedBreak(_) | Ir::LabeledBreak(_) => {
                 panic!("uneliminated break in CFG")
             }
@@ -490,27 +498,39 @@ impl Cfg {
                     _ => Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont)),
                 }
             }
-            Ir::Error => match cont {
-                Target::Done => Target::Error,
-                _ => Target::Then(Rc::new(Target::Error), Rc::new(cont)),
-            },
+            Ir::Error(error, maybe_child) => {
+                let spanned_error = Spanned {
+                    inner: error.clone(),
+                    span: node.span,
+                };
+
+                errors.push(spanned_error);
+
+                match *maybe_child {
+                    Some(child) => self.to_target_inner(errors, cont, child),
+                    None => cont,
+                }
+            }
         }
     }
 
-    fn to_target(&self, node: Index) -> Target {
-        self.to_target_inner(Target::Done, node)
-    }
+    fn to_target(&self, node: Index) -> Result<Target, Error> {
+        let mut errors = Vec::new();
+        let output = self.to_target_inner(&mut errors, Target::Done, node);
 
-    fn drain_errors(&mut self) -> Option<syn::Error> {
         let mut maybe_error = None;
-        for reported_error in self.errors.drain(..) {
+        for reported_error in errors.drain(..) {
             let new_error = Error::new(reported_error.span, reported_error.inner.to_string());
             match maybe_error.as_mut() {
                 None => maybe_error = Some(new_error),
                 Some(accumulated_errors) => accumulated_errors.combine(new_error),
             }
         }
-        maybe_error
+
+        match maybe_error {
+            Some(error) => Err(error),
+            None => Ok(output),
+        }
     }
 }
 
@@ -560,7 +580,6 @@ impl fmt::Display for Target {
                 }
             }
             Type(s) => write!(f, "{}", s.to_token_stream())?,
-            Error => write!(f, "!")?,
         }
         Ok(())
     }
@@ -598,7 +617,6 @@ impl ToTokens for Target {
                 }
             }
             Type(s) => quote! { #s }.to_tokens(tokens),
-            Error => quote! { ! }.to_tokens(tokens),
         }
     }
 }
@@ -623,47 +641,47 @@ mod tests {
 
     #[test]
     fn tally_client_expr_direct_subst() {
-        let mut soup = Cfg::new();
-        let send = soup.send("i64");
-        let recv = soup.recv("i64");
-        let continue_ = soup.singleton(Ir::IndexedContinue(0));
-        soup[send].next = Some(continue_);
-        let break_ = soup.singleton(Ir::IndexedBreak(0));
-        soup[recv].next = Some(break_);
+        let mut cfg = Cfg::new();
+        let send = cfg.send("i64");
+        let recv = cfg.recv("i64");
+        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
+        cfg[send].next = Some(continue_);
+        let break_ = cfg.singleton(Ir::IndexedBreak(0));
+        cfg[recv].next = Some(break_);
         let choose_opts = vec![send, recv];
-        let choose = soup.singleton(Ir::Choose(choose_opts));
-        let client_tally = soup.singleton(Ir::Loop(None, choose));
-        let continue1 = soup.singleton(Ir::IndexedContinue(1));
-        soup[client_tally].next = Some(continue1);
+        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let client_tally = cfg.singleton(Ir::Loop(None, choose));
+        let continue1 = cfg.singleton(Ir::IndexedContinue(1));
+        cfg[client_tally].next = Some(continue1);
 
-        let break_ = soup.singleton(Ir::IndexedBreak(0));
-        let send = soup.send("Operation");
-        soup[send].next = Some(client_tally);
+        let break_ = cfg.singleton(Ir::IndexedBreak(0));
+        let send = cfg.send("Operation");
+        cfg[send].next = Some(client_tally);
         let choose_opts = vec![break_, send];
-        let choose = soup.singleton(Ir::Choose(choose_opts));
-        let client = soup.singleton(Ir::Loop(None, choose));
+        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let client = cfg.singleton(Ir::Loop(None, choose));
 
-        soup.eliminate_breaks_and_labels(client);
-        let s = format!("{}", soup.to_target(client));
+        cfg.eliminate_breaks_and_labels(client);
+        let s = format!("{}", cfg.to_target(client).unwrap());
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 
     #[test]
     fn tally_client_expr_call() {
-        let mut soup = Cfg::new();
-        let break_ = soup.singleton(Ir::IndexedBreak(0));
-        let send = soup.send("Operation");
-        let callee = soup.type_("ClientTally");
-        let call = soup.singleton(Ir::Call(callee));
-        soup[send].next = Some(call);
-        let continue_ = soup.singleton(Ir::IndexedContinue(0));
-        soup[call].next = Some(continue_);
+        let mut cfg = Cfg::new();
+        let break_ = cfg.singleton(Ir::IndexedBreak(0));
+        let send = cfg.send("Operation");
+        let callee = cfg.type_("ClientTally");
+        let call = cfg.singleton(Ir::Call(callee));
+        cfg[send].next = Some(call);
+        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
+        cfg[call].next = Some(continue_);
         let choose_opts = vec![break_, send];
-        let choose = soup.singleton(Ir::Choose(choose_opts));
-        let client = soup.singleton(Ir::Loop(None, choose));
+        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let client = cfg.singleton(Ir::Loop(None, choose));
 
-        soup.eliminate_breaks_and_labels(client);
-        let s = format!("{}", soup.to_target(client));
+        cfg.eliminate_breaks_and_labels(client);
+        let s = format!("{}", cfg.to_target(client).unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
