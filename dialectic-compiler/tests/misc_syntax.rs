@@ -37,6 +37,24 @@ fn basic_split() {
 }
 
 #[test]
+fn continued_split() {
+    let to_parse = "{
+            split {
+                -> send String,
+                <- recv String,
+            };
+            send bool;
+        }";
+
+    let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
+    let s = format!("{}", ast.to_session().unwrap());
+    assert_eq!(
+        s,
+        "Split<Send<String, Done>, Recv<String, Done>, Send<bool, Done>>"
+    );
+}
+
+#[test]
 fn simple_break_outside_of_loop() {
     let to_parse = "break";
     let error = syn::parse_str::<Invocation>(to_parse)
