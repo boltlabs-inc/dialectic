@@ -1,6 +1,10 @@
 extern crate proc_macro;
 
-use {proc_macro::TokenStream, quote::ToTokens, syn::parse_macro_input};
+use {
+    proc_macro::TokenStream,
+    quote::{quote, ToTokens},
+    syn::parse_macro_input,
+};
 
 #[proc_macro]
 #[allow(non_snake_case)]
@@ -11,6 +15,10 @@ pub fn Session(input: TokenStream) -> TokenStream {
 
     match result {
         Ok(compiled) => compiled.to_token_stream().into(),
-        Err(error) => error.to_compile_error().into(),
+        Err(error) => {
+            let compile_errors = error.to_compile_error();
+            let quoted = quote! { [(); { #compile_errors 0 }] };
+            quoted.into()
+        }
     }
 }
