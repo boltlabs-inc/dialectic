@@ -355,14 +355,13 @@ impl Cfg {
                     }
                 }
                 Ir::Loop(label, body) => {
-                    let maybe_next = cfg[node].next;
+                    let label = label.clone();
                     let body = *body; // pacify borrowck, or else it thinks cfg is borrowed
 
-                    let scope = Scope {
-                        label: label.clone(),
-                        cont: maybe_next
-                            .unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done))),
-                    };
+                    let maybe_next = cfg[node].next;
+                    let cont =
+                        maybe_next.unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done)));
+                    let scope = Scope { label, cont };
 
                     if scope.label.is_some()
                         && env.iter().any(|ancestor| ancestor.label == scope.label)
@@ -374,6 +373,8 @@ impl Cfg {
                     env.push(scope);
                     eliminate_inner(cfg, env, body);
                     env.pop();
+
+                    eliminate_inner(cfg, env, cont);
                 }
                 Ir::LabeledContinue(label) => {
                     let labeled_index = env
@@ -646,13 +647,11 @@ mod tests {
         let recv = cfg.recv("i64");
         let continue_ = cfg.singleton(Ir::IndexedContinue(0));
         cfg[send].next = Some(continue_);
-        let break_ = cfg.singleton(Ir::IndexedBreak(0));
-        cfg[recv].next = Some(break_);
+        let continue1 = cfg.singleton(Ir::IndexedContinue(1));
+        cfg[recv].next = Some(continue1);
         let choose_opts = vec![send, recv];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
         let client_tally = cfg.singleton(Ir::Loop(None, choose));
-        let continue1 = cfg.singleton(Ir::IndexedContinue(1));
-        cfg[client_tally].next = Some(continue1);
 
         let break_ = cfg.singleton(Ir::IndexedBreak(0));
         let send = cfg.send("Operation");
