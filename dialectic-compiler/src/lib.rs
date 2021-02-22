@@ -20,6 +20,10 @@ pub enum CompileError {
     ContinueOutsideLoop,
     #[error("cannot `break` outside of a loop")]
     BreakOutsideLoop,
+    #[error("any code following this statement is unreachable")]
+    FollowingCodeUnreachable,
+    #[error("unreachable statement")]
+    UnreachableStatement,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -272,9 +276,22 @@ impl Cfg {
     }
 
     /// Cause any access to the `from` index to be redirected to the
-    /// `to` index.
+    /// `to` index, unless the `from` index refers to an error. In
+    /// the case that the `from` index refers to an error, we wish to
+    /// preserve the error, and we instead redirect the already redirected
+    /// index inside the `Error`, or assign it if unassigned.
     fn redirect(&mut self, from: Index, to: Index) {
-        self.arena[from] = Err(to);
+        match &mut self[from].expr {
+            Ir::Error(_, Some(child)) => {
+                let child = *child;
+                self.redirect(child, to);
+            }
+            Ir::Error(_, maybe_child @ None) => {
+                *maybe_child = Some(to);
+            }
+            // TODO: follow redirects?
+            _ => self.arena[from] = Err(to),
+        }
     }
 
     /// Insert an `Error` node as a shim.
@@ -296,7 +313,11 @@ impl Cfg {
     /// additional spurious error further down the compilation process, and
     /// removing it is necessary in order to try and generate any more errors.
     fn replace_error_at(&mut self, node: Index, kind: CompileError) {
-        self[node].expr = Ir::Error(kind, None);
+        if let Ir::Error(_, _) = self[node].expr {
+            self.insert_error_at(node, kind);
+        } else {
+            self[node].expr = Ir::Error(kind, None);
+        }
     }
 
     /// Create a new node containing only this expression with no next-node link.
@@ -393,14 +414,29 @@ impl Cfg {
                         // replacing it with an `Ir::Error` node.
                         cfg.replace_error_at(node, compile_error);
                     }
+
+                    if let Some(next) = cfg[node].next {
+                        // If this continue statement has a next node, it means it's effectively
+                        // not at the end of a block, and there's dead code, which is not something
+                        // we want to accept.
+                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
+                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
+                    }
                 }
                 Ir::LabeledBreak(label) => {
                     let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
+                    let label = label.clone();
+
+                    if let Some(next) = cfg[node].next {
+                        // Same rationale as `LabeledContinue`.
+                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
+                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
+                    }
 
                     if let Some(cont) = labeled_scope.map(|s| s.cont) {
                         cfg.redirect(node, cont);
                     } else {
-                        let compile_error = CompileError::UndeclaredLabel(label.clone());
+                        let compile_error = CompileError::UndeclaredLabel(label);
 
                         // Eliminate the break, but replace it with an error node instead. This way,
                         // the CFG can still get by conversion to a session type without panicking
@@ -426,15 +462,29 @@ impl Cfg {
                         // this won't blow up later.
                         cfg.insert_error_at(node, CompileError::ContinueOutsideLoop);
                     }
+
+                    if let Some(next) = cfg[node].next {
+                        // Same rationale as `LabeledContinue`.
+                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
+                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
+                    }
                 }
                 Ir::IndexedBreak(debruijn_index) => {
+                    let debruijn_index = *debruijn_index; // Pacify borrowck.
+
+                    if let Some(next) = cfg[node].next {
+                        // Same rationale as `LabeledContinue`.
+                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
+                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
+                    }
+
                     // The same caveats as in the above `IndexedContinue` case also apply to the
                     // `IndexedBreak` variant.
-                    if *debruijn_index >= env.len() {
+                    if debruijn_index >= env.len() {
                         // See rationale for this same construct in `Ir::LabeledBreak` arm.
                         cfg.replace_error_at(node, CompileError::BreakOutsideLoop);
                     } else {
-                        let cont = env[env.len() - 1 - *debruijn_index].cont;
+                        let cont = env[env.len() - 1 - debruijn_index].cont;
                         cfg.redirect(node, cont);
                     }
                 }
