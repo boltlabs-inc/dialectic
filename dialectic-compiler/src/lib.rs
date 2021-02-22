@@ -421,19 +421,28 @@ impl Cfg {
                         // we want to accept.
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
+
+                        // We also want to go forward and report any errors with the dead code, and
+                        // eliminate any breaks potentially further in.
+                        eliminate_inner(cfg, env, next);
                     }
                 }
                 Ir::LabeledBreak(label) => {
-                    let labeled_scope = env.iter().rev().find(|s| s.label.as_ref() == Some(label));
+                    let labeled_scope = env
+                        .iter()
+                        .rev()
+                        .position(|s| s.label.as_ref() == Some(label));
                     let label = label.clone();
 
                     if let Some(next) = cfg[node].next {
                         // Same rationale as `LabeledContinue`.
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
+
+                        eliminate_inner(cfg, env, next);
                     }
 
-                    if let Some(cont) = labeled_scope.map(|s| s.cont) {
+                    if let Some(cont) = labeled_scope.map(|s| env[s].cont) {
                         cfg.redirect(node, cont);
                     } else {
                         let compile_error = CompileError::UndeclaredLabel(label);
@@ -467,6 +476,8 @@ impl Cfg {
                         // Same rationale as `LabeledContinue`.
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
+
+                        eliminate_inner(cfg, env, next);
                     }
                 }
                 Ir::IndexedBreak(debruijn_index) => {
@@ -476,6 +487,8 @@ impl Cfg {
                         // Same rationale as `LabeledContinue`.
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
+
+                        eliminate_inner(cfg, env, next);
                     }
 
                     // The same caveats as in the above `IndexedContinue` case also apply to the
