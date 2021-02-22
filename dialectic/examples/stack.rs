@@ -45,6 +45,7 @@ async fn client_prompt(
 /// reference instead of by value. This function can't be written in `async fn` style because it is
 /// recursive, and current restrictions in Rust mean that recursive functions returning futures must
 /// explicitly return a boxed `dyn Future` object.
+#[allow(clippy::type_complexity)]
 fn client_rec<'a>(
     size: usize,
     input: &'a mut BufReader<Stdin>,
@@ -56,7 +57,7 @@ fn client_rec<'a>(
             chan = {
                 // Get either a string to push or an instruction to pop ([ENTER]) from user
                 let string = client_prompt(input, output, size).await?;
-                if string == "" {
+                if string.is_empty() {
                     // Break this nested loop (about to go to pop/quit)
                     break chan.choose(_0).await?.close();
                 } else {
@@ -88,6 +89,7 @@ type Server = <Client as Session>::Dual;
 /// The implementation of the server for each client connection. This function can't be written in
 /// `async fn` style because it is recursive, and current restrictions in Rust mean that recursive
 /// functions returning futures must explicitly return a boxed `dyn Future` object.
+#[allow(clippy::type_complexity)]
 fn server(
     mut chan: TcpChan<Server>,
 ) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + std::marker::Send>> {
