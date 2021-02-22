@@ -15,8 +15,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Define the sessions we wish to test
     let deep = Session::enumerate(6, 1, 1);
-    let medium = Session::enumerate(3, 2, 2);
-    let wide = Session::enumerate(2, 3, 127);
+    let medium = Session::enumerate(3, 2, 3);
+    let wide = Session::enumerate(2, 4, 127);
     let sessions = deep.chain(medium.chain(wide));
 
     // File header
@@ -43,7 +43,7 @@ pub enum Session {
     Offer(Vec<Session>),
     Loop(Box<Session>),
     Continue(u8),
-    Split(Box<Session>, Box<Session>),
+    Split(Box<Session>, Box<Session>, Box<Session>),
     Call(Box<Session>, Box<Session>),
 }
 
@@ -71,7 +71,7 @@ impl Display for Session {
             Recv(s) => write!(f, "Recv<(), {}>", s)?,
             Send(s) => write!(f, "Send<(), {}>", s)?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
-            Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
+            Split(s, p, q) => write!(f, "Split<{}, {}, {}>", s, p, q)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
@@ -186,8 +186,10 @@ impl Session {
                     loops + 1,
                     productive + 1,
                 ) {
-                    if min_width <= 2 && max_width >= 2 {
-                        *self = Split(Box::new(Done), Box::new(Done));
+                    if min_width <= 3 && 3 <= max_width {
+                        *self = Split(Box::new(Done), Box::new(Done), Box::new(Done));
+                    } else if min_width <= 2 && 2 <= min_width {
+                        *self = Call(Box::new(Done), Box::new(Done));
                     } else {
                         let mut initial = Vec::with_capacity(max_width.into());
                         for _ in 0..min_width {
@@ -197,9 +199,10 @@ impl Session {
                     }
                 }
             }
-            Split(s, p) => {
+            Split(s, p, q) => {
                 if !s.step(max_depth - 1, min_width, max_width, loops, 0)
                     && !p.step(max_depth - 1, min_width, max_width, loops, 0)
+                    && !q.step(max_depth - 1, min_width, max_width, loops, 0)
                 {
                     *self = Call(Box::new(Done), Box::new(Done));
                 }

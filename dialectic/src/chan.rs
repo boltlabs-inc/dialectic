@@ -409,15 +409,17 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// Split a channel into transmit-only and receive-only ends and manipulate them, potentially
     /// concurrently, in the given closure.
     ///
-    /// To use the channel as a reunited whole after it has been split, combine this operation with
-    /// [`call`](Chan::call) to sequence further operations after it.
+    /// This is akin to [`call`](Chan::call), except the closure is given *two* [`Chan`]s: one which
+    /// can only do [`Transmit`] operations ([`Send`] and [`Choose`]) and one which can only do
+    /// [`Receive`] operations ([`Recv`] and [`Offer`]). The result of the call to
+    /// [`split`](Chan::split) is a re-unified [`Chan`] ready to execute the session `R`.
     ///
     /// # Errors
     ///
     /// The closure must *finish* the session for both the send-only and receive-only ends of the
-    /// channel and drop or [`close`](Chan::close) each end *before* the future completes.
-    /// If either end is dropped before finishing its session, or is not closed after finishing its
-    /// session, a [`SessionIncomplete`] error will be returned instead of a finished channel.
+    /// channel and drop or [`close`](Chan::close) each end *before* the future completes. If either
+    /// end is dropped before finishing its session, or is not closed after finishing its session, a
+    /// [`SessionIncomplete`] error will be returned instead of a finished channel.
     ///
     /// # Examples
     ///
@@ -431,7 +433,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>>;
+    /// type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
     ///
     /// let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
     ///
@@ -477,14 +479,15 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn split<T, E, P, Q, F, Fut>(
+    pub async fn split<T, E, P, Q, R, F, Fut>(
         self,
         with_parts: F,
-    ) -> Result<(T, Result<Chan<Done, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
+    ) -> Result<(T, Result<Chan<R, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
-        S: Session<Action = Split<P, Q>>,
+        S: Session<Action = Split<P, Q, R>>,
         P: Session,
         Q: Session,
+        R: Session,
         F: FnOnce(Chan<P, Tx, Unavailable>, Chan<Q, Unavailable, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
