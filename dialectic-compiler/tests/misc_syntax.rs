@@ -33,7 +33,7 @@ fn basic_split() {
 
     let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
     let s = format!("{}", ast.to_session().unwrap());
-    assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>>");
+    assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>, Done>");
 }
 
 #[test]
