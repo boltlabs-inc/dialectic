@@ -98,7 +98,7 @@ pub enum Target {
     Offer(Vec<Target>),
     Loop(Rc<Target>),
     Continue(usize),
-    Split(Rc<Target>, Rc<Target>),
+    Split(Rc<Target>, Rc<Target>, Rc<Target>),
     Call(Rc<Target>, Rc<Target>),
     Then(Rc<Target>, Rc<Target>),
     Type(Type),
@@ -527,9 +527,9 @@ impl Cfg {
             }
             Ir::Split(tx_only, rx_only) => {
                 let (tx_only, rx_only) = (*tx_only, *rx_only);
-                let tx_target = self.to_target_inner(errors, cont.clone(), tx_only);
-                let rx_target = self.to_target_inner(errors, cont, rx_only);
-                Target::Split(Rc::new(tx_target), Rc::new(rx_target))
+                let tx_target = self.to_target_inner(errors, Target::Done, tx_only);
+                let rx_target = self.to_target_inner(errors, Target::Done, rx_only);
+                Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
             }
             Ir::Choose(choices) => {
                 let targets = choices
@@ -606,7 +606,7 @@ impl fmt::Display for Target {
             Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s)?,
             Send(t, s) => write!(f, "Send<{}, {}>", t.to_token_stream(), s)?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
-            Split(s, p) => write!(f, "Split<{}, {}>", s, p)?,
+            Split(s, p, q) => write!(f, "Split<{}, {}, {}>", s, p, q)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Then(s, p) => write!(f, "<{} as Then<{}>>::Combined", s, p)?,
             Choose(cs) => {
@@ -665,7 +665,7 @@ impl ToTokens for Target {
             Recv(t, s) => quote! { #c::types::Recv<#t, #s> }.to_tokens(tokens),
             Send(t, s) => quote! { #c::types::Send<#t, #s> }.to_tokens(tokens),
             Loop(s) => quote! { #c::types::Loop<#s> }.to_tokens(tokens),
-            Split(s, p) => quote! { #c::types::Split<#s, #p> }.to_tokens(tokens),
+            Split(s, p, q) => quote! { #c::types::Split<#s, #p, #q> }.to_tokens(tokens),
             Call(s, p) => quote! { #c::types::Call<#s, #p> }.to_tokens(tokens),
             Then(s, p) => quote! { <#s as #c::types::Then<#p>>::Combined }.to_tokens(tokens),
             Choose(cs) => quote! { #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
