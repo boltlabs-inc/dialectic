@@ -3,19 +3,19 @@ use {
     syn::{
         braced,
         parse::{Error, Parse, ParseStream, Result},
-        spanned::Spanned,
+        spanned::Spanned as SpannedExt,
         token, Ident, Lifetime, Token, Type,
     },
 };
 
-use crate::{Invocation, Syntax, SyntaxNode};
+use crate::{Invocation, Spanned, Syntax};
 
 trait JoinSpansExt {
-    fn combine<T: Spanned>(&mut self, new: T) -> T;
+    fn combine<T: SpannedExt>(&mut self, new: T) -> T;
 }
 
 impl JoinSpansExt for Span {
-    fn combine<T: Spanned>(&mut self, new: T) -> T {
+    fn combine<T: SpannedExt>(&mut self, new: T) -> T {
         *self = self.join(new.span()).unwrap_or(*self);
         new
     }
@@ -38,7 +38,7 @@ enum Direction {
 
 struct SplitArm {
     dir: Direction,
-    arm: SyntaxNode,
+    arm: Spanned<Syntax>,
 }
 
 impl Parse for SplitArm {
@@ -53,14 +53,14 @@ impl Parse for SplitArm {
         } else {
             return Err(lookahead.error());
         };
-        let arm = input.parse::<SyntaxNode>()?;
+        let arm = input.parse::<Spanned<Syntax>>()?;
         Ok(SplitArm { dir, arm })
     }
 }
 
 struct ChoiceArm {
     index: usize,
-    arm: SyntaxNode,
+    arm: Spanned<Syntax>,
     span: Span,
 }
 
@@ -75,12 +75,12 @@ impl Parse for ChoiceArm {
             .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
         input.parse::<Token![=>]>()?;
         span = span.join(input.span()).unwrap_or(span);
-        let arm = input.parse::<SyntaxNode>()?;
+        let arm = input.parse::<Spanned<Syntax>>()?;
         Ok(ChoiceArm { index, arm, span })
     }
 }
 
-struct Block(SyntaxNode);
+struct Block(Spanned<Syntax>);
 
 impl Parse for Block {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -89,32 +89,32 @@ impl Parse for Block {
         let content;
         braced!(content in input);
         let nodes = content
-            .parse_terminated::<SyntaxNode, Token![;]>(SyntaxNode::parse)?
+            .parse_terminated::<Spanned<Syntax>, Token![;]>(Spanned::parse)?
             .into_iter()
             .collect();
 
-        Ok(Block(SyntaxNode {
-            expr: Syntax::Block(nodes),
+        Ok(Block(Spanned {
+            inner: Syntax::Block(nodes),
             span: block_span,
         }))
     }
 }
 
-impl Parse for SyntaxNode {
+impl Parse for Spanned<Syntax> {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
         if lookahead.peek(kw::recv) {
             // Ast::Recv: recv <type>
             let recv_span = input.parse::<kw::recv>()?.span();
-            Ok(SyntaxNode {
-                expr: Syntax::Recv(input.parse::<Type>()?),
+            Ok(Spanned {
+                inner: Syntax::Recv(input.parse::<Type>()?),
                 span: recv_span,
             })
         } else if lookahead.peek(kw::send) {
             // Ast::Send: send <type>
             let send_span = input.parse::<kw::send>()?.span();
-            Ok(SyntaxNode {
-                expr: Syntax::Send(input.parse::<Type>()?),
+            Ok(Spanned {
+                inner: Syntax::Send(input.parse::<Type>()?),
                 span: send_span,
             })
         } else if lookahead.peek(kw::call) {
@@ -130,14 +130,16 @@ impl Parse for SyntaxNode {
                     e
                 })?;
 
-                SyntaxNode {
-                    span: ty.span(),
-                    expr: Syntax::Type(ty),
+                let span = ty.span();
+
+                Spanned {
+                    inner: Syntax::Type(ty),
+                    span,
                 }
             };
 
-            Ok(SyntaxNode {
-                expr: Syntax::Call(Box::new(callee)),
+            Ok(Spanned {
+                inner: Syntax::Call(Box::new(callee)),
                 span: call_span,
             })
         } else if lookahead.peek(kw::choose) {
@@ -164,8 +166,8 @@ impl Parse for SyntaxNode {
                 arm_asts.push(choice_arm.arm);
             }
 
-            Ok(SyntaxNode {
-                expr: Syntax::Choose(arm_asts),
+            Ok(Spanned {
+                inner: Syntax::Choose(arm_asts),
                 span: choose_span,
             })
         } else if lookahead.peek(kw::offer) {
@@ -192,8 +194,8 @@ impl Parse for SyntaxNode {
                 arm_asts.push(choice_arm.arm);
             }
 
-            Ok(SyntaxNode {
-                expr: Syntax::Offer(arm_asts),
+            Ok(Spanned {
+                inner: Syntax::Offer(arm_asts),
                 span: offer_span,
             })
         } else if lookahead.peek(kw::split) {
@@ -217,8 +219,8 @@ impl Parse for SyntaxNode {
                 split_arms.swap(0, 1);
             }
 
-            Ok(SyntaxNode {
-                expr: Syntax::Split(
+            Ok(Spanned {
+                inner: Syntax::Split(
                     Box::new(split_arms[0].arm.clone()),
                     Box::new(split_arms[1].arm.clone()),
                 ),
@@ -240,8 +242,8 @@ impl Parse for SyntaxNode {
             };
 
             let Block(block) = input.parse::<Block>()?;
-            Ok(SyntaxNode {
-                expr: Syntax::Loop(label, Box::new(block)),
+            Ok(Spanned {
+                inner: Syntax::Loop(label, Box::new(block)),
                 span: loop_span,
             })
         } else if lookahead.peek(Token![break]) {
@@ -255,8 +257,8 @@ impl Parse for SyntaxNode {
                 None
             };
 
-            Ok(SyntaxNode {
-                expr: Syntax::Break(label),
+            Ok(Spanned {
+                inner: Syntax::Break(label),
                 span: break_span,
             })
         } else if lookahead.peek(Token![continue]) {
@@ -270,8 +272,8 @@ impl Parse for SyntaxNode {
                 None
             };
 
-            Ok(SyntaxNode {
-                expr: Syntax::Continue(label),
+            Ok(Spanned {
+                inner: Syntax::Continue(label),
                 span: continue_span,
             })
         } else if lookahead.peek(token::Brace) {
@@ -290,9 +292,11 @@ impl Parse for SyntaxNode {
                 }
             };
 
-            Ok(SyntaxNode {
-                span: ty.span(),
-                expr: Syntax::Type(ty),
+            let span = ty.span();
+
+            Ok(Spanned {
+                inner: Syntax::Type(ty),
+                span,
             })
         }
     }
@@ -301,11 +305,11 @@ impl Parse for SyntaxNode {
 impl Parse for Invocation {
     fn parse(input: ParseStream) -> Result<Self> {
         let nodes = input
-            .parse_terminated::<SyntaxNode, Token![;]>(SyntaxNode::parse)?
+            .parse_terminated::<Spanned<Syntax>, Token![;]>(Spanned::parse)?
             .into_iter()
             .collect::<Vec<_>>();
-        let ast = SyntaxNode {
-            expr: Syntax::Block(nodes),
+        let ast = Spanned {
+            inner: Syntax::Block(nodes),
             span: Span::call_site(),
         };
         Ok(Invocation { syntax: ast })
