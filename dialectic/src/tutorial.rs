@@ -437,106 +437,6 @@ This behavior is enabled by the [`Session`] trait, which in addition to defining
 action" is that session type itself. However, for [`Loop`], the next real action is whatever
 follows entering the loop(s), with the loop body unrolled by one iteration.
 
-# Splitting off
-
-Traditional presentations of session types do not allow the channel to be used concurrently to
-send and receive at the same time. Some protocols, however, can be made more efficient by
-executing certain portions of them in parallel.
-
-Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
-a session type of `Split<P, Q>` can be [`split`](Chan::split) into a send-only end with the
-session type `P` and a receive-only end with the session type `Q`, which can then be used
-concurrently. In the example below, the two ends of a channel **concurrently swap** a
-`Vec<usize>` and a `String`. If this example were run over a network and these values were
-large, this could represent a significant reduction in runtime.
-
-```
-# use dialectic::prelude::*;
-type SwapVecString = Split<Send<Vec<usize>, Done>, Recv<String, Done>>;
-```
-
-The dual of `Split<P, Q>` is `Split<Q::Dual, P::Dual>`:
-
-```
-# use dialectic::prelude::*;
-# use static_assertions::assert_type_eq_all;
-assert_type_eq_all!(
-    <Split<Send<Vec<usize>, Done>, Recv<String, Done>> as Session>::Dual,
-    Split<Send<String, Done>, Recv<Vec<usize>, Done>>,
-);
-```
-
-Notice that `P` and `Q` switch places! This is because the left-hand `P` is always the send-only
-session, and the right-hand `Q` is always the receive-only session.
-
-Now, let's use a channel of this session type to enact a concurrent swap of a `String` and a
-`Vec<usize>`:
-
-```
-use dialectic::prelude::*;
-use dialectic::backend::mpsc;
-
-# #[tokio::main]
-# async fn main() -> Result<(), Box<dyn std::error::Error>> {
-type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>>;
-
-let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
-
-// Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
-let t1 = tokio::spawn(async move {
-    c1.split(|tx, rx| async move {
-        // In one thread we send the `Vec`...
-        let send_vec = tokio::spawn(async move {
-            tx.send(vec![1, 2, 3, 4, 5]).await?;
-            Ok::<_, mpsc::Error>(())
-        });
-        // In another thread we receive the `String`...
-        let recv_string = tokio::spawn(async move {
-            let (string, _) = rx.recv().await?;
-            Ok::<_, mpsc::Error>(string)
-        });
-        send_vec.await.unwrap()?;
-        let string = recv_string.await.unwrap()?;
-        Ok::<_, mpsc::Error>(string)
-    }).await
-});
-
-// Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
-// the task above:
-c2.split(|tx, rx| async move {
-    // In one thread we send the `String`...
-    let send_string = tokio::spawn(async move {
-        tx.send("Hello!".to_string()).await?;
-        Ok::<_, mpsc::Error>(())
-    });
-    // In another thread we receive the `Vec`...
-    let recv_vec = tokio::spawn(async move {
-        let (vec, _) = rx.recv().await?;
-        Ok::<_, mpsc::Error>(vec)
-    });
-
-    // Examine the result values:
-    send_string.await??;
-    let vec = recv_vec.await??;
-    let string = t1.await??.0;
-    assert_eq!(vec, &[1, 2, 3, 4, 5]);
-    assert_eq!(string, "Hello!");
-
-    Ok::<_, Box<dyn std::error::Error>>(())
-}).await?;
-#
-# Ok(())
-# }
-```
-
-When using [`Split`], keep in mind its limitations:
-
-- It's a type error to [`Send`] or [`Choose`] on the receive-only end.
-- It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
-- It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
-  before the future completes. This is subject to the same behavior as in [`call`](Chan::call),
-  described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).
-
 # Sequencing and Modularity
 
 The final session type provided by Dialectic is the [`Call`] type, which permits a more modular
@@ -631,6 +531,111 @@ proceed without further fanfare.
 💡 **A useful pattern:** If you make sure to *always* call [`close`](Chan::close) on the channel
 before the subroutine's future returns, you can be guaranteed that such errors are impossible,
 because [`close`](Chan::close) can only be called when a channel's session is complete.
+
+# Splitting off
+
+Traditional presentations of session types do not allow the channel to be used concurrently to
+send and receive at the same time. Some protocols, however, can be made more efficient by
+executing certain portions of them in parallel.
+
+Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
+a session type of `Split<P, Q, R>` can be [`split`](Chan::split) into a send-only end with the
+session type `P` and a receive-only end with the session type `Q`, which can then be used
+concurrently. Just as in [`call`](Chan::call), once the given closure finishes using the `P` and
+`Q` channels until their sessions are both [`Done`], [`split`](Chan::split) returns a channel for
+the session type `R`, which can be used for both sending and receiving.
+
+In the example below, the two ends of a channel **concurrently swap** a
+`Vec<usize>` and a `String`. If this example were run over a network and these values were
+large, this could represent a significant reduction in runtime.
+
+```
+# use dialectic::prelude::*;
+type SwapVecString = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
+```
+
+The dual of `Split<P, Q, R>` is `Split<Q::Dual, P::Dual, R::Dual>`:
+
+```
+# use dialectic::prelude::*;
+# use static_assertions::assert_type_eq_all;
+assert_type_eq_all!(
+    <Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done> as Session>::Dual,
+    Split<Send<String, Done>, Recv<Vec<usize>, Done>, Done>,
+);
+```
+
+Notice that `P` and `Q` switch places! This is because the left-hand `P` is always the send-only
+session, and the right-hand `Q` is always the receive-only session.
+
+Now, let's use a channel of this session type to enact a concurrent swap of a `String` and a
+`Vec<usize>`:
+
+```
+use dialectic::prelude::*;
+use dialectic::backend::mpsc;
+
+# #[tokio::main]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
+type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
+
+let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
+
+// Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
+let t1 = tokio::spawn(async move {
+    c1.split(|tx, rx| async move {
+        // In one thread we send the `Vec`...
+        let send_vec = tokio::spawn(async move {
+            tx.send(vec![1, 2, 3, 4, 5]).await?;
+            Ok::<_, mpsc::Error>(())
+        });
+        // In another thread we receive the `String`...
+        let recv_string = tokio::spawn(async move {
+            let (string, _) = rx.recv().await?;
+            Ok::<_, mpsc::Error>(string)
+        });
+        send_vec.await.unwrap()?;
+        let string = recv_string.await.unwrap()?;
+        Ok::<_, mpsc::Error>(string)
+    }).await
+});
+
+// Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
+// the task above:
+c2.split(|tx, rx| async move {
+    // In one thread we send the `String`...
+    let send_string = tokio::spawn(async move {
+        tx.send("Hello!".to_string()).await?;
+        Ok::<_, mpsc::Error>(())
+    });
+    // In another thread we receive the `Vec`...
+    let recv_vec = tokio::spawn(async move {
+        let (vec, _) = rx.recv().await?;
+        Ok::<_, mpsc::Error>(vec)
+    });
+
+    // Examine the result values:
+    send_string.await??;
+    let vec = recv_vec.await??;
+    let string = t1.await??.0;
+    assert_eq!(vec, &[1, 2, 3, 4, 5]);
+    assert_eq!(string, "Hello!");
+
+    Ok::<_, Box<dyn std::error::Error>>(())
+}).await?;
+#
+# Ok(())
+# }
+```
+
+When using [`Split`], keep in mind that it is subject to some limitations, in addition to the
+caveats of [`Call`], of which it is a close relative:
+
+- It's a type error to [`Send`] or [`Choose`] on the receive-only end.
+- It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
+- It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
+  before the future completes. This is subject to the same behavior as in [`call`](Chan::call),
+  described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).
 
 # Wrapping up
 
