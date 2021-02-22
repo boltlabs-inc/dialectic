@@ -53,7 +53,7 @@ fn bench_send_recv(c: &mut Criterion) {
                 // Pre-populate the channel with things to receive
                 let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
                 rt.block_on(plain_server(s, tx.clone()));
-                let client = Client::wrap(Unavailable, rx);
+                let client = Client::wrap(Unavailable::default(), rx);
                 let start = Instant::now();
                 rt.block_on(dialectic_client(client));
                 total_duration += start.elapsed();
@@ -68,7 +68,7 @@ fn bench_send_recv(c: &mut Criterion) {
             let mut total_duration = Duration::from_secs(0);
             for _ in 0..iters {
                 let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
-                let server = Server::wrap(tx, Unavailable);
+                let server = Server::wrap(tx, Unavailable::default());
                 let start = Instant::now();
                 rt.block_on(dialectic_server(s, server));
                 total_duration += start.elapsed();
