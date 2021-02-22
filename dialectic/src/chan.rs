@@ -495,14 +495,19 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         use SessionIncomplete::*;
 
         let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let ((result, maybe_rx), maybe_tx) =
-            P::over(tx.unwrap(), Unavailable, |tx_only| async move {
-                Q::over(Unavailable, rx.unwrap(), |rx_only| async move {
-                    with_parts(tx_only, rx_only).await
-                })
+        let ((result, maybe_rx), maybe_tx) = P::over(
+            tx.unwrap(),
+            Unavailable { _priv: () },
+            |tx_only| async move {
+                Q::over(
+                    Unavailable { _priv: () },
+                    rx.unwrap(),
+                    |rx_only| async move { with_parts(tx_only, rx_only).await },
+                )
                 .await
-            })
-            .await?;
+            },
+        )
+        .await?;
         // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
         // Available/Unavailable and maximize possible returned things (it's fine to drop the
         // Unavailable end of something if for some reason you split twice)

@@ -68,7 +68,7 @@
 //! | [`Recv<T, P>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
 //! | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Duals>`](Offer) |
 //! | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Duals>`](Choose) |
-//! | [`Split<P, Q>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `Done`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual>`](Split) |
+//! | [`Split<P, Q, R>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `R`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual, R::Dual>`](Split) |
 //! | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
 //! | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
 //! | [`Call<P, Q>`](Call) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.call(&#124;c&#124; async move { ... }).await?;</code>](Chan::call) | [`Call<P::Dual, Q::Dual>`](Call) |
@@ -223,7 +223,9 @@ macro_rules! offer {
 /// respectively. This is reflected at the type level by the presence of [`Unavailable`] on the type
 /// of the connection which *is not* present for each part of the split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Unavailable;
+pub struct Unavailable {
+    _priv: (),
+}
 
 /// The error returned when a closure which is expected to complete a channel's session fails to
 /// finish the session of the channel it is given.
