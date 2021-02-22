@@ -66,7 +66,7 @@ async fn client_tally(
         // Parse a desired number from the user
         let user_input = prompt(&format!("{} ", operation), input, output, |s| {
             let s = s.trim();
-            if s == "" || s == "=" {
+            if s.is_empty() || s == "=" {
                 // Empty line or "=" means finish tally
                 Ok(None)
             } else if let Ok(n) = s.parse() {

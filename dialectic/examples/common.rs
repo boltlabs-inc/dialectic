@@ -55,7 +55,7 @@ pub type TcpChan<S> = dialectic::backend::serde::SymmetricalChan<
 
 /// Wrap a raw TCP socket in a given session type, using the length delimited bincode transport
 /// format/encoding.
-fn wrap_socket<'a, P>(socket: TcpStream, max_length: usize) -> TcpChan<P>
+fn wrap_socket<P>(socket: TcpStream, max_length: usize) -> TcpChan<P>
 where
     P: Session,
 {
