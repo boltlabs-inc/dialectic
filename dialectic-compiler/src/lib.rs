@@ -174,8 +174,8 @@ impl Spanned<Syntax> {
                     | Ir::IndexedBreak(_)
                     | Ir::IndexedContinue(_) => {}
                     _ => {
-                        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
-                        cfg[tail].next = Some(continue_);
+                        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+                        cfg[tail].next = Some(continue0);
                     }
                 }
 
@@ -641,22 +641,22 @@ mod tests {
     }
 
     #[test]
-    fn tally_client_expr_direct_subst() {
+    fn tally_client_cfg_direct_subst() {
         let mut cfg = Cfg::new();
         let send = cfg.send("i64");
         let recv = cfg.recv("i64");
-        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
-        cfg[send].next = Some(continue_);
+        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+        cfg[send].next = Some(continue0);
         let continue1 = cfg.singleton(Ir::IndexedContinue(1));
         cfg[recv].next = Some(continue1);
         let choose_opts = vec![send, recv];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
         let client_tally = cfg.singleton(Ir::Loop(None, choose));
 
-        let break_ = cfg.singleton(Ir::IndexedBreak(0));
+        let break0 = cfg.singleton(Ir::IndexedBreak(0));
         let send = cfg.send("Operation");
         cfg[send].next = Some(client_tally);
-        let choose_opts = vec![break_, send];
+        let choose_opts = vec![break0, send];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
         let client = cfg.singleton(Ir::Loop(None, choose));
 
@@ -666,16 +666,16 @@ mod tests {
     }
 
     #[test]
-    fn tally_client_expr_call() {
+    fn tally_client_cfg_call() {
         let mut cfg = Cfg::new();
-        let break_ = cfg.singleton(Ir::IndexedBreak(0));
+        let break0 = cfg.singleton(Ir::IndexedBreak(0));
         let send = cfg.send("Operation");
         let callee = cfg.type_("ClientTally");
         let call = cfg.singleton(Ir::Call(callee));
         cfg[send].next = Some(call);
-        let continue_ = cfg.singleton(Ir::IndexedContinue(0));
-        cfg[call].next = Some(continue_);
-        let choose_opts = vec![break_, send];
+        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+        cfg[call].next = Some(continue0);
+        let choose_opts = vec![break0, send];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
         let client = cfg.singleton(Ir::Loop(None, choose));
 
@@ -684,237 +684,6 @@ mod tests {
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
-        );
-    }
-
-    #[test]
-    fn tally_client_expr_call_ast() {
-        let client_ast: Spanned<Syntax> = Syntax::Loop(
-            None,
-            Box::new(
-                Syntax::Choose(vec![
-                    Syntax::Break(None).into(),
-                    Syntax::Block(vec![
-                        Syntax::send("Operation").into(),
-                        Syntax::call(Syntax::type_("ClientTally")).into(),
-                    ])
-                    .into(),
-                ])
-                .into(),
-            ),
-        )
-        .into();
-
-        let s = format!("{}", client_ast.to_session().unwrap());
-        assert_eq!(
-            s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
-        );
-    }
-
-    #[test]
-    fn tally_client_expr_call_parse_string() {
-        let to_parse = "loop {
-            choose {
-                _0 => break,
-                _1 => {
-                    send Operation;
-                    call ClientTally;
-                },
-            }
-        }";
-
-        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(
-            s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
-        );
-    }
-
-    #[test]
-    fn tally_client_invocation_call_parse_string() {
-        let to_parse = "loop {
-                choose {
-                    _0 => break,
-                    _1 => {
-                        send Operation;
-                        call ClientTally;
-                    },
-                }
-            }";
-
-        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(
-            s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
-        );
-    }
-
-    #[test]
-    fn tally_client_invocation_direct_subst_parse_string() {
-        let to_parse = "'client: loop {
-                choose {
-                    _0 => break,
-                    _1 => {
-                        send Operation;
-                        ClientTally;
-                    },
-                }
-            }";
-
-        let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(
-            s,
-            "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue>>::Combined>)>>"
-        );
-    }
-
-    #[test]
-    fn hello_invocation() {
-        let to_parse = "
-                send String;
-                recv String;
-            ";
-
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(s, "Send<String, Recv<String, Done>>");
-    }
-
-    #[test]
-    fn hello_invocation_double_block() {
-        let to_parse = "{
-                send String;
-                recv String;
-            }";
-
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(s, "Send<String, Recv<String, Done>>");
-    }
-
-    #[test]
-    fn tally_client_direct_subst_nested_loop_break() {
-        let to_parse = "'client: loop {
-            choose {
-                _0 => break,
-                _1 => {
-                    send Operation;
-                    loop {
-                        choose {
-                            _0 => send i64,
-                            _1 => {
-                                recv i64;
-                                continue 'client;
-                            }
-                        }
-                    }
-                },
-            }
-        }";
-
-        let lhs: Type = syn::parse2(
-            syn::parse_str::<Invocation>(to_parse)
-                .unwrap()
-                .syntax
-                .to_session()
-                .unwrap()
-                .into_token_stream(),
-        )
-        .unwrap();
-
-        let rhs: Type = syn::parse_str(
-            "dialectic::types::Loop<
-                dialectic::types::Choose<(
-                    dialectic::types::Done,
-                    dialectic::types::Send<
-                        Operation,
-                        dialectic::types::Loop<
-                            dialectic::types::Choose<(
-                                dialectic::types::Send<i64, dialectic::types::Continue>,
-                                dialectic::types::Recv<i64, dialectic::types::Continue<dialectic::types::S<dialectic::types::Z>>>,
-                            )>
-                        >
-                    >,
-                )>
-            >",
-        )
-        .unwrap();
-
-        assert_eq!(
-            lhs.to_token_stream().to_string(),
-            rhs.to_token_stream().to_string()
-        );
-    }
-
-    #[test]
-    fn basic_split() {
-        let to_parse = "split {
-                -> send String,
-                <- recv String,
-            }";
-
-        let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-        let s = format!("{}", ast.to_session().unwrap());
-        assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>>");
-    }
-
-    #[test]
-    fn simple_break_outside_of_loop() {
-        let to_parse = "break";
-        let error = syn::parse_str::<Invocation>(to_parse)
-            .unwrap()
-            .syntax
-            .to_session()
-            .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            CompileError::BreakOutsideLoop.to_string()
-        );
-    }
-
-    #[test]
-    fn simple_continue_outside_of_loop() {
-        let to_parse = "continue";
-        let error = syn::parse_str::<Invocation>(to_parse)
-            .unwrap()
-            .syntax
-            .to_session()
-            .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            CompileError::ContinueOutsideLoop.to_string()
-        );
-    }
-
-    #[test]
-    fn shadowed_label() {
-        let to_parse = "'foo: loop { 'foo: loop {} }";
-        let error = syn::parse_str::<Invocation>(to_parse)
-            .unwrap()
-            .syntax
-            .to_session()
-            .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            CompileError::ShadowedLabel("foo".to_owned()).to_string()
-        );
-    }
-
-    #[test]
-    fn undeclared_label() {
-        let to_parse = "{ continue 'foo; }";
-        let error = syn::parse_str::<Invocation>(to_parse)
-            .unwrap()
-            .syntax
-            .to_session()
-            .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            CompileError::UndeclaredLabel("foo".to_owned()).to_string()
         );
     }
 }
