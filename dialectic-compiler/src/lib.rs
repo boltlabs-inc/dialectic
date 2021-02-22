@@ -289,8 +289,17 @@ impl Cfg {
             Ir::Error(_, maybe_child @ None) => {
                 *maybe_child = Some(to);
             }
-            // TODO: follow redirects?
-            _ => self.arena[from] = Err(to),
+            _ => {
+                // If this node is redirected already, redirect whatever node
+                // it's already been redirected to.
+                let at_from = &mut self.arena[from];
+                if at_from.is_ok() {
+                    self.arena[from] = Err(to);
+                } else {
+                    let redirected = *self.arena[from].as_ref().unwrap_err();
+                    self.redirect(redirected, to);
+                }
+            }
         }
     }
 
