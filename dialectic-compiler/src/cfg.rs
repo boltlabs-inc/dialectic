@@ -123,58 +123,73 @@ impl Cfg {
     }
 
     /// Eliminate `Break` nodes, replacing them w/ redirections to the nodes they reference and
-    /// effectively dereferencing the continuations they represent. In addition, eliminate
-    /// `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
+    /// effectively dereferencing the continuations they represent.
     pub fn eliminate_breaks(&mut self, node: Index) {
         let mut env = Vec::new();
-        eliminate_inner(self, &mut env, |_, _| unreachable!(), node);
+        eliminate_inner(
+            self,
+            &mut env,
+            |_| unreachable!("all breaks are valid before this pass"),
+            node,
+        );
         debug_assert!(
             env.is_empty(),
             "mismatched number of push/pop in `eliminate_breaks_and_labels`"
         );
 
-        fn assign_next(node: Index) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| cfg[node].next = Some(to_assign)
-        }
-
-        fn assign_child(node: Index) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Call(child) | Ir::Error(_, Some(child)) => *child = to_assign,
-                _ => panic!(),
+        #[inline]
+        fn origin_next(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| {
+                cfg[node]
+                    .next
+                    .as_mut()
+                    .expect("there will always be a parent")
             }
         }
 
-        fn assign_tx_only(node: Index) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Split(tx_only, _) => *tx_only = to_assign,
-                _ => panic!(),
+        #[inline]
+        fn origin_child(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| match &mut cfg[node].expr {
+                Ir::Call(child) | Ir::Error(_, Some(child)) => child,
+                _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
-        fn assign_rx_only(node: Index) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Split(_, rx_only) => *rx_only = to_assign,
-                _ => panic!(),
+        #[inline]
+        fn origin_tx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| match &mut cfg[node].expr {
+                Ir::Split(tx_only, _) => tx_only,
+                _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
-        fn assign_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Choose(choices) | Ir::Offer(choices) => choices[i] = to_assign,
-                _ => panic!(),
+        #[inline]
+        fn origin_rx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| match &mut cfg[node].expr {
+                Ir::Split(_, rx_only) => rx_only,
+                _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
-        fn assign_body(node: Index) -> impl FnOnce(&mut Cfg, Index) {
-            move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Loop(body) => *body = to_assign,
-                _ => panic!(),
+        #[inline]
+        fn origin_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| match &mut cfg[node].expr {
+                Ir::Choose(choices) | Ir::Offer(choices) => &mut choices[i],
+                _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
-        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Index>, eliminate: F, node: Index)
+        #[inline]
+        fn origin_body(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+            move |cfg| match &mut cfg[node].expr {
+                Ir::Loop(body) => body,
+                _ => panic!("parent node has unexpectedly mutated"),
+            }
+        }
+
+        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Index>, origin: F, node: Index)
         where
-            F: FnOnce(&mut Cfg, Index),
+            F: FnOnce(&mut Cfg) -> &mut Index,
         {
             match &cfg[node].expr {
                 Ir::Done
@@ -184,50 +199,57 @@ impl Cfg {
                 | Ir::Continue(_)
                 | Ir::Error(_, None) => {
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, assign_next(node), next);
+                        eliminate_inner(cfg, env, origin_next(node), next);
                     }
                 }
                 Ir::Call(child) | Ir::Error(_, Some(child)) => {
                     let child = *child;
-                    eliminate_inner(cfg, env, assign_child(node), child);
+                    eliminate_inner(cfg, env, origin_child(node), child);
+
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, assign_next(node), next);
+                        eliminate_inner(cfg, env, origin_next(node), next);
                     }
                 }
                 Ir::Split(tx_only, rx_only) => {
                     let (tx_only, rx_only) = (*tx_only, *rx_only);
-                    eliminate_inner(cfg, env, assign_tx_only(node), tx_only);
-                    eliminate_inner(cfg, env, assign_rx_only(node), rx_only);
+                    eliminate_inner(cfg, env, origin_tx_only(node), tx_only);
+                    eliminate_inner(cfg, env, origin_rx_only(node), rx_only);
+
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, assign_next(node), next);
+                        eliminate_inner(cfg, env, origin_next(node), next);
                     }
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
-                    let choices = choices.clone(); // pacify borrowck so cfg isn't borrowed
+                    // Pacify borrowck by reborrowing
+                    let choices = choices.clone();
+                    // For each choose/offer arm, eliminate whatever's inside, using that particular
+                    // arm's next pointer as the origin.
                     for (i, choice) in choices.into_iter().enumerate() {
-                        eliminate_inner(cfg, env, assign_choice_n(node, i), choice);
+                        eliminate_inner(cfg, env, origin_choice_n(node, i), choice);
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, assign_next(node), next);
+                        eliminate_inner(cfg, env, origin_next(node), next);
                     }
                 }
                 Ir::Loop(body) => {
-                    let body = *body; // pacify borrowck, or else it thinks cfg is borrowed
+                    let body = *body; // Pacify borrowck, or else it thinks cfg is borrowed
+                    let cont = cfg[node]
+                        .next
+                        .unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done)));
 
-                    let maybe_next = cfg[node].next;
-                    let cont =
-                        maybe_next.unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done)));
+                    env.push(cont); // Enter new loop environment
+                    eliminate_inner(cfg, env, origin_body(node), body);
+                    env.pop(); // Exit loop environment
 
-                    env.push(cont);
-                    eliminate_inner(cfg, env, assign_body(node), body);
-                    env.pop();
-
-                    eliminate_inner(cfg, env, assign_next(node), cont);
+                    eliminate_inner(cfg, env, origin_next(node), cont);
                 }
                 Ir::Break(index) => {
-                    let index = *index; // Pacify borrowck.
-                    eliminate(cfg, env[env.len() - 1 - index]);
+                    // Pacify borrowck by reborrowing
+                    let index = *index;
+                    // Set the parent's corresponding next pointer to the continuation referenced by
+                    // this `break` statement, stored in the environment
+                    *origin(cfg) = env[env.len() - 1 - index];
                 }
             }
         }
@@ -274,13 +296,8 @@ impl Cfg {
                 Target::Offer(targets)
             }
             Ir::Loop(body) => Target::Loop(Rc::new(self.to_target_inner(errors, cont, *body))),
-            Ir::Break(_) => {
-                panic!("uneliminated break in CFG")
-            }
-            Ir::Continue(i) => {
-                debug_assert!(node.next.is_none(), "continue must be the end of a block");
-                Target::Continue(*i)
-            }
+            Ir::Break(_) => panic!("uneliminated break in CFG"),
+            Ir::Continue(i) => Target::Continue(*i),
             Ir::Type(t) => {
                 // Optimize a little bit by doing the `Then` transform ourselves if the next
                 // continuation is a `Done`.
@@ -290,12 +307,10 @@ impl Cfg {
                 }
             }
             Ir::Error(error, maybe_child) => {
-                let spanned_error = Spanned {
+                errors.push(Spanned {
                     inner: error.clone(),
                     span: node.span,
-                };
-
-                errors.push(spanned_error);
+                });
 
                 match *maybe_child {
                     Some(child) => self.to_target_inner(errors, cont, child),
