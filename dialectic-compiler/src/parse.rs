@@ -8,7 +8,10 @@ use {
     },
 };
 
-use crate::{Invocation, Spanned, Syntax};
+use crate::{
+    syntax::{Invocation, Syntax},
+    Spanned,
+};
 
 trait JoinSpansExt {
     fn combine<T: SpannedExt>(&mut self, new: T) -> T;
