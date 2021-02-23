@@ -143,7 +143,7 @@ impl Spanned<Syntax> {
         let ir = match &self.inner {
             Recv(ty) => Ir::Recv(ty.clone()),
             Send(ty) => Ir::Send(ty.clone()),
-            Type(s) => Ir::Type(s.clone()),
+            Type(ty) => Ir::Type(ty.clone()),
             Call(callee) => {
                 let callee_node = callee.to_cfg(cfg, env).0;
                 Ir::Call(callee_node)
