@@ -235,26 +235,20 @@ impl CfgNode {
 /// A cfg of CFG nodes acting as a context for a single compilation unit.
 #[derive(Debug)]
 struct Cfg {
-    arena: Arena<Result<CfgNode, Index>>,
+    arena: Arena<CfgNode>,
 }
 
 impl ops::Index<Index> for Cfg {
     type Output = CfgNode;
 
     fn index(&self, index: Index) -> &Self::Output {
-        match &self.arena[index] {
-            Ok(node) => node,
-            Err(i) => &self[*i],
-        }
+        &self.arena[index]
     }
 }
 
 impl ops::IndexMut<Index> for Cfg {
     fn index_mut(&mut self, index: Index) -> &mut Self::Output {
-        match self.arena[index] {
-            Ok(_) => self.arena[index].as_mut().unwrap(),
-            Err(redirected) => &mut self[redirected],
-        }
+        &mut self.arena[index]
     }
 }
 
@@ -272,35 +266,7 @@ impl Cfg {
     }
 
     fn insert(&mut self, node: CfgNode) -> Index {
-        self.arena.insert(Ok(node))
-    }
-
-    /// Cause any access to the `from` index to be redirected to the
-    /// `to` index, unless the `from` index refers to an error. In
-    /// the case that the `from` index refers to an error, we wish to
-    /// preserve the error, and we instead redirect the already redirected
-    /// index inside the `Error`, or assign it if unassigned.
-    fn redirect(&mut self, from: Index, to: Index) {
-        match &mut self[from].expr {
-            Ir::Error(_, Some(child)) => {
-                let child = *child;
-                self.redirect(child, to);
-            }
-            Ir::Error(_, maybe_child @ None) => {
-                *maybe_child = Some(to);
-            }
-            _ => {
-                // If this node is redirected already, redirect whatever node
-                // it's already been redirected to.
-                let at_from = &mut self.arena[from];
-                if at_from.is_ok() {
-                    self.arena[from] = Err(to);
-                } else {
-                    let redirected = *self.arena[from].as_ref().unwrap_err();
-                    self.redirect(redirected, to);
-                }
-            }
-        }
+        self.arena.insert(node)
     }
 
     /// Insert an `Error` node as a shim.
@@ -346,42 +312,84 @@ impl Cfg {
     /// nodes.
     fn eliminate_breaks_and_labels(&mut self, node: Index) {
         let mut env = Vec::new();
-        eliminate_inner(self, &mut env, node);
+        eliminate_inner(self, &mut env, |_, _| unreachable!(), node);
         debug_assert!(
             env.is_empty(),
             "mismatched number of push/pop in `eliminate_breaks_and_labels`"
         );
 
-        fn eliminate_inner(cfg: &mut Cfg, env: &mut Vec<Scope>, node: Index) {
+        fn assign_next(node: Index) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| cfg[node].next = Some(to_assign)
+        }
+
+        fn assign_child(node: Index) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| match &mut cfg[node].expr {
+                Ir::Call(child) | Ir::Error(_, Some(child)) => *child = to_assign,
+                _ => panic!(),
+            }
+        }
+
+        fn assign_tx_only(node: Index) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| match &mut cfg[node].expr {
+                Ir::Split(tx_only, _) => *tx_only = to_assign,
+                _ => panic!(),
+            }
+        }
+
+        fn assign_rx_only(node: Index) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| match &mut cfg[node].expr {
+                Ir::Split(_, rx_only) => *rx_only = to_assign,
+                _ => panic!(),
+            }
+        }
+
+        fn assign_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| match &mut cfg[node].expr {
+                Ir::Choose(choices) | Ir::Offer(choices) => choices[i] = to_assign,
+                _ => panic!(),
+            }
+        }
+
+        fn assign_body(node: Index) -> impl FnOnce(&mut Cfg, Index) {
+            move |cfg, to_assign| match &mut cfg[node].expr {
+                Ir::Loop(_, body) => *body = to_assign,
+                _ => panic!(),
+            }
+        }
+
+        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Scope>, eliminate: F, node: Index)
+        where
+            F: FnOnce(&mut Cfg, Index),
+        {
             match &cfg[node].expr {
                 Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) | Ir::Error(_, None) => {
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::Call(child) | Ir::Error(_, Some(child)) => {
                     let child = *child;
-                    eliminate_inner(cfg, env, child);
+                    eliminate_inner(cfg, env, assign_child(node), child);
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::Split(tx_only, rx_only) => {
                     let (tx_only, rx_only) = (*tx_only, *rx_only);
-                    eliminate_inner(cfg, env, tx_only);
-                    eliminate_inner(cfg, env, rx_only);
+                    eliminate_inner(cfg, env, assign_tx_only(node), tx_only);
+                    eliminate_inner(cfg, env, assign_rx_only(node), rx_only);
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
                     let choices = choices.clone(); // pacify borrowck so cfg isn't borrowed
-                    for choice in choices {
-                        eliminate_inner(cfg, env, choice);
+                    for (i, choice) in choices.into_iter().enumerate() {
+                        eliminate_inner(cfg, env, assign_choice_n(node, i), choice);
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::Loop(label, body) => {
@@ -401,10 +409,10 @@ impl Cfg {
                     }
 
                     env.push(scope);
-                    eliminate_inner(cfg, env, body);
+                    eliminate_inner(cfg, env, assign_body(node), body);
                     env.pop();
 
-                    eliminate_inner(cfg, env, cont);
+                    eliminate_inner(cfg, env, assign_next(node), cont);
                 }
                 Ir::LabeledContinue(label) => {
                     let labeled_index = env
@@ -433,7 +441,7 @@ impl Cfg {
 
                         // We also want to go forward and report any errors with the dead code, and
                         // eliminate any breaks potentially further in.
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::LabeledBreak(label) => {
@@ -448,11 +456,11 @@ impl Cfg {
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
 
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
 
                     if let Some(cont) = labeled_scope.map(|s| env[s].cont) {
-                        cfg.redirect(node, cont);
+                        eliminate(cfg, cont);
                     } else {
                         let compile_error = CompileError::UndeclaredLabel(label);
 
@@ -486,7 +494,7 @@ impl Cfg {
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
 
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
                 Ir::IndexedBreak(debruijn_index) => {
@@ -497,7 +505,7 @@ impl Cfg {
                         cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                         cfg.insert_error_at(next, CompileError::UnreachableStatement);
 
-                        eliminate_inner(cfg, env, next);
+                        eliminate_inner(cfg, env, assign_next(node), next);
                     }
 
                     // The same caveats as in the above `IndexedContinue` case also apply to the
@@ -506,8 +514,7 @@ impl Cfg {
                         // See rationale for this same construct in `Ir::LabeledBreak` arm.
                         cfg.replace_error_at(node, CompileError::BreakOutsideLoop);
                     } else {
-                        let cont = env[env.len() - 1 - debruijn_index].cont;
-                        cfg.redirect(node, cont);
+                        eliminate(cfg, env[env.len() - 1 - debruijn_index].cont);
                     }
                 }
             }
