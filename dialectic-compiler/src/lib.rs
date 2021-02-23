@@ -10,6 +10,7 @@ use {
 
 pub mod parse;
 
+/// A compilation error due to invalid (but parseable) input in the surface macro syntax.
 #[derive(Error, Debug, Clone)]
 pub enum CompileError {
     #[error("label name `'{0}` shadows a label name that is already in scope")]
@@ -27,6 +28,7 @@ pub enum CompileError {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// A thing attached to some `Span` that tracks its origin in the macro invocation.
 pub struct Spanned<T> {
     pub inner: T,
     pub span: Span,
@@ -41,14 +43,18 @@ impl<T> From<T> for Spanned<T> {
     }
 }
 
-/// A shim for parsing the root level of a macro invocation, so
-/// that a session type may be written as a block w/o an extra
-/// layer of braces.
+/// A shim for parsing the root level of a macro invocation, so that a session type may be written
+/// as a block w/o an extra layer of braces.
 #[derive(Debug, Clone)]
 pub struct Invocation {
     pub syntax: Spanned<Syntax>,
 }
 
+/// The surface syntax for a macro invocation: a single statement-like item, or a block of them.
+///
+/// While the [`Target`] of the compiler (and its corresponding types in the Dialectic library) have
+/// continuations for almost every expression, the surface syntax is not in continuation passing
+/// style, instead encoding sequences of operations using the `;` operator within blocks.
 #[derive(Debug, Clone)]
 pub enum Syntax {
     Recv(Type),
@@ -80,11 +86,9 @@ enum Ir {
     Choose(Vec<Index>),
     Offer(Vec<Index>),
     Split(Index, Index),
-    Loop(Option<String>, Index),
-    IndexedBreak(usize),
-    IndexedContinue(usize),
-    LabeledBreak(String),
-    LabeledContinue(String),
+    Loop(Index),
+    Break(usize),
+    Continue(usize),
     Type(Type),
     Error(CompileError, Option<Index>),
 }
@@ -127,69 +131,109 @@ impl Syntax {
 }
 
 impl Spanned<Syntax> {
-    pub fn span(&self) -> Span {
-        self.span
-    }
-
     pub fn to_session(&self) -> Result<Target, Error> {
         let mut cfg = Cfg::new();
-        let head = self.to_cfg(&mut cfg).0;
-        cfg.eliminate_breaks_and_labels(head);
+        let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
+        cfg.eliminate_breaks(head);
         cfg.to_target(head)
     }
 
-    pub fn new(syntax: Syntax) -> Self {
-        Self::from(syntax)
-    }
-
-    fn to_cfg(&self, cfg: &mut Cfg) -> (Index, Index) {
-        use {syn::spanned::Spanned, Syntax::*};
-        let node = match &self.inner {
-            Recv(ty) => cfg.spanned(Ir::Recv(ty.clone()), self.span),
-            Send(ty) => cfg.spanned(Ir::Send(ty.clone()), self.span),
-            Break(Some(label)) => cfg.spanned(Ir::LabeledBreak(label.clone()), self.span),
-            Break(None) => cfg.spanned(Ir::IndexedBreak(0), self.span),
-            Continue(Some(label)) => cfg.spanned(Ir::LabeledContinue(label.clone()), self.span),
-            Continue(None) => cfg.spanned(Ir::IndexedContinue(0), self.span),
-            Type(s) => cfg.spanned(Ir::Type(s.clone()), s.span()),
+    fn to_cfg<'a>(&'a self, cfg: &mut Cfg, env: &mut Vec<&'a Option<String>>) -> (Index, Index) {
+        use Syntax::*;
+        let ir = match &self.inner {
+            Recv(ty) => Ir::Recv(ty.clone()),
+            Send(ty) => Ir::Send(ty.clone()),
+            Type(s) => Ir::Type(s.clone()),
             Call(callee) => {
-                let callee_node = callee.to_cfg(cfg).0;
-                cfg.spanned(Ir::Call(callee_node), self.span)
+                let callee_node = callee.to_cfg(cfg, env).0;
+                Ir::Call(callee_node)
             }
             Split(tx, rx) => {
-                let tx_node = tx.to_cfg(cfg).0;
-                let rx_node = rx.to_cfg(cfg).0;
-                cfg.spanned(Ir::Split(tx_node, rx_node), self.span)
+                let tx_node = tx.to_cfg(cfg, env).0;
+                let rx_node = rx.to_cfg(cfg, env).0;
+                Ir::Split(tx_node, rx_node)
             }
             Choose(choices) => {
-                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
-                cfg.spanned(Ir::Choose(choice_nodes), self.span)
+                let choice_nodes = choices
+                    .iter()
+                    .map(|choice| choice.to_cfg(cfg, env).0)
+                    .collect();
+                Ir::Choose(choice_nodes)
             }
             Offer(choices) => {
-                let choice_nodes = choices.iter().map(|choice| choice.to_cfg(cfg).0).collect();
-                cfg.spanned(Ir::Offer(choice_nodes), self.span)
+                let choice_nodes = choices
+                    .iter()
+                    .map(|choice| choice.to_cfg(cfg, env).0)
+                    .collect();
+                Ir::Offer(choice_nodes)
             }
             Loop(maybe_label, body) => {
-                let (head, tail) = body.to_cfg(cfg);
+                // Convert the body in the environment with this loop label
+                env.push(maybe_label);
+                let (head, tail) = body.to_cfg(cfg, env);
+                env.pop();
 
+                // Set the continuation for the loop if it doesn't end in a `Break` or `Continue`
                 match cfg[tail].expr {
-                    Ir::LabeledBreak(_)
-                    | Ir::LabeledContinue(_)
-                    | Ir::IndexedBreak(_)
-                    | Ir::IndexedContinue(_) => {}
+                    Ir::Break(_) | Ir::Continue(_) => {}
                     _ => {
-                        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+                        let continue0 = cfg.singleton(Ir::Continue(0));
                         cfg[tail].next = Some(continue0);
                     }
                 }
 
-                cfg.spanned(Ir::Loop(maybe_label.clone(), head), self.span)
+                // The `Ir` for this loop just wraps its body
+                let ir = Ir::Loop(head);
+
+                // Check to ensure the environment does not already contain this label
+                if maybe_label.is_some() && env.contains(&maybe_label) {
+                    Ir::Error(
+                        CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
+                        Some(cfg.spanned(ir, self.span)),
+                    )
+                } else {
+                    ir
+                }
+            }
+            Continue(label) => {
+                if env.is_empty() {
+                    Ir::Error(CompileError::ContinueOutsideLoop, None)
+                } else {
+                    match label {
+                        None => Ir::Continue(0),
+                        Some(label) => {
+                            match env.iter().rev().position(|&l| l.as_ref() == Some(label)) {
+                                None => {
+                                    Ir::Error(CompileError::UndeclaredLabel(label.clone()), None)
+                                }
+                                Some(index) => Ir::Continue(index),
+                            }
+                        }
+                    }
+                }
+            }
+            Break(label) => {
+                if env.is_empty() {
+                    Ir::Error(CompileError::BreakOutsideLoop, None)
+                } else {
+                    match label {
+                        None => Ir::Break(0),
+                        Some(label) => {
+                            match env.iter().rev().position(|&l| l.as_ref() == Some(label)) {
+                                None => {
+                                    Ir::Error(CompileError::UndeclaredLabel(label.clone()), None)
+                                }
+                                Some(index) => Ir::Break(index),
+                            }
+                        }
+                    }
+                }
             }
             Block(stmts) => {
                 let mut next_head = None;
                 let mut next_tail = None;
                 for stmt in stmts.iter().rev() {
-                    let (head, tail) = stmt.to_cfg(cfg);
+                    let (head, tail) = stmt.to_cfg(cfg, env);
                     next_tail = next_tail.or(Some(tail));
                     cfg[tail].next = next_head;
                     next_head = Some(head);
@@ -204,14 +248,9 @@ impl Spanned<Syntax> {
             }
         };
 
+        let node = cfg.spanned(ir, self.span);
         (node, node)
     }
-}
-
-#[derive(Debug, Clone)]
-struct Scope {
-    label: Option<String>,
-    cont: Index,
 }
 
 impl CfgNode {
@@ -283,10 +322,10 @@ impl Cfg {
         self[node].expr = Ir::Error(kind, Some(new_child));
     }
 
-    /// Replace the given node with an error node. This is useful when the node
-    /// in question is malformed such that it will cause an assertion failure or
-    /// additional spurious error further down the compilation process, and
-    /// removing it is necessary in order to try and generate any more errors.
+    /// Replace the given node with an error node. This is useful when the node in question is
+    /// malformed such that it will cause an assertion failure or additional spurious error further
+    /// down the compilation process, and removing it is necessary in order to try and generate any
+    /// more errors.
     fn replace_error_at(&mut self, node: Index, kind: CompileError) {
         if let Ir::Error(_, _) = self[node].expr {
             self.insert_error_at(node, kind);
@@ -306,11 +345,10 @@ impl Cfg {
         self.insert(CfgNode::spanned(expr, span))
     }
 
-    /// Eliminate `LabeledBreak` and `IndexedBreak` nodes, replacing them w/ redirections to the
-    /// nodes they reference and effectively dereferencing the continuations they represent. In
-    /// addition, eliminate `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation`
-    /// nodes.
-    fn eliminate_breaks_and_labels(&mut self, node: Index) {
+    /// Eliminate `Break` nodes, replacing them w/ redirections to the nodes they reference and
+    /// effectively dereferencing the continuations they represent. In addition, eliminate
+    /// `LabeledContinuation` nodes, replacing them w/ `IndexedContinuation` nodes.
+    fn eliminate_breaks(&mut self, node: Index) {
         let mut env = Vec::new();
         eliminate_inner(self, &mut env, |_, _| unreachable!(), node);
         debug_assert!(
@@ -352,17 +390,22 @@ impl Cfg {
 
         fn assign_body(node: Index) -> impl FnOnce(&mut Cfg, Index) {
             move |cfg, to_assign| match &mut cfg[node].expr {
-                Ir::Loop(_, body) => *body = to_assign,
+                Ir::Loop(body) => *body = to_assign,
                 _ => panic!(),
             }
         }
 
-        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Scope>, eliminate: F, node: Index)
+        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Index>, eliminate: F, node: Index)
         where
             F: FnOnce(&mut Cfg, Index),
         {
             match &cfg[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Done | Ir::Type(_) | Ir::Error(_, None) => {
+                Ir::Done
+                | Ir::Recv(_)
+                | Ir::Send(_)
+                | Ir::Type(_)
+                | Ir::Continue(_)
+                | Ir::Error(_, None) => {
                     if let Some(next) = cfg[node].next {
                         eliminate_inner(cfg, env, assign_next(node), next);
                     }
@@ -392,130 +435,22 @@ impl Cfg {
                         eliminate_inner(cfg, env, assign_next(node), next);
                     }
                 }
-                Ir::Loop(label, body) => {
-                    let label = label.clone();
+                Ir::Loop(body) => {
                     let body = *body; // pacify borrowck, or else it thinks cfg is borrowed
 
                     let maybe_next = cfg[node].next;
                     let cont =
                         maybe_next.unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done)));
-                    let scope = Scope { label, cont };
 
-                    if scope.label.is_some()
-                        && env.iter().any(|ancestor| ancestor.label == scope.label)
-                    {
-                        let label_name = scope.label.as_ref().unwrap().clone();
-                        cfg.insert_error_at(node, CompileError::ShadowedLabel(label_name));
-                    }
-
-                    env.push(scope);
+                    env.push(cont);
                     eliminate_inner(cfg, env, assign_body(node), body);
                     env.pop();
 
                     eliminate_inner(cfg, env, assign_next(node), cont);
                 }
-                Ir::LabeledContinue(label) => {
-                    let labeled_index = env
-                        .iter()
-                        .rev()
-                        .position(|s| s.label.as_ref() == Some(label));
-
-                    if let Some(i) = labeled_index {
-                        cfg[node].expr = Ir::IndexedContinue(i);
-                    } else {
-                        let compile_error = CompileError::UndeclaredLabel(label.clone());
-
-                        // Similar to the break elimination cases, we want to eliminate this even
-                        // though we can't figure out the exact continuation of it so that we don't
-                        // blow up when lowering to the target language. We can do this by just
-                        // replacing it with an `Ir::Error` node.
-                        cfg.replace_error_at(node, compile_error);
-                    }
-
-                    if let Some(next) = cfg[node].next {
-                        // If this continue statement has a next node, it means it's effectively
-                        // not at the end of a block, and there's dead code, which is not something
-                        // we want to accept.
-                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
-                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
-
-                        // We also want to go forward and report any errors with the dead code, and
-                        // eliminate any breaks potentially further in.
-                        eliminate_inner(cfg, env, assign_next(node), next);
-                    }
-                }
-                Ir::LabeledBreak(label) => {
-                    let labeled_scope = env
-                        .iter()
-                        .rev()
-                        .position(|s| s.label.as_ref() == Some(label));
-                    let label = label.clone();
-
-                    if let Some(next) = cfg[node].next {
-                        // Same rationale as `LabeledContinue`.
-                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
-                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
-
-                        eliminate_inner(cfg, env, assign_next(node), next);
-                    }
-
-                    if let Some(cont) = labeled_scope.map(|s| env[s].cont) {
-                        eliminate(cfg, cont);
-                    } else {
-                        let compile_error = CompileError::UndeclaredLabel(label);
-
-                        // Eliminate the break, but replace it with an error node instead. This way,
-                        // the CFG can still get by conversion to a session type without panicking
-                        // on an uneliminated break.
-                        cfg.replace_error_at(node, compile_error);
-                    }
-                }
-                Ir::IndexedContinue(debruijn_index) => {
-                    // Ordinarily, the only way this would encounter a DeBruijn index of > 0 is if
-                    // such an indexed continue is generated by hand, maybe in a test. Otherwise the
-                    // only way that an `IndexedContinue` is normally generated is through parsing,
-                    // which will only ever generate an indexed continue with an index of zero. In
-                    // this case, this error means that the user wrote a `continue` outside of a
-                    // loop.
-                    //
-                    // Another reason this error might be hit is if the eliminate-breaks-and-labels
-                    // pass is run more than once on the same term, as we generate non-zero indexed
-                    // continues from this pass. By not erroring on seeing a DeBruijn index > 0 we
-                    // make this pass idempotent. However, as the architecture of the compiler is
-                    // currently, this should never happen.
-                    if *debruijn_index >= env.len() {
-                        // This could be a `replace_error_at`, but we can use `insert` here because
-                        // this won't blow up later.
-                        cfg.insert_error_at(node, CompileError::ContinueOutsideLoop);
-                    }
-
-                    if let Some(next) = cfg[node].next {
-                        // Same rationale as `LabeledContinue`.
-                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
-                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
-
-                        eliminate_inner(cfg, env, assign_next(node), next);
-                    }
-                }
-                Ir::IndexedBreak(debruijn_index) => {
-                    let debruijn_index = *debruijn_index; // Pacify borrowck.
-
-                    if let Some(next) = cfg[node].next {
-                        // Same rationale as `LabeledContinue`.
-                        cfg.insert_error_at(node, CompileError::FollowingCodeUnreachable);
-                        cfg.insert_error_at(next, CompileError::UnreachableStatement);
-
-                        eliminate_inner(cfg, env, assign_next(node), next);
-                    }
-
-                    // The same caveats as in the above `IndexedContinue` case also apply to the
-                    // `IndexedBreak` variant.
-                    if debruijn_index >= env.len() {
-                        // See rationale for this same construct in `Ir::LabeledBreak` arm.
-                        cfg.replace_error_at(node, CompileError::BreakOutsideLoop);
-                    } else {
-                        eliminate(cfg, env[env.len() - 1 - debruijn_index].cont);
-                    }
+                Ir::Break(index) => {
+                    let index = *index; // Pacify borrowck.
+                    eliminate(cfg, env[env.len() - 1 - index]);
                 }
             }
         }
@@ -561,12 +496,11 @@ impl Cfg {
                     .collect();
                 Target::Offer(targets)
             }
-            Ir::Loop(_, body) => Target::Loop(Rc::new(self.to_target_inner(errors, cont, *body))),
-            Ir::IndexedBreak(_) | Ir::LabeledBreak(_) => {
+            Ir::Loop(body) => Target::Loop(Rc::new(self.to_target_inner(errors, cont, *body))),
+            Ir::Break(_) => {
                 panic!("uneliminated break in CFG")
             }
-            Ir::LabeledContinue(_) => panic!("uneliminated labeled continue in CFG"),
-            Ir::IndexedContinue(i) => {
+            Ir::Continue(i) => {
                 debug_assert!(node.next.is_none(), "continue must be the end of a block");
                 Target::Continue(*i)
             }
@@ -724,22 +658,22 @@ mod tests {
         let mut cfg = Cfg::new();
         let send = cfg.send("i64");
         let recv = cfg.recv("i64");
-        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+        let continue0 = cfg.singleton(Ir::Continue(0));
         cfg[send].next = Some(continue0);
-        let continue1 = cfg.singleton(Ir::IndexedContinue(1));
+        let continue1 = cfg.singleton(Ir::Continue(1));
         cfg[recv].next = Some(continue1);
         let choose_opts = vec![send, recv];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client_tally = cfg.singleton(Ir::Loop(None, choose));
+        let client_tally = cfg.singleton(Ir::Loop(choose));
 
-        let break0 = cfg.singleton(Ir::IndexedBreak(0));
+        let break0 = cfg.singleton(Ir::Break(0));
         let send = cfg.send("Operation");
         cfg[send].next = Some(client_tally);
         let choose_opts = vec![break0, send];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client = cfg.singleton(Ir::Loop(None, choose));
+        let client = cfg.singleton(Ir::Loop(choose));
 
-        cfg.eliminate_breaks_and_labels(client);
+        cfg.eliminate_breaks(client);
         let s = format!("{}", cfg.to_target(client).unwrap());
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
@@ -747,18 +681,18 @@ mod tests {
     #[test]
     fn tally_client_cfg_call() {
         let mut cfg = Cfg::new();
-        let break0 = cfg.singleton(Ir::IndexedBreak(0));
+        let break0 = cfg.singleton(Ir::Break(0));
         let send = cfg.send("Operation");
         let callee = cfg.type_("ClientTally");
         let call = cfg.singleton(Ir::Call(callee));
         cfg[send].next = Some(call);
-        let continue0 = cfg.singleton(Ir::IndexedContinue(0));
+        let continue0 = cfg.singleton(Ir::Continue(0));
         cfg[call].next = Some(continue0);
         let choose_opts = vec![break0, send];
         let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client = cfg.singleton(Ir::Loop(None, choose));
+        let client = cfg.singleton(Ir::Loop(choose));
 
-        cfg.eliminate_breaks_and_labels(client);
+        cfg.eliminate_breaks(client);
         let s = format!("{}", cfg.to_target(client).unwrap());
         assert_eq!(
             s,

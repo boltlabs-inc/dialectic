@@ -106,6 +106,6 @@ fn undeclared_label() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        CompileError::UndeclaredLabel("foo".to_owned()).to_string()
+        CompileError::ContinueOutsideLoop.to_string()
     );
 }
