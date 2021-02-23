@@ -22,16 +22,25 @@ pub use crate::{
 /// A compilation error due to invalid (but parseable) input in the surface macro syntax.
 #[derive(Error, Debug, Clone)]
 pub enum CompileError {
+    /// Error resulting from `'a loop { ... 'a loop { ... }}`.
     #[error("label name `'{0}` shadows a label name that is already in scope")]
     ShadowedLabel(String),
+    /// Error resulting from `continue 'a` or `break 'a` which *are* inside a `loop`, but not inside
+    /// any loop with the label `'a`.
     #[error("undeclared label `'{0}`")]
     UndeclaredLabel(String),
+    /// Error resulting from any call to `continue` outside of a `loop`.
     #[error("cannot `continue` outside of a loop")]
     ContinueOutsideLoop,
+    /// Error resulting from any call to `break` outside of a `loop`.
     #[error("cannot `break` outside of a loop")]
     BreakOutsideLoop,
+    /// Error resulting from control flow analysis finding that a statement unconditionally jumps
+    /// away from following code.
     #[error("any code following this statement is unreachable")]
     FollowingCodeUnreachable,
+    /// Error resulting from control flow analysis finding that a statement can never be reached
+    /// because of preceding control flow.
     #[error("unreachable statement")]
     UnreachableStatement,
 }
@@ -39,7 +48,9 @@ pub enum CompileError {
 #[derive(Debug, Clone, Copy)]
 /// A thing attached to some `Span` that tracks its origin in the macro invocation.
 pub struct Spanned<T> {
+    /// The thing to which the [`Span`] is attached.
     pub inner: T,
+    /// The [`Span`] which is attache to the thing.
     pub span: Span,
 }
 

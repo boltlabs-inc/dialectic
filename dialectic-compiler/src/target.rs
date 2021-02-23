@@ -1,3 +1,5 @@
+//! The target language of the `Session!` macro, produced by the compiler.
+
 use {
     lazy_static::lazy_static,
     proc_macro2::{Span, TokenStream},
@@ -6,18 +8,36 @@ use {
     syn::{Ident, Type},
 };
 
+/// The target language of the macro: the type level language of session types in Dialectic.
+///
+/// This is a one-to-one mapping to the literal syntax you would write without using the `Session!`
+/// macro. The only constructors which don't correspond directly to constructs with `Session`
+/// implementations are [`Target::Then`], which translates to a type-level function invocation to
+/// concatenate two session types, and [`Target::Type`], which translates to an embedding of some
+/// arbitrary session type by name (i.e. defined elsewhere as a synonym).
 #[derive(Clone, Debug)]
 pub enum Target {
+    /// Session type: `Done`.
     Done,
+    /// Session type: `Recv<T, P>`.
     Recv(Type, Rc<Target>),
+    /// Session type: `Send<T, P>`.
     Send(Type, Rc<Target>),
+    /// Session type: `Choose<(P, ...)>`.
     Choose(Vec<Target>),
+    /// Session type: `Offer<(P, ...)>`.
     Offer(Vec<Target>),
+    /// Session type: `Loop<...>`.
     Loop(Rc<Target>),
+    /// Session type: `Continue<_N>`.
     Continue(usize),
+    /// Session type: `Split<P, Q, R>`.
     Split(Rc<Target>, Rc<Target>, Rc<Target>),
+    /// Session type: `Call<P, Q>`.
     Call(Rc<Target>, Rc<Target>),
+    /// Session type: `<P as Then<Q>>::Combined`.
     Then(Rc<Target>, Rc<Target>),
+    /// Some arbitrary session type referenced by name.
     Type(Type),
 }
 

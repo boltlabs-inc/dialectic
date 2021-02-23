@@ -1,3 +1,5 @@
+//! The parser for the surface syntax of the `Session!` macro.
+
 use {
     proc_macro2::Span,
     syn::{
