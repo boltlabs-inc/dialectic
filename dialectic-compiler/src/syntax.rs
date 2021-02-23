@@ -1,3 +1,5 @@
+//! The abstract surface syntax for the `Session!` macro, produced by the parser.
+
 use {
     syn::{Error, Type},
     thunderdome::Index,
@@ -13,6 +15,7 @@ use crate::{
 /// as a block w/o an extra layer of braces.
 #[derive(Debug, Clone)]
 pub struct Invocation {
+    /// The spanned syntax representing a full invocation of the macro.
     pub syntax: Spanned<Syntax>,
 }
 
@@ -23,42 +26,72 @@ pub struct Invocation {
 /// style, instead encoding sequences of operations using the `;` operator within blocks.
 #[derive(Debug, Clone)]
 pub enum Syntax {
+    /// Syntax: `recv T`.
     Recv(Type),
+    /// Syntax: `send T`.
     Send(Type),
+    /// Syntax: `call T` or `call { ... }`.
     Call(Box<Spanned<Syntax>>),
+    /// Syntax: `choose { _0 => ..., ... }`.
     Choose(Vec<Spanned<Syntax>>),
+    /// Syntax: `offer { _0 => ..., ... }`.
     Offer(Vec<Spanned<Syntax>>),
+    /// Syntax: `split { <- ..., -> ... }`.
     Split(Box<Spanned<Syntax>>, Box<Spanned<Syntax>>),
+    /// Syntax: `loop { ... }` or `'label loop { ... }`.
     Loop(Option<String>, Box<Spanned<Syntax>>),
+    /// Syntax: `break` or `break 'label`.
     Break(Option<String>),
+    /// Syntax: `continue` or `continue 'label`.
     Continue(Option<String>),
+    /// Syntax: `{ ... }`
     Block(Vec<Spanned<Syntax>>),
+    /// Syntax: `T`.
     Type(Type),
 }
 
 impl Syntax {
+    /// Construct a [`Syntax::Recv`] from a string representing a type.
+    ///
+    /// # Panics
+    ///
+    /// If the type does not parse correctly, this panics.
     pub fn recv(ty: &str) -> Self {
         Syntax::Recv(syn::parse_str(ty).unwrap())
     }
 
+    /// Construct a [`Syntax::Send`] from a string representing a type.
+    ///
+    /// # Panics
+    ///
+    /// If the type does not parse correctly, this panics.
     pub fn send(ty: &str) -> Self {
         Syntax::Send(syn::parse_str(ty).unwrap())
     }
 
+    /// Construct a [`Syntax::Call`] from its inner callee.
     pub fn call(callee: impl Into<Spanned<Syntax>>) -> Self {
         Syntax::Call(Box::new(callee.into()))
     }
 
+    /// Construct a [`Syntax::Loop`] from its (optional) label and its body.
     pub fn loop_(label: Option<String>, body: impl Into<Spanned<Syntax>>) -> Self {
         Syntax::Loop(label, Box::new(body.into()))
     }
 
+    /// Construct a [`Syntax::Type`] from a string representing a type.
+    ///
+    /// # Panics
+    ///
+    /// If the type does not parse correctly, this panics.
     pub fn type_(ty: &str) -> Self {
         Syntax::Type(syn::parse_str(ty).unwrap())
     }
 }
 
 impl Spanned<Syntax> {
+    /// Compile a spanned syntax tree into either a representation of a valid session type
+    /// [`Target`], or an [`Error`].
     pub fn to_session(&self) -> Result<Target, Error> {
         let mut cfg = Cfg::new();
         let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
