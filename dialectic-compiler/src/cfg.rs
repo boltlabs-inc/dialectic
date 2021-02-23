@@ -240,7 +240,7 @@ impl Cfg {
 
                     env.push(cont); // Enter new loop environment
                     eliminate_inner(cfg, env, origin_body(node), body);
-                    env.pop(); // Exit loop environment
+                    let _ = env.pop(); // Exit loop environment
 
                     eliminate_inner(cfg, env, origin_next(node), cont);
                 }
