@@ -105,16 +105,21 @@ pub mod prelude {
     pub use crate::backend::{Choice, Receive, Transmit};
     #[doc(no_inline)]
     pub use crate::session::Session;
+    #[doc(no_inline)]
     pub use crate::tuple::{List, Tuple};
     #[doc(no_inline)]
     pub use crate::types::{Call, Choose, Continue, Done, Loop, Offer, Recv, Send, Split};
+    #[doc(no_inline)]
     pub use crate::unary::constants::*;
+    #[doc(no_inline)]
     pub use crate::unary::types::*;
+    #[doc(no_inline)]
     pub use crate::unary::{LessThan, Unary, S, Z};
     #[doc(no_inline)]
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
+    #[doc(no_inline)]
     pub use dialectic_macro::Session;
 }
 
@@ -125,6 +130,7 @@ pub mod types;
 pub mod unary;
 
 mod session;
+pub use dialectic_macro::Session;
 pub use session::Session;
 
 mod chan;
