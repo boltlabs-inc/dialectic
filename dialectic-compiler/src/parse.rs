@@ -48,10 +48,10 @@ impl Parse for SplitArm {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
         let dir = if lookahead.peek(Token![->]) {
-            input.parse::<Token![->]>()?;
+            let _ = input.parse::<Token![->]>()?;
             Direction::Outbound
         } else if lookahead.peek(Token![<-]) {
-            input.parse::<Token![<-]>()?;
+            let _ = input.parse::<Token![<-]>()?;
             Direction::Inbound
         } else {
             return Err(lookahead.error());
@@ -76,7 +76,7 @@ impl Parse for ChoiceArm {
             .strip_prefix("_")
             .ok_or_else(|| input.error("expected index identifier starting with an underscore"))
             .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
-        input.parse::<Token![=>]>()?;
+        let _ = input.parse::<Token![=>]>()?;
         span = span.join(input.span()).unwrap_or(span);
         let arm = input.parse::<Spanned<Syntax>>()?;
         Ok(ChoiceArm { index, arm, span })
@@ -236,8 +236,8 @@ impl Parse for Spanned<Syntax> {
                 loop_span = input.span();
                 let lifetime = loop_span.combine(input.parse::<Lifetime>()?);
                 let name = lifetime.ident.to_string();
-                loop_span.combine(input.parse::<Token![:]>()?);
-                loop_span.combine(input.parse::<Token![loop]>()?);
+                let _ = loop_span.combine(input.parse::<Token![:]>()?);
+                let _ = loop_span.combine(input.parse::<Token![loop]>()?);
                 Some(name)
             } else {
                 loop_span = input.parse::<Token![loop]>()?.span();
@@ -254,7 +254,7 @@ impl Parse for Spanned<Syntax> {
             let mut break_span = input.parse::<Token![break]>()?.span();
             let label = if input.peek(Lifetime) {
                 let lifetime = input.parse::<Lifetime>()?;
-                break_span.combine(&lifetime);
+                let _ = break_span.combine(&lifetime);
                 Some(lifetime.ident.to_string())
             } else {
                 None
@@ -269,7 +269,7 @@ impl Parse for Spanned<Syntax> {
             let mut continue_span = input.parse::<Token![continue]>()?.span();
             let label = if input.peek(Lifetime) {
                 let lifetime = input.parse::<Lifetime>()?;
-                continue_span.combine(&lifetime);
+                let _ = continue_span.combine(&lifetime);
                 Some(lifetime.ident.to_string())
             } else {
                 None

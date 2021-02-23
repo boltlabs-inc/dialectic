@@ -99,7 +99,7 @@ impl Spanned<Syntax> {
                 // Convert the body in the environment with this loop label
                 env.push(maybe_label);
                 let (head, tail) = body.to_cfg(cfg, env);
-                env.pop();
+                let _ = env.pop();
 
                 // Set the continuation for the loop if it doesn't end in a `Break` or `Continue`
                 match cfg[tail].expr {
