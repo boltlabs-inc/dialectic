@@ -39,7 +39,7 @@
 //!   reference](#quick-reference)**, then read more in the [`types`](crate::types) module and the
 //!   documentation for [`Chan`](crate::Chan).
 //! - You may also find helpful the **[full self-contained
-//!   examples](https://github.com/boltlabs-inc/dialectic/tree/main/examples)**, which show how all
+//!   examples](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic/examples)**, which show how all
 //!   the features of the crate come together to build session-typed network programs.
 //! - If you want to **integrate your own channel type** with Dialectic, you need to implement the
 //!   [`Transmit`] and [`Receive`] traits from the [`backend`] module.
