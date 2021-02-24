@@ -95,11 +95,17 @@ impl Spanned<Syntax> {
     pub fn to_session(&self) -> Result<Target, Error> {
         let mut cfg = Cfg::new();
         let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
+        cfg.resolve_scopes(head);
+        cfg.report_dead_code(head);
         cfg.eliminate_breaks(head);
         cfg.to_target(head)
     }
 
-    fn to_cfg<'a>(&'a self, cfg: &mut Cfg, env: &mut Vec<&'a Option<String>>) -> (Index, Index) {
+    fn to_cfg<'a>(
+        &'a self,
+        cfg: &mut Cfg,
+        env: &mut Vec<&'a Option<String>>,
+    ) -> (Option<Index>, Option<Index>) {
         use Syntax::*;
         let ir = match &self.inner {
             Recv(ty) => Ir::Recv(ty.clone()),
@@ -131,17 +137,12 @@ impl Spanned<Syntax> {
             Loop(maybe_label, body) => {
                 // Convert the body in the environment with this loop label
                 env.push(maybe_label);
-                let (head, tail) = body.to_cfg(cfg, env);
+                let head = body.to_cfg(cfg, env).0;
                 let _ = env.pop();
 
-                // Set the continuation for the loop if it doesn't end in a `Break` or `Continue`
-                match cfg[tail].expr {
-                    Ir::Break(_) | Ir::Continue(_) => {}
-                    _ => cfg[tail].next = Some(cfg.singleton(Ir::Continue(0))),
-                }
-
-                // The `Ir` for this loop just wraps its body
-                let ir = Ir::Loop(head);
+                // The `Ir` for this loop just wraps its body, but we want to make it implicitly an
+                // infinite loop if its body is empty
+                let ir = Ir::Loop(head.or_else(|| Some(cfg.singleton(Ir::Continue(0)))));
 
                 // Check to ensure the environment does not already contain this label
                 if maybe_label.is_some() && env.contains(&maybe_label) {
@@ -192,21 +193,22 @@ impl Spanned<Syntax> {
                 let mut next_tail = None;
                 for stmt in stmts.iter().rev() {
                     let (head, tail) = stmt.to_cfg(cfg, env);
-                    next_tail = next_tail.or(Some(tail));
-                    cfg[tail].next = next_head;
-                    next_head = Some(head);
-                }
+                    next_tail = next_tail.or(tail);
 
-                let head = next_head.unwrap_or_else(|| cfg.spanned(Ir::Done, self.span));
-                let tail = next_tail.unwrap_or(head);
+                    if let Some(tail) = tail {
+                        cfg[tail].next = next_head
+                    }
+
+                    next_head = head;
+                }
 
                 // Only case where we return a differing head and tail, since a `Block` is the only
                 // expression to be compiled into multiple nodes
-                return (head, tail);
+                return (next_head, next_tail);
             }
         };
 
         let node = cfg.spanned(ir, self.span);
-        (node, node)
+        (Some(node), Some(node))
     }
 }
