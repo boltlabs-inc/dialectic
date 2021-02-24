@@ -14,3 +14,7 @@ dialectic-compiler = { path = "../dialectic-compiler" }
 syn = "1.0.60"
 proc-macro2 = "1.0.24"
 quote = "1.0.9"
+
+[dev-dependencies]
+dialectic = { path = "../dialectic" }
+static_assertions = "1.1"

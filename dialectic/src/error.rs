@@ -1,3 +1,6 @@
+#[allow(unused_imports)] // To link with documentation
+use crate::prelude::*;
+
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
 /// When using [`split`](Chan::split), the resultant two channels can only send or only receive,

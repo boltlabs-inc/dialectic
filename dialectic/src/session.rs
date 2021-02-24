@@ -2,6 +2,7 @@ pub use crate::chan::Over;
 
 use super::*;
 use crate::types::*;
+use std::marker;
 
 /// The `Session` extension trait gives methods to create session-typed channels from session types.
 /// These are implemented as static methods on the session type itself.

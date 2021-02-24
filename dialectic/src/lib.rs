@@ -86,7 +86,6 @@ Once you've got a channel, here's what you can do:
 #![forbid(broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use std::marker;
 #[macro_use]
 extern crate derivative;
 use futures::Future;
@@ -101,17 +100,15 @@ mod chan;
 mod error;
 mod offer_macro;
 mod session;
-mod session_macro;
+
 pub use chan::{Branches, Chan};
+pub use dialectic_macro::Session;
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;
-pub use session_macro::Session;
 
-#[allow(unused_imports)]
-use crate::backend::*;
-
-#[allow(unused_imports)]
-use crate::prelude::*;
+use backend::*;
+#[allow(unused_imports)] // For documentation linking
+use prelude::*;
 
 /// The prelude module for quickly getting started with Dialectic.
 ///
@@ -122,8 +119,6 @@ pub mod prelude {
     pub use crate::backend::{Choice, Receive, Transmit};
     #[doc(no_inline)]
     pub use crate::session::Session;
-    #[doc(no_inline)]
-    pub use crate::session_macro::Session;
     #[doc(no_inline)]
     pub use crate::tuple::{List, Tuple};
     #[doc(no_inline)]
@@ -138,4 +133,6 @@ pub mod prelude {
     pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
     #[doc(no_inline)]
     pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
+    #[doc(no_inline)]
+    pub use dialectic_macro::Session;
 }
