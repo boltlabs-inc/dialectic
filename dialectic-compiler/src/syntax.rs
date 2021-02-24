@@ -1,9 +1,9 @@
 //! The abstract surface syntax for the `Session!` macro, produced by the parser.
 
-use {
-    syn::{Error, Type},
-    thunderdome::Index,
-};
+use quote::ToTokens;
+use std::fmt::{self, Display, Formatter};
+use syn::{Error, Type};
+use thunderdome::Index;
 
 use crate::{
     cfg::{Cfg, Ir},
@@ -48,6 +48,71 @@ pub enum Syntax {
     Block(Vec<Spanned<Syntax>>),
     /// Syntax: `T`.
     Type(Type),
+}
+
+impl Display for Syntax {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use Syntax::*;
+        let keyword = match self {
+            Recv(_) => "recv",
+            Send(_) => "send",
+            Call(_) => "call",
+            Choose(_) => "choose",
+            Offer(_) => "offer",
+            Split(_, _) => "split",
+            Loop(_, _) => "loop",
+            Break(_) => "break",
+            Continue(_) => "continue",
+            Block(_) | Type(_) => "",
+        };
+        match self {
+            Recv(ty) | Send(ty) | Type(ty) => {
+                write!(f, "{} ", keyword)?;
+                write!(f, "{}", ty.to_token_stream())?;
+            }
+            Call(callee) => {
+                write!(f, "{} ", keyword)?;
+                if matches!(callee.inner, Type(_) | Block(_)) {
+                    write!(f, "{}", callee.inner)?;
+                } else {
+                    write!(f, "{{ {} }}", callee.inner)?;
+                }
+            }
+            Choose(choices) | Offer(choices) => {
+                write!(f, "{} ", keyword)?;
+                write!(f, "{{ ")?;
+                for (i, Spanned { inner: choice, .. }) in choices.iter().enumerate() {
+                    write!(f, "_{} => {},", i, choice)?;
+                }
+                write!(f, " }}")?;
+            }
+            Split(tx, rx) => {
+                write!(f, "{} ", keyword)?;
+                write!(f, "{{ -> {}, <- {}, }}", tx.inner, rx.inner)?;
+            }
+            Loop(label, body) => {
+                if let Some(label) = label {
+                    write!(f, "'{}: ", label)?;
+                }
+                write!(f, "{} ", keyword)?;
+                write!(f, "{{ {} }}", body.inner)?;
+            }
+            Break(label) | Continue(label) => {
+                write!(f, "{}", keyword)?;
+                if let Some(label) = label {
+                    write!(f, " '{}", label)?;
+                }
+            }
+            Block(statements) => {
+                write!(f, "{{ ")?;
+                for Spanned { inner, .. } in statements {
+                    write!(f, "{}; ", inner)?;
+                }
+                write!(f, "}}")?;
+            }
+        };
+        Ok(())
+    }
 }
 
 impl Syntax {
