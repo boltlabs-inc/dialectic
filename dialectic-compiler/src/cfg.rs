@@ -1,11 +1,56 @@
 use {
     proc_macro2::Span,
-    std::{mem, ops, rc::Rc},
+    std::{
+        collections::{HashMap, HashSet},
+        ops,
+        rc::Rc,
+    },
     syn::{Error, Type},
     thunderdome::{Arena, Index},
 };
 
 use crate::{target::Target, CompileError, Spanned};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FlowState {
+    Impassable,
+    Passable,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowAnalysis {
+    states: HashMap<Index, FlowState>,
+    progress: bool,
+}
+
+impl FlowAnalysis {
+    fn new() -> Self {
+        Self {
+            states: HashMap::new(),
+            progress: false,
+        }
+    }
+
+    fn mark_reachable(&mut self, node: Index) {
+        let Self { states, progress } = self;
+        let _ = states.entry(node).or_insert_with(|| {
+            *progress = true;
+            FlowState::Impassable
+        });
+    }
+
+    fn mark_passable(&mut self, node: Index) {
+        let _ = self.states.insert(node, FlowState::Passable);
+    }
+
+    fn is_reachable(&self, node: Index) -> bool {
+        self.states.contains_key(&node)
+    }
+
+    fn is_passable(&self, node: Index) -> bool {
+        self.states.get(&node) == Some(&FlowState::Passable)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CfgNode {
@@ -16,14 +61,13 @@ pub struct CfgNode {
 
 #[derive(Debug, Clone)]
 pub enum Ir {
-    Done,
     Recv(Type),
     Send(Type),
-    Call(Index),
-    Choose(Vec<Index>),
-    Offer(Vec<Index>),
-    Split(Index, Index),
-    Loop(Index),
+    Call(Option<Index>),
+    Choose(Vec<Option<Index>>),
+    Offer(Vec<Option<Index>>),
+    Split(Option<Index>, Option<Index>),
+    Loop(Option<Index>),
     Break(usize),
     Continue(usize),
     Type(Type),
@@ -90,7 +134,7 @@ impl Cfg {
         // Temporarily move the body out of the node.
         let (child, span) = {
             let mut_node = &mut self[node];
-            let child = mem::replace(&mut mut_node.expr, Ir::Done);
+            let child = mut_node.expr.clone();
             let span = mut_node.span;
             (child, span)
         };
@@ -122,41 +166,261 @@ impl Cfg {
         self.insert(CfgNode::spanned(expr, span))
     }
 
+    pub fn resolve_scopes(&mut self, node: Option<Index>) {
+        let mut visited = HashSet::new();
+        let mut queue = node
+            .into_iter()
+            .map(|node| (None, node))
+            .collect::<Vec<(Option<Index>, Index)>>();
+
+        while let Some((scope, node)) = queue.pop() {
+            let CfgNode { expr, next, .. } = &mut self[node];
+
+            match expr {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) => {}
+                Ir::Break(_) | Ir::Continue(_) => continue,
+                Ir::Call(child) | Ir::Error(_, child) => {
+                    if let Some(child) = *child {
+                        if visited.insert(child) {
+                            queue.push((None, child));
+                        }
+                    }
+                }
+                Ir::Split(tx_only, rx_only) => {
+                    if let Some(tx_only) = *tx_only {
+                        if visited.insert(tx_only) {
+                            queue.push((None, tx_only));
+                        }
+                    }
+
+                    if let Some(rx_only) = *rx_only {
+                        if visited.insert(rx_only) {
+                            queue.push((None, rx_only));
+                        }
+                    }
+                }
+                Ir::Choose(choices) | Ir::Offer(choices) => {
+                    let cont = next.or(scope);
+                    for &choice in choices.iter().filter_map(Option::as_ref) {
+                        if visited.insert(choice) {
+                            queue.push((cont, choice));
+                        }
+                    }
+                }
+                Ir::Loop(body) => {
+                    if let Some(body) = *body {
+                        let continue0 = self.singleton(Ir::Continue(0));
+                        if visited.insert(body) {
+                            queue.push((Some(continue0), body));
+                        }
+                    }
+                }
+            }
+
+            match &mut self[node].next {
+                Some(next) => {
+                    if visited.insert(*next) {
+                        queue.push((scope, *next));
+                    }
+                }
+                next @ None => *next = scope,
+            }
+        }
+    }
+
+    fn analyze_control_flow(&self, node: Option<Index>) -> FlowAnalysis {
+        let mut analysis = FlowAnalysis::new();
+        if let Some(node) = node {
+            let mut visited = HashSet::new();
+            let mut next_env = Vec::new();
+            let mut loop_env = Vec::new();
+            interpret(
+                self,
+                &mut visited,
+                &mut analysis,
+                &mut next_env,
+                &mut loop_env,
+                node,
+            );
+            debug_assert!(
+                next_env.is_empty(),
+                "mismatched number of next pointer push/pop in `analyze_control_flow`"
+            );
+            debug_assert!(
+                loop_env.is_empty(),
+                "mismatched number of loop pointer push/pop in `analyze_control_flow`"
+            );
+        }
+        return analysis;
+
+        struct LoopScope {
+            broken: bool,
+        }
+
+        fn interpret(
+            cfg: &Cfg,
+            visited: &mut HashSet<Index>,
+            analysis: &mut FlowAnalysis,
+            next_env: &mut Vec<Index>,
+            loop_env: &mut Vec<LoopScope>,
+            node_index: Index,
+        ) {
+            if !visited.insert(node_index) {
+                return;
+            }
+
+            analysis.mark_reachable(node_index);
+
+            let node = &cfg[node_index];
+
+            match &node.expr {
+                Ir::Continue(_) => {}
+                Ir::Send(_) | Ir::Recv(_) | Ir::Error(_, None) | Ir::Type(_) | Ir::Call(None) => {
+                    analysis.mark_passable(node_index);
+
+                    if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
+                        interpret(cfg, visited, analysis, next_env, loop_env, cont);
+                    }
+                }
+                Ir::Call(Some(child)) | Ir::Error(_, Some(child)) => {
+                    interpret(cfg, visited, analysis, next_env, loop_env, *child);
+
+                    if analysis.is_passable(*child) {
+                        analysis.mark_passable(node_index);
+
+                        if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
+                            interpret(cfg, visited, analysis, next_env, loop_env, cont);
+                        }
+                    }
+                }
+                Ir::Split(tx_only, rx_only) => {
+                    if let Some(cont) = node.next {
+                        next_env.push(cont);
+                    }
+
+                    if let Some(tx_only) = *tx_only {
+                        interpret(cfg, visited, analysis, next_env, loop_env, tx_only);
+                    }
+
+                    if let Some(rx_only) = *rx_only {
+                        interpret(cfg, visited, analysis, next_env, loop_env, rx_only);
+                    }
+
+                    if let Some(next) = node.next {
+                        let _ = next_env.pop();
+
+                        if analysis.is_reachable(next) {
+                            analysis.mark_passable(node_index);
+                        }
+                    }
+                }
+                Ir::Choose(choices) | Ir::Offer(choices) => {
+                    if let Some(cont) = node.next {
+                        next_env.push(cont);
+                    }
+
+                    for &choice in choices.iter().filter_map(Option::as_ref) {
+                        interpret(cfg, visited, analysis, next_env, loop_env, choice);
+                    }
+
+                    if let Some(next) = node.next {
+                        let _ = next_env.pop();
+
+                        if analysis.is_reachable(next) {
+                            analysis.mark_passable(node_index);
+                        }
+                    }
+                }
+                Ir::Loop(body) => {
+                    loop_env.push(LoopScope { broken: false });
+
+                    if let Some(body) = *body {
+                        interpret(cfg, visited, analysis, next_env, loop_env, body);
+                    }
+
+                    let loop_scope = loop_env.pop().unwrap();
+
+                    if loop_scope.broken {
+                        if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
+                            analysis.mark_passable(node_index);
+
+                            interpret(cfg, visited, analysis, next_env, loop_env, cont);
+                        }
+                    }
+                }
+                Ir::Break(debruijn_index) => {
+                    // A break here means we've escaped the loop we're breaking from, so we set
+                    // the corresponding loop scope's `escaped` flag.
+                    let reversed_index = loop_env.len() - 1 - *debruijn_index;
+                    loop_env[reversed_index].broken = true;
+                }
+            }
+        }
+    }
+
+    pub fn report_dead_code(&mut self, node: Option<Index>) {
+        let flow = self.analyze_control_flow(node);
+        let mut stack = node.into_iter().collect::<Vec<_>>();
+        let mut visited = HashSet::new();
+
+        while let Some(node) = stack.pop() {
+            if !visited.insert(node) {
+                break;
+            }
+
+            match &self[node].expr {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Continue(_) | Ir::Break(_) => {}
+                Ir::Loop(child) | Ir::Call(child) | Ir::Error(_, child) => stack.extend(*child),
+                Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
+                Ir::Choose(choices) | Ir::Offer(choices) => {
+                    stack.extend(choices.iter().filter_map(Option::as_ref))
+                }
+            }
+
+            if let Some(cont) = self[node].next {
+                if flow.is_passable(node) {
+                    stack.push(cont);
+                } else {
+                    self.insert_error_at(node, CompileError::FollowingCodeUnreachable);
+                    self.insert_error_at(cont, CompileError::UnreachableStatement);
+                }
+            }
+        }
+    }
+
     /// Eliminate `Break` nodes, replacing them w/ redirections to the nodes they reference and
     /// effectively dereferencing the continuations they represent.
-    pub fn eliminate_breaks(&mut self, node: Index) {
-        let mut env = Vec::new();
-        eliminate_inner(
-            self,
-            &mut env,
-            |_| unreachable!("all breaks are valid before this pass"),
-            node,
-        );
-        debug_assert!(
-            env.is_empty(),
-            "mismatched number of push/pop in `eliminate_breaks_and_labels`"
-        );
-
-        #[inline]
-        fn origin_next(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
-            move |cfg| {
-                cfg[node]
-                    .next
-                    .as_mut()
-                    .expect("there will always be a parent")
-            }
+    pub fn eliminate_breaks(&mut self, node: Option<Index>) {
+        if let Some(node) = node {
+            let mut loop_env = Vec::new();
+            eliminate_inner(
+                self,
+                None,
+                &mut loop_env,
+                |_| unreachable!("all breaks are valid before this pass"),
+                node,
+            );
+            debug_assert!(
+                loop_env.is_empty(),
+                "mismatched number of push/pop in `eliminate_breaks_and_labels`"
+            );
         }
 
         #[inline]
-        fn origin_child(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+        fn origin_next(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
+            move |cfg| &mut cfg[node].next
+        }
+
+        #[inline]
+        fn origin_child(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
             move |cfg| match &mut cfg[node].expr {
-                Ir::Call(child) | Ir::Error(_, Some(child)) => child,
+                Ir::Call(child) | Ir::Error(_, child) => child,
                 _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
         #[inline]
-        fn origin_tx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+        fn origin_tx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
             move |cfg| match &mut cfg[node].expr {
                 Ir::Split(tx_only, _) => tx_only,
                 _ => panic!("parent node has unexpectedly mutated"),
@@ -164,7 +428,7 @@ impl Cfg {
         }
 
         #[inline]
-        fn origin_rx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+        fn origin_rx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
             move |cfg| match &mut cfg[node].expr {
                 Ir::Split(_, rx_only) => rx_only,
                 _ => panic!("parent node has unexpectedly mutated"),
@@ -172,7 +436,7 @@ impl Cfg {
         }
 
         #[inline]
-        fn origin_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg) -> &mut Index {
+        fn origin_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
             move |cfg| match &mut cfg[node].expr {
                 Ir::Choose(choices) | Ir::Offer(choices) => &mut choices[i],
                 _ => panic!("parent node has unexpectedly mutated"),
@@ -180,43 +444,52 @@ impl Cfg {
         }
 
         #[inline]
-        fn origin_body(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Index {
+        fn origin_body(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
             move |cfg| match &mut cfg[node].expr {
                 Ir::Loop(body) => body,
                 _ => panic!("parent node has unexpectedly mutated"),
             }
         }
 
-        fn eliminate_inner<F>(cfg: &mut Cfg, env: &mut Vec<Index>, origin: F, node: Index)
-        where
-            F: FnOnce(&mut Cfg) -> &mut Index,
+        fn eliminate_inner<F>(
+            cfg: &mut Cfg,
+            next_env: Option<Index>,
+            loop_env: &mut Vec<Option<Index>>,
+            origin: F,
+            node: Index,
+        ) where
+            F: FnOnce(&mut Cfg) -> &mut Option<Index>,
         {
             match &cfg[node].expr {
-                Ir::Done
-                | Ir::Recv(_)
-                | Ir::Send(_)
-                | Ir::Type(_)
-                | Ir::Continue(_)
-                | Ir::Error(_, None) => {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Continue(_) => {
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, origin_next(node), next);
+                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
                     }
                 }
-                Ir::Call(child) | Ir::Error(_, Some(child)) => {
+                Ir::Call(child) | Ir::Error(_, child) => {
                     let child = *child;
-                    eliminate_inner(cfg, env, origin_child(node), child);
+
+                    if let Some(child) = child {
+                        eliminate_inner(cfg, next_env, loop_env, origin_child(node), child);
+                    }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, origin_next(node), next);
+                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
                     }
                 }
                 Ir::Split(tx_only, rx_only) => {
                     let (tx_only, rx_only) = (*tx_only, *rx_only);
-                    eliminate_inner(cfg, env, origin_tx_only(node), tx_only);
-                    eliminate_inner(cfg, env, origin_rx_only(node), rx_only);
+
+                    if let Some(tx_only) = tx_only {
+                        eliminate_inner(cfg, next_env, loop_env, origin_tx_only(node), tx_only);
+                    }
+
+                    if let Some(rx_only) = rx_only {
+                        eliminate_inner(cfg, next_env, loop_env, origin_rx_only(node), rx_only);
+                    }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, origin_next(node), next);
+                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
                     }
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
@@ -224,32 +497,34 @@ impl Cfg {
                     let choices = choices.clone();
                     // For each choose/offer arm, eliminate whatever's inside, using that particular
                     // arm's next pointer as the origin.
-                    for (i, choice) in choices.into_iter().enumerate() {
-                        eliminate_inner(cfg, env, origin_choice_n(node, i), choice);
+                    for (i, choice) in choices.into_iter().filter_map(|x| x).enumerate() {
+                        eliminate_inner(cfg, next_env, loop_env, origin_choice_n(node, i), choice);
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, env, origin_next(node), next);
+                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
                     }
                 }
                 Ir::Loop(body) => {
-                    let body = *body; // Pacify borrowck, or else it thinks cfg is borrowed
-                    let cont = cfg[node]
-                        .next
-                        .unwrap_or_else(|| cfg.insert(CfgNode::singleton(Ir::Done)));
+                    let maybe_body = *body; // Pacify borrowck, or else it thinks cfg is borrowed
+                    let cont = cfg[node].next;
 
-                    env.push(cont); // Enter new loop environment
-                    eliminate_inner(cfg, env, origin_body(node), body);
-                    let _ = env.pop(); // Exit loop environment
+                    if let Some(body) = maybe_body {
+                        loop_env.push(cont); // Enter new loop environment
+                        eliminate_inner(cfg, next_env, loop_env, origin_body(node), body);
+                        let _ = loop_env.pop(); // Exit loop environment
+                    }
 
-                    eliminate_inner(cfg, env, origin_next(node), cont);
+                    if let Some(cont) = cont {
+                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), cont);
+                    }
                 }
                 Ir::Break(index) => {
                     // Pacify borrowck by reborrowing
                     let index = *index;
                     // Set the parent's corresponding next pointer to the continuation referenced by
                     // this `break` statement, stored in the environment
-                    *origin(cfg) = env[env.len() - 1 - index];
+                    *origin(cfg) = loop_env[loop_env.len() - 1 - index];
                 }
             }
         }
@@ -259,16 +534,18 @@ impl Cfg {
         &self,
         errors: &mut Vec<Spanned<CompileError>>,
         parent_cont: Target,
-        node: Index,
+        maybe_node: Option<Index>,
     ) -> Target {
-        let node = &self[node];
+        let node = match maybe_node {
+            Some(node) => &self[node],
+            None => return Target::Done,
+        };
         let cont = match node.next {
-            Some(i) => self.to_target_inner(errors, parent_cont, i),
+            Some(i) => self.to_target_inner(errors, parent_cont, Some(i)),
             None => parent_cont,
         };
 
         match &node.expr {
-            Ir::Done => Target::Done,
             Ir::Recv(t) => Target::Recv(t.clone(), Rc::new(cont)),
             Ir::Send(t) => Target::Send(t.clone(), Rc::new(cont)),
             Ir::Call(callee) => {
@@ -313,14 +590,14 @@ impl Cfg {
                 });
 
                 match *maybe_child {
-                    Some(child) => self.to_target_inner(errors, cont, child),
+                    Some(child) => self.to_target_inner(errors, cont, Some(child)),
                     None => cont,
                 }
             }
         }
     }
 
-    pub fn to_target(&self, node: Index) -> Result<Target, Error> {
+    pub fn to_target(&self, node: Option<Index>) -> Result<Target, Error> {
         let mut errors = Vec::new();
         let output = self.to_target_inner(&mut errors, Target::Done, node);
 
