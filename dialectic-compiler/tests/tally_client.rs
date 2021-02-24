@@ -128,7 +128,7 @@ fn tally_client_direct_subst_nested_loop_break() {
                         dialectic::types::Loop<
                             dialectic::types::Choose<(
                                 dialectic::types::Send<i64, dialectic::types::Continue>,
-                                dialectic::types::Recv<i64, dialectic::types::Continue<dialectic::types::S<dialectic::types::Z>>>,
+                                dialectic::types::Recv<i64, dialectic::types::Continue<dialectic::unary::S<dialectic::unary::Z>>>,
                             )>
                         >
                     >,

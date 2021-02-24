@@ -116,8 +116,8 @@ impl ToTokens for Target {
             Continue(n) => {
                 if *n > 0 {
                     (quote! { #c::types::Continue< }).to_tokens(tokens);
-                    (0..*n).for_each(|_| (quote! { #c::types::S< }).to_tokens(tokens));
-                    (quote! { #c::types::Z }).to_tokens(tokens);
+                    (0..*n).for_each(|_| (quote! { #c::unary::S< }).to_tokens(tokens));
+                    (quote! { #c::unary::Z }).to_tokens(tokens);
                     (0..=*n).for_each(|_| (quote! { > }).to_tokens(tokens));
                 } else {
                     (quote! { #c::types::Continue }).to_tokens(tokens);
