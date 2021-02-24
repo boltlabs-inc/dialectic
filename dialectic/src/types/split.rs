@@ -30,8 +30,8 @@ impl<N: Unary, P: Subst<S, N>, Q: Subst<S, N>, R: Subst<S, N>, S> Subst<S, N> fo
     type Substituted = Split<P::Substituted, Q::Substituted, R::Substituted>;
 }
 
-impl<N: Unary, P: Then<S, N>, Q: Then<S, N>, R: Then<S, N>, S> Then<S, N> for Split<P, Q, R> {
-    type Combined = Split<P::Combined, Q::Combined, R::Combined>;
+impl<N: Unary, P: 'static, Q: 'static, R: Then<S, N>, S> Then<S, N> for Split<P, Q, R> {
+    type Combined = Split<P, Q, R::Combined>;
 }
 
 impl<N: Unary, Level: Unary, P: Lift<N, Level>, Q: Lift<N, Level>, R: Lift<N, Level>> Lift<N, Level>
