@@ -164,7 +164,27 @@ type R = Session! {
 type_eq!(R, Loop<Choose<(Send<i64, Call<Continue, Recv<i64, Continue>>>, Done)>>);
 ```
 
-TODO: split
+## The `split` keyword
+
+The `split` keyword precedes a block with two clauses, indicating two concurrent sessions to be
+run, one (marked by `->`) which can only transmit information, and the other (marked by `<-`)
+which can only receive information. It corresponds to the [`Split`] session type and the [`split`]
+method.
+
+```
+# use static_assertions::assert_type_eq_all as type_eq;
+# use dialectic::prelude::*;
+#
+type P = Session! {
+    split {
+        -> send i64,
+        <- recv bool,
+    };
+    send String;
+};
+
+type_eq!(P, Split<Send<i64, Done>, Recv<bool, Done>, Send<String, Done>>);
+```
 
 ## External session types
 
@@ -199,6 +219,8 @@ type_eq!(
 [`Loop`]: https://docs.rs/dialectic/latest/dialectic/types/struct.Loop.html
 [`Continue`]: https://docs.rs/dialectic/latest/dialectic/types/struct.Continue.html
 [`Done`]: https://docs.rs/dialectic/latest/dialectic/types/struct.Done.html
+[`Call`]: https://docs.rs/dialectic/latest/dialectic/types/struct.Call.html
+[`Split`]: https://docs.rs/dialectic/latest/dialectic/types/struct.Split.html
 [`send`]: https://docs.rs/dialectic/latest/dialectic/struct.Chan.html#method.send
 [`recv`]: https://docs.rs/dialectic/latest/dialectic/struct.Chan.html#method.recv
 [`offer!`]: https://docs.rs/dialectic/latest/dialectic/macro.offer.html
