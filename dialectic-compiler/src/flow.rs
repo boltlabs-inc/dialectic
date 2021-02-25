@@ -164,10 +164,17 @@ impl<'a> Solver<'a> {
     fn holds(&mut self, dnf: &Dnf) -> Validity {
         if dnf.0.iter().any(|cj| cj.iter().all(|c| self.trivial(c))) {
             Validity::Trivial
-        } else if dnf.0.iter().flatten().any(|&c| self.push(c)) {
-            Validity::Progress
         } else {
-            Validity::NoProgress
+            let mut progress = false;
+            for &constraint in dnf.0.iter().flatten() {
+                progress |= self.push(constraint);
+            }
+
+            if progress {
+                Validity::Progress
+            } else {
+                Validity::NoProgress
+            }
         }
     }
 
