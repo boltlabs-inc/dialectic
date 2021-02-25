@@ -20,6 +20,7 @@ pub struct CfgNode {
     pub expr: Ir,
     pub next: Option<Index>,
     pub span: Span,
+    pub machine_generated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,7 @@ impl CfgNode {
             expr,
             next: None,
             span: Span::call_site(),
+            machine_generated: false,
         }
     }
 
@@ -51,6 +53,7 @@ impl CfgNode {
             expr,
             next: None,
             span,
+            machine_generated: false,
         }
     }
 }
@@ -165,12 +168,15 @@ impl Cfg {
                 Ir::Loop(body) => {
                     if let Some(body) = *body {
                         let continue0 = self.singleton(Ir::Continue(0));
+                        self[continue0].machine_generated = true;
                         if visited.insert(body) {
                             queue.push((Some(continue0), body));
                         }
                     } else {
+                        // duplicated due to borrowck errors
                         let continue0 = self.singleton(Ir::Continue(0));
-                        // reborrow here because otherwise we lose the borrow on `body`
+                        self[continue0].machine_generated = true;
+                        // reborrow here because we've lost the borrow on `body`
                         self[node].expr = Ir::Loop(Some(continue0));
                     }
                 }
@@ -260,7 +266,7 @@ impl Cfg {
             if let Some(cont) = self[node].next {
                 if flow.is_passable(node) {
                     stack.push(cont);
-                } else {
+                } else if !self[cont].machine_generated {
                     self.insert_error_at(node, CompileError::FollowingCodeUnreachable);
                     self.insert_error_at(cont, CompileError::UnreachableStatement);
                 }
