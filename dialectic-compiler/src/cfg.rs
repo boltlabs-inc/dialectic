@@ -120,6 +120,16 @@ impl Cfg {
         self.insert(CfgNode::spanned(expr, span))
     }
 
+    /// The purpose of the scope resolution pass is to transform "implicit" continuations into
+    /// "explicit" continuations. For example, consider the session type `choose { ... }; send ()`.
+    /// In this type, the first parsing of the block will result in a `Choose` node with its
+    /// continuation/"next" pointer set to point to a `Send(())` node. However, in order to ensure
+    /// that the arms of the choose construct don't have to worry about the continuation that
+    /// comes "after" *in a higher/parent scope,* we have the resolve_scopes pass to "lift" this
+    /// continuation which implicitly follows every arm of the `Choose`, into becoming the
+    /// continuation of every relevant arm of the `Choose`. This does have some special cases,
+    /// for example we don't want to change or set a next continuation for a `Break` node or
+    /// `Continuation` node
     pub fn resolve_scopes(&mut self, node: Option<Index>) {
         let mut visited = HashSet::new();
         let mut queue = node
@@ -283,6 +293,7 @@ impl Cfg {
                 self,
                 None,
                 &mut loop_env,
+                0,
                 |_| unreachable!("all breaks are valid before this pass"),
                 node,
             );
@@ -341,41 +352,84 @@ impl Cfg {
             cfg: &mut Cfg,
             next_env: Option<Index>,
             loop_env: &mut Vec<Option<Index>>,
+            loop_offset: usize,
             origin: F,
             node: Index,
         ) where
             F: FnOnce(&mut Cfg) -> &mut Option<Index>,
         {
             match &cfg[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Continue(_) => {
+                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) => {
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_next(node),
+                            next,
+                        );
                     }
                 }
                 Ir::Call(child) | Ir::Error(_, child) => {
                     let child = *child;
 
                     if let Some(child) = child {
-                        eliminate_inner(cfg, next_env, loop_env, origin_child(node), child);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_child(node),
+                            child,
+                        );
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_next(node),
+                            next,
+                        );
                     }
                 }
                 Ir::Split(tx_only, rx_only) => {
                     let (tx_only, rx_only) = (*tx_only, *rx_only);
 
                     if let Some(tx_only) = tx_only {
-                        eliminate_inner(cfg, next_env, loop_env, origin_tx_only(node), tx_only);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_tx_only(node),
+                            tx_only,
+                        );
                     }
 
                     if let Some(rx_only) = rx_only {
-                        eliminate_inner(cfg, next_env, loop_env, origin_rx_only(node), rx_only);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_rx_only(node),
+                            rx_only,
+                        );
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_next(node),
+                            next,
+                        );
                     }
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
@@ -384,11 +438,25 @@ impl Cfg {
                     // For each choose/offer arm, eliminate whatever's inside, using that particular
                     // arm's next pointer as the origin.
                     for (i, choice) in choices.into_iter().filter_map(|x| x).enumerate() {
-                        eliminate_inner(cfg, next_env, loop_env, origin_choice_n(node, i), choice);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_choice_n(node, i),
+                            choice,
+                        );
                     }
 
                     if let Some(next) = cfg[node].next {
-                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), next);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_next(node),
+                            next,
+                        );
                     }
                 }
                 Ir::Loop(body) => {
@@ -397,12 +465,26 @@ impl Cfg {
 
                     if let Some(body) = maybe_body {
                         loop_env.push(cont); // Enter new loop environment
-                        eliminate_inner(cfg, next_env, loop_env, origin_body(node), body);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset,
+                            origin_body(node),
+                            body,
+                        );
                         let _ = loop_env.pop(); // Exit loop environment
                     }
 
                     if let Some(cont) = cont {
-                        eliminate_inner(cfg, next_env, loop_env, origin_next(node), cont);
+                        eliminate_inner(
+                            cfg,
+                            next_env,
+                            loop_env,
+                            loop_offset + 1,
+                            origin_next(node),
+                            cont,
+                        );
                     }
                 }
                 Ir::Break(index) => {
@@ -412,6 +494,10 @@ impl Cfg {
                     // this `break` statement, stored in the environment
                     *origin(cfg) = loop_env[loop_env.len() - 1 - index];
                 }
+                Ir::Continue(_) => match &mut cfg[node].expr {
+                    Ir::Continue(debruijn_index) => *debruijn_index += loop_offset,
+                    _ => panic!(),
+                },
             }
         }
     }
