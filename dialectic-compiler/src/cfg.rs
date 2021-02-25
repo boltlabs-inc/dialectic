@@ -9,7 +9,11 @@ use {
     thunderdome::{Arena, Index},
 };
 
-use crate::{flow::FlowAnalysis, target::Target, CompileError, Spanned};
+use crate::{
+    flow::{FlowAnalysis, Solver},
+    target::Target,
+    CompileError, Spanned,
+};
 
 #[derive(Debug, Clone)]
 pub struct CfgNode {
@@ -229,12 +233,17 @@ impl Cfg {
         }
     }
 
-    pub fn analyze_control_flow(&self, node: Option<Index>) -> FlowAnalysis {
-        todo!();
+    pub fn analyze_control_flow(&self, node: Index) -> FlowAnalysis {
+        Solver::new(self, node).solve()
     }
 
     pub fn report_dead_code(&mut self, node: Option<Index>) {
-        let flow = self.analyze_control_flow(node);
+        let root = match node {
+            Some(node) => node,
+            None => return,
+        };
+
+        let flow = self.analyze_control_flow(root);
         let mut stack = node.into_iter().collect::<Vec<_>>();
         let mut visited = HashSet::new();
 
