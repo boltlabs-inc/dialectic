@@ -121,7 +121,7 @@ impl<'a> Solver<'a> {
     }
 
     fn insert_fact(&mut self, constraint: Constraint) {
-        let _ = match constraint {
+        match constraint {
             Constraint::Passable(node) => self.passable.insert(node),
             Constraint::Haltable(node) => self.haltable.insert(node),
             Constraint::BreakableTo {
