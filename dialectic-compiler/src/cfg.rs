@@ -9,48 +9,7 @@ use {
     thunderdome::{Arena, Index},
 };
 
-use crate::{target::Target, CompileError, Spanned};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FlowState {
-    Impassable,
-    Passable,
-}
-
-#[derive(Debug, Clone)]
-pub struct FlowAnalysis {
-    states: HashMap<Index, FlowState>,
-    progress: bool,
-}
-
-impl FlowAnalysis {
-    fn new() -> Self {
-        Self {
-            states: HashMap::new(),
-            progress: false,
-        }
-    }
-
-    fn mark_reachable(&mut self, node: Index) {
-        let Self { states, progress } = self;
-        let _ = states.entry(node).or_insert_with(|| {
-            *progress = true;
-            FlowState::Impassable
-        });
-    }
-
-    fn mark_passable(&mut self, node: Index) {
-        let _ = self.states.insert(node, FlowState::Passable);
-    }
-
-    fn is_reachable(&self, node: Index) -> bool {
-        self.states.contains_key(&node)
-    }
-
-    fn is_passable(&self, node: Index) -> bool {
-        self.states.get(&node) == Some(&FlowState::Passable)
-    }
-}
+use crate::{flow::FlowAnalysis, target::Target, CompileError, Spanned};
 
 #[derive(Debug, Clone)]
 pub struct CfgNode {
@@ -228,134 +187,50 @@ impl Cfg {
         }
     }
 
-    fn analyze_control_flow(&self, node: Option<Index>) -> FlowAnalysis {
-        let mut analysis = FlowAnalysis::new();
-        if let Some(node) = node {
-            let mut visited = HashSet::new();
-            let mut next_env = Vec::new();
-            let mut loop_env = Vec::new();
-            interpret(
-                self,
-                &mut visited,
-                &mut analysis,
-                &mut next_env,
-                &mut loop_env,
-                node,
-            );
-            debug_assert!(
-                next_env.is_empty(),
-                "mismatched number of next pointer push/pop in `analyze_control_flow`"
-            );
-            debug_assert!(
-                loop_env.is_empty(),
-                "mismatched number of loop pointer push/pop in `analyze_control_flow`"
-            );
-        }
-        return analysis;
+    pub fn jump_table(&self, root: Index) -> HashMap<Index, Index> {
+        let mut loop_env = Vec::new();
+        let mut stack = vec![root];
+        let mut jump_table = HashMap::new();
 
-        struct LoopScope {
-            broken: bool,
-        }
+        jump_table_inner(self, &mut jump_table, &mut loop_env, &mut stack);
 
-        fn interpret(
+        return jump_table;
+
+        fn jump_table_inner(
             cfg: &Cfg,
-            visited: &mut HashSet<Index>,
-            analysis: &mut FlowAnalysis,
-            next_env: &mut Vec<Index>,
-            loop_env: &mut Vec<LoopScope>,
-            node_index: Index,
+            jump_table: &mut HashMap<Index, Index>,
+            loop_env: &mut Vec<Index>,
+            stack: &mut Vec<Index>,
         ) {
-            if !visited.insert(node_index) {
-                return;
-            }
-
-            analysis.mark_reachable(node_index);
-
-            let node = &cfg[node_index];
-
-            match &node.expr {
-                Ir::Continue(_) => {}
-                Ir::Send(_) | Ir::Recv(_) | Ir::Error(_, None) | Ir::Type(_) | Ir::Call(None) => {
-                    analysis.mark_passable(node_index);
-
-                    if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
-                        interpret(cfg, visited, analysis, next_env, loop_env, cont);
+            while let Some(node_index) = stack.pop() {
+                let node = &cfg[node_index];
+                match &node.expr {
+                    Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Loop(None) => {}
+                    Ir::Call(child) | Ir::Error(_, child) => stack.extend(*child),
+                    Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
+                    Ir::Choose(choices) | Ir::Offer(choices) => {
+                        stack.extend(choices.iter().filter_map(Option::as_ref))
+                    }
+                    Ir::Break(debruijn_index) | Ir::Continue(debruijn_index) => {
+                        let _ = jump_table
+                            .insert(node_index, loop_env[loop_env.len() - 1 - *debruijn_index]);
+                    }
+                    Ir::Loop(Some(body)) => {
+                        loop_env.push(node_index);
+                        jump_table_inner(cfg, jump_table, loop_env, &mut vec![*body]);
+                        loop_env.pop();
                     }
                 }
-                Ir::Call(Some(child)) | Ir::Error(_, Some(child)) => {
-                    interpret(cfg, visited, analysis, next_env, loop_env, *child);
 
-                    if analysis.is_passable(*child) {
-                        analysis.mark_passable(node_index);
-
-                        if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
-                            interpret(cfg, visited, analysis, next_env, loop_env, cont);
-                        }
-                    }
-                }
-                Ir::Split(tx_only, rx_only) => {
-                    if let Some(cont) = node.next {
-                        next_env.push(cont);
-                    }
-
-                    if let Some(tx_only) = *tx_only {
-                        interpret(cfg, visited, analysis, next_env, loop_env, tx_only);
-                    }
-
-                    if let Some(rx_only) = *rx_only {
-                        interpret(cfg, visited, analysis, next_env, loop_env, rx_only);
-                    }
-
-                    if let Some(next) = node.next {
-                        let _ = next_env.pop();
-
-                        if analysis.is_reachable(next) {
-                            analysis.mark_passable(node_index);
-                        }
-                    }
-                }
-                Ir::Choose(choices) | Ir::Offer(choices) => {
-                    if let Some(cont) = node.next {
-                        next_env.push(cont);
-                    }
-
-                    for &choice in choices.iter().filter_map(Option::as_ref) {
-                        interpret(cfg, visited, analysis, next_env, loop_env, choice);
-                    }
-
-                    if let Some(next) = node.next {
-                        let _ = next_env.pop();
-
-                        if analysis.is_reachable(next) {
-                            analysis.mark_passable(node_index);
-                        }
-                    }
-                }
-                Ir::Loop(body) => {
-                    loop_env.push(LoopScope { broken: false });
-
-                    if let Some(body) = *body {
-                        interpret(cfg, visited, analysis, next_env, loop_env, body);
-                    }
-
-                    let loop_scope = loop_env.pop().unwrap();
-
-                    if loop_scope.broken {
-                        if let Some(cont) = node.next.or_else(|| next_env.last().copied()) {
-                            analysis.mark_passable(node_index);
-
-                            interpret(cfg, visited, analysis, next_env, loop_env, cont);
-                        }
-                    }
-                }
-                Ir::Break(debruijn_index) => {
-                    // A break here means we've escaped the loop we're breaking from, so we set
-                    // the corresponding loop scope's `escaped` flag.
-                    let reversed_index = loop_env.len() - 1 - *debruijn_index;
-                    loop_env[reversed_index].broken = true;
+                if let Some(cont) = node.next {
+                    stack.push(cont);
                 }
             }
         }
+    }
+
+    pub fn analyze_control_flow(&self, node: Option<Index>) -> FlowAnalysis {
+        todo!();
     }
 
     pub fn report_dead_code(&mut self, node: Option<Index>) {
@@ -614,5 +489,9 @@ impl Cfg {
             Some(error) => Err(error),
             None => Ok(output),
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Index, &CfgNode)> + '_ {
+        self.arena.iter()
     }
 }
