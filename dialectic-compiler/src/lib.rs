@@ -10,6 +10,7 @@
 use {proc_macro2::Span, thiserror::Error};
 
 mod cfg;
+mod flow;
 pub mod parse;
 pub mod syntax;
 pub mod target;
