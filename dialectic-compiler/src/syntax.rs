@@ -140,9 +140,7 @@ impl Spanned<Syntax> {
                 let head = body.to_cfg(cfg, env).0;
                 let _ = env.pop();
 
-                // The `Ir` for this loop just wraps its body, but we want to make it implicitly an
-                // infinite loop if its body is empty
-                let ir = Ir::Loop(head.or_else(|| Some(cfg.singleton(Ir::Continue(0)))));
+                let ir = Ir::Loop(head);
 
                 // Check to ensure the environment does not already contain this label
                 if maybe_label.is_some() && env.contains(&maybe_label) {
