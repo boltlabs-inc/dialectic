@@ -12,16 +12,6 @@ pub struct FlowAnalysis {
     pub jumps: HashMap<Index, Index>,
 }
 
-impl<'a> From<Solver<'a>> for FlowAnalysis {
-    fn from(queue: Solver<'a>) -> Self {
-        Self {
-            passable: queue.passable,
-            haltable: queue.haltable,
-            jumps: queue.jumps,
-        }
-    }
-}
-
 impl FlowAnalysis {
     pub fn is_passable(&self, node: Index) -> bool {
         self.passable.contains(&node)
@@ -152,7 +142,7 @@ impl<'a> Solver<'a> {
     }
 
     fn pop(&mut self) -> Option<Implication> {
-        if self.progress < self.queue.len() {
+        if self.progress > self.queue.len() {
             None
         } else {
             self.progress += 1;
@@ -178,6 +168,28 @@ impl<'a> Solver<'a> {
             Validity::Progress
         } else {
             Validity::NoProgress
+        }
+    }
+
+    pub fn solve(mut self) -> FlowAnalysis {
+        while let Some(implication) = self.pop() {
+            let validity = self.holds(&implication.dnf);
+
+            if let Validity::Trivial = validity {
+                self.insert_fact(implication.consequence);
+            } else {
+                self.queue.push_back(implication);
+            }
+
+            if let Validity::Trivial | Validity::Progress = validity {
+                self.progress = 0;
+            }
+        }
+
+        FlowAnalysis {
+            passable: self.passable,
+            haltable: self.haltable,
+            jumps: self.jumps,
         }
     }
 }
