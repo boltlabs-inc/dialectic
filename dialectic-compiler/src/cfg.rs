@@ -106,18 +106,6 @@ impl Cfg {
         self[node].expr = Ir::Error(kind, Some(new_child));
     }
 
-    /// Replace the given node with an error node. This is useful when the node in question is
-    /// malformed such that it will cause an assertion failure or additional spurious error further
-    /// down the compilation process, and removing it is necessary in order to try and generate any
-    /// more errors.
-    pub fn replace_error_at(&mut self, node: Index, kind: CompileError) {
-        if let Ir::Error(_, _) = self[node].expr {
-            self.insert_error_at(node, kind);
-        } else {
-            self[node].expr = Ir::Error(kind, None);
-        }
-    }
-
     /// Create a new node containing only this expression with no next-node link.
     pub fn singleton(&mut self, expr: Ir) -> Index {
         self.insert(CfgNode::singleton(expr))
@@ -169,6 +157,10 @@ impl Cfg {
                             queue.push((cont, choice));
                         }
                     }
+
+                    // We do not want to resolve the `next` of the `Choose` to anything,
+                    // because we no longer need to "scope" it.
+                    continue;
                 }
                 Ir::Loop(body) => {
                     if let Some(body) = *body {
@@ -176,6 +168,10 @@ impl Cfg {
                         if visited.insert(body) {
                             queue.push((Some(continue0), body));
                         }
+                    } else {
+                        let continue0 = self.singleton(Ir::Continue(0));
+                        // reborrow here because otherwise we lose the borrow on `body`
+                        self[node].expr = Ir::Loop(Some(continue0));
                     }
                 }
             }
