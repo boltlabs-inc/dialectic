@@ -1,8 +1,12 @@
 //! The abstract surface syntax for the `Session!` macro, produced by the parser.
 
-use quote::ToTokens;
-use std::fmt::{self, Display, Formatter};
-use syn::{Error, Type};
+use quickcheck::{Arbitrary, Gen};
+use quote::{quote, ToTokens};
+use std::{
+    convert::TryFrom,
+    fmt::{self, Display, Formatter},
+};
+use syn::{parse_quote, Error, Type};
 use thunderdome::Index;
 
 use crate::{
@@ -112,6 +116,24 @@ impl Display for Syntax {
             }
         };
         Ok(())
+    }
+}
+
+impl Arbitrary for Syntax {
+    fn arbitrary(g: &mut Gen) -> Self {
+        use Syntax::*;
+
+        fn arbitrary_in_env(g: &mut Gen, env: &mut Vec<String>) -> Syntax {
+            let types: &[syn::Type] = &[parse_quote!(())];
+
+            todo!()
+        }
+
+        arbitrary_in_env(g, &mut Vec::new())
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        quickcheck::empty_shrinker()
     }
 }
 
