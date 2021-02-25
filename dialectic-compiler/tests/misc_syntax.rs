@@ -109,3 +109,17 @@ fn undeclared_label() {
         CompileError::ContinueOutsideLoop.to_string()
     );
 }
+
+#[test]
+fn infinite_loop() {
+    let to_parse = "loop {}; send ()";
+    let error = syn::parse_str::<Invocation>(to_parse)
+        .unwrap()
+        .syntax
+        .to_session()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        CompileError::UnreachableStatement.to_string()
+    );
+}
