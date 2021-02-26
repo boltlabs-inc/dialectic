@@ -134,21 +134,39 @@ impl Spanned<Syntax> {
                 Ir::Offer(choice_nodes)
             }
             Continue(label) => match env.last() {
-                None => Ir::Error(CompileError::ContinueOutsideLoop, None),
+                None => {
+                    let node = Some(cfg.create_error(CompileError::ContinueOutsideLoop, self.span));
+                    return (node, node);
+                }
                 Some((_, index)) => match label {
                     None => Ir::Continue(*index),
                     Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
-                        None => Ir::Error(CompileError::UndeclaredLabel(label.clone()), None),
+                        None => {
+                            let node = Some(cfg.create_error(
+                                CompileError::UndeclaredLabel(label.clone()),
+                                self.span,
+                            ));
+                            return (node, node);
+                        }
                         Some((_, index)) => Ir::Continue(*index),
                     },
                 },
             },
             Break(label) => match env.last() {
-                None => Ir::Error(CompileError::BreakOutsideLoop, None),
+                None => {
+                    let node = Some(cfg.create_error(CompileError::BreakOutsideLoop, self.span));
+                    return (node, node);
+                }
                 Some((_, index)) => match label {
                     None => Ir::Break(*index),
                     Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
-                        None => Ir::Error(CompileError::UndeclaredLabel(label.clone()), None),
+                        None => {
+                            let node = Some(cfg.create_error(
+                                CompileError::UndeclaredLabel(label.clone()),
+                                self.span,
+                            ));
+                            return (node, node);
+                        }
                         Some((_, index)) => Ir::Break(*index),
                     },
                 },
@@ -171,10 +189,11 @@ impl Spanned<Syntax> {
 
                 // Check to ensure the environment does not already contain this label
                 if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
-                    Ir::Error(
+                    let node = Some(cfg.create_error(
                         CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
-                        Some(ir_node),
-                    )
+                        self.span,
+                    ));
+                    return (node, node);
                 } else {
                     // Like the `Block` clause, we've already calculated and used this
                     // node's index, so we don't want to construct a new node from it.
