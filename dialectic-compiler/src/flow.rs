@@ -200,7 +200,9 @@ impl<'a> Solver<'a> {
 fn construct_passable_preconditions(solver: &Solver, node: Index) -> Dnf {
     let cfg = solver.cfg;
     match &cfg[node].expr {
-        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) | Ir::Call(None) => Dnf::trivially_true(),
+        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) | Ir::Error | Ir::Call(None) => {
+            Dnf::trivially_true()
+        }
         Ir::Loop(None) | Ir::Break(_) | Ir::Continue(_) => Dnf::trivially_false(),
         Ir::Call(Some(callee)) => Dnf::only_if(vec![Constraint::Haltable(*callee)]),
         Ir::Split(tx_only, rx_only) => {
@@ -216,13 +218,6 @@ fn construct_passable_preconditions(solver: &Solver, node: Index) -> Dnf {
             breaks_from: *body,
             breaks_to: node,
         }]),
-
-        // Control flow through an error node is undefined, so we assume for now
-        // that it is trivially passable.
-        //
-        // FIXME(sleffy): do we want to add a constraint for passability of the
-        // child node that the error is wrapping, if there is one?
-        Ir::Error(..) => Dnf::trivially_true(),
     }
 }
 
@@ -230,7 +225,7 @@ fn construct_haltable_preconditions(solver: &Solver, node_index: Index) -> Dnf {
     let cfg = solver.cfg;
     let node = &cfg[node_index];
     match &node.expr {
-        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) => match node.next {
+        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) | Ir::Error => match node.next {
             Some(cont) => Dnf::only_if(vec![Constraint::Haltable(cont)]),
             None => Dnf::trivially_true(),
         },
@@ -246,23 +241,11 @@ fn construct_haltable_preconditions(solver: &Solver, node_index: Index) -> Dnf {
             .map(|&c| vec![Constraint::Haltable(c)])
             .collect()),
 
-        Ir::Continue(of_loop) => {
-            Dnf::only_if(vec![Constraint::Haltable(cfg.get_jump_target(*of_loop))])
-        }
-        Ir::Break(of_loop) => match solver.cfg[cfg.get_jump_target(*of_loop)].next {
+        Ir::Continue(of_loop) => Dnf::only_if(vec![Constraint::Haltable(*of_loop)]),
+        Ir::Break(of_loop) => match solver.cfg[*of_loop].next {
             Some(cont) => Dnf::only_if(vec![Constraint::Haltable(cont)]),
             None => Dnf::trivially_true(),
         },
-
-        // Control flow through an error node is undefined, so for now we ask
-        // whether its child is passable and whether its next node is haltable.
-        Ir::Error(_, child) => Dnf::only_if(
-            child
-                .map(Constraint::Passable)
-                .into_iter()
-                .chain(node.next.map(Constraint::Haltable))
-                .collect(),
-        ),
     }
 }
 
@@ -274,12 +257,12 @@ fn construct_breakable_to_preconditions(
     let cfg = solver.cfg;
     let node = &cfg[breaks_from];
     match &node.expr {
-        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) => match node.next {
+        Ir::Send(_) | Ir::Recv(_) | Ir::Type(_) | Ir::Error => match node.next {
             Some(cont) => Dnf::only_if(vec![Constraint::BreakableTo {
                 breaks_from: cont,
                 breaks_to,
             }]),
-            None => Dnf::trivially_true(),
+            None => Dnf::trivially_false(),
         },
         Ir::Call(_) | Ir::Split(_, _) => {
             let mut conj = vec![Constraint::Passable(breaks_from)];
@@ -324,31 +307,5 @@ fn construct_breakable_to_preconditions(
         }
         Ir::Break(of_loop) if *of_loop == breaks_to => Dnf::trivially_true(),
         Ir::Break(_) | Ir::Continue(_) => Dnf::trivially_false(),
-
-        // Control flow through an error node is undefined, so for now we ask
-        // whether its child is BreakableTo the relevant loop *OR* whether its
-        // continuation is.
-        Ir::Error(_, child) => {
-            let mut disj = vec![];
-
-            if let Some(child) = child {
-                disj.push(vec![Constraint::BreakableTo {
-                    breaks_from: *child,
-                    breaks_to,
-                }]);
-            }
-
-            if let Some(cont) = node.next {
-                disj.push(vec![
-                    Constraint::Passable(breaks_from),
-                    Constraint::BreakableTo {
-                        breaks_from: cont,
-                        breaks_to,
-                    },
-                ]);
-            }
-
-            Dnf(disj)
-        }
     }
 }

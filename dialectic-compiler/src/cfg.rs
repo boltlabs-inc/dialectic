@@ -17,6 +17,7 @@ pub struct CfgNode {
     pub next: Option<Index>,
     pub span: Span,
     pub machine_generated: bool,
+    pub errors: Vec<CompileError>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +32,7 @@ pub enum Ir {
     Break(Index),
     Continue(Index),
     Type(Type),
-    Error(CompileError, Option<Index>),
+    Error,
 }
 
 impl CfgNode {
@@ -41,6 +42,7 @@ impl CfgNode {
             next: None,
             span: Span::call_site(),
             machine_generated: false,
+            errors: Vec::new(),
         }
     }
 
@@ -50,6 +52,7 @@ impl CfgNode {
             next: None,
             span,
             machine_generated: false,
+            errors: Vec::new(),
         }
     }
 }
@@ -93,25 +96,18 @@ impl Cfg {
 
     /// Insert an `Error` node as a shim.
     pub fn insert_error_at(&mut self, node: Index, kind: CompileError) {
-        // Temporarily move the body out of the node.
-        let (child, span) = {
-            let mut_node = &mut self[node];
-            let child = mut_node.expr.clone();
-            let span = mut_node.span;
-            (child, span)
-        };
-
-        let new_child = self.insert(CfgNode::spanned(child, span));
-        self[node].expr = Ir::Error(kind, Some(new_child));
-        self[new_child].next = self[node].next.take();
+        self[node].errors.push(kind);
     }
 
-    pub fn get_jump_target(&self, mut node: Index) -> Index {
-        while let Ir::Error(_, Some(child)) = &self[node].expr {
-            node = *child;
-        }
-
-        node
+    /// Create a dummy `Error` node.
+    pub fn create_error(&mut self, kind: CompileError, span: Span) -> Index {
+        self.insert(CfgNode {
+            expr: Ir::Error,
+            next: None,
+            span,
+            machine_generated: false,
+            errors: vec![kind],
+        })
     }
 
     /// Create a new node containing only this expression with no next-node link.
@@ -146,9 +142,9 @@ impl Cfg {
             let CfgNode { expr, next, .. } = &mut self[node];
 
             match expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) => {}
+                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Error => {}
                 Ir::Break(_) | Ir::Continue(_) => continue,
-                Ir::Call(child) | Ir::Error(_, child) => {
+                Ir::Call(child) => {
                     if let Some(child) = *child {
                         if visited.insert(child) {
                             queue.push((None, child));
@@ -228,8 +224,13 @@ impl Cfg {
             }
 
             match &self[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Continue(_) | Ir::Break(_) => {}
-                Ir::Loop(child) | Ir::Call(child) | Ir::Error(_, child) => stack.extend(*child),
+                Ir::Recv(_)
+                | Ir::Send(_)
+                | Ir::Type(_)
+                | Ir::Continue(_)
+                | Ir::Break(_)
+                | Ir::Error => {}
+                Ir::Loop(child) | Ir::Call(child) => stack.extend(*child),
                 Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
                 Ir::Choose(choices) | Ir::Offer(choices) => {
                     stack.extend(choices.iter().filter_map(Option::as_ref))
@@ -258,6 +259,11 @@ impl Cfg {
             Some(node) => (&self[node], node),
             None => return Target::Done,
         };
+
+        errors.extend(node.errors.iter().map(|err| Spanned {
+            inner: err.clone(),
+            span: node.span,
+        }));
 
         match &node.expr {
             Ir::Recv(t) => {
@@ -310,11 +316,11 @@ impl Cfg {
                 target
             }
             Ir::Break(of_loop) => {
-                let jump = self[self.get_jump_target(*of_loop)].next;
+                let jump = self[*of_loop].next;
                 self.to_target_inner(errors, loop_base + 1, loop_env, jump)
             }
             Ir::Continue(of_loop) => {
-                let jump_target = self.get_jump_target(*of_loop);
+                let jump_target = *of_loop;
                 Target::Continue(
                     loop_env
                         .iter()
@@ -335,14 +341,7 @@ impl Cfg {
                     }
                 }
             }
-            Ir::Error(error, maybe_child) => {
-                errors.push(Spanned {
-                    inner: error.clone(),
-                    span: node.span,
-                });
-
-                self.to_target_inner(errors, loop_base, loop_env, *maybe_child)
-            }
+            Ir::Error => self.to_target_inner(errors, loop_base, loop_env, node.next),
         }
     }
 
