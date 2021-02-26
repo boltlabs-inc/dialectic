@@ -100,11 +100,48 @@ impl Spanned<Syntax> {
         cfg.to_target(head)
     }
 
+    /// Converts surface [`Syntax`] to a control-flow graph intermediate representation, suitable
+    /// for further analysis and error reporting.
     fn to_cfg<'a>(
         &'a self,
         cfg: &mut Cfg,
         env: &mut Vec<(&'a Option<String>, Index)>,
     ) -> (Option<Index>, Option<Index>) {
+        // Helper function for converting break and continue nodes to CFG nodes. This is here
+        // because the cases for `Break` and `Continue` are 100% identical minus the emitted errors
+        // and constructed IR node variants; so this function extracts that logic and parameterizes
+        // it over the error emitted in the case that the jump node exists outside of a loop as well
+        // as the constructor (which is always of the type `fn(Index) -> Ir`.)
+        let mut convert_jump_to_cfg = |label: &Option<String>,
+                                       outside_loop_error: CompileError,
+                                       constructor: fn(Index) -> Ir|
+         -> (Option<Index>, Option<Index>) {
+            let node = match env.last() {
+                // When not inside a loop at all:
+                None => cfg.create_error(outside_loop_error, self.span),
+                // When inside a loop:
+                Some((_, index)) => match label {
+                    // With an unlabeled break/continue:
+                    None => cfg.spanned(constructor(*index), self.span),
+                    // With a labeled break/continue:
+                    Some(label) => {
+                        let found_index = env.iter().rev().find(|&l| l.0.as_ref() == Some(label));
+                        match found_index {
+                            // If label cannot be found:
+                            None => cfg.create_error(
+                                CompileError::UndeclaredLabel(label.clone()),
+                                self.span,
+                            ),
+                            // If label is found:
+                            Some((_, index)) => cfg.spanned(constructor(*index), self.span),
+                        }
+                    }
+                },
+            };
+
+            (Some(node), Some(node))
+        };
+
         use Syntax::*;
         let ir = match &self.inner {
             Recv(ty) => Ir::Recv(ty.clone()),
@@ -133,44 +170,12 @@ impl Spanned<Syntax> {
                     .collect();
                 Ir::Offer(choice_nodes)
             }
-            Continue(label) => match env.last() {
-                None => {
-                    let node = Some(cfg.create_error(CompileError::ContinueOutsideLoop, self.span));
-                    return (node, node);
-                }
-                Some((_, index)) => match label {
-                    None => Ir::Continue(*index),
-                    Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
-                        None => {
-                            let node = Some(cfg.create_error(
-                                CompileError::UndeclaredLabel(label.clone()),
-                                self.span,
-                            ));
-                            return (node, node);
-                        }
-                        Some((_, index)) => Ir::Continue(*index),
-                    },
-                },
-            },
-            Break(label) => match env.last() {
-                None => {
-                    let node = Some(cfg.create_error(CompileError::BreakOutsideLoop, self.span));
-                    return (node, node);
-                }
-                Some((_, index)) => match label {
-                    None => Ir::Break(*index),
-                    Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
-                        None => {
-                            let node = Some(cfg.create_error(
-                                CompileError::UndeclaredLabel(label.clone()),
-                                self.span,
-                            ));
-                            return (node, node);
-                        }
-                        Some((_, index)) => Ir::Break(*index),
-                    },
-                },
-            },
+            Continue(label) => {
+                return convert_jump_to_cfg(label, CompileError::ContinueOutsideLoop, Ir::Continue)
+            }
+            Break(label) => {
+                return convert_jump_to_cfg(label, CompileError::BreakOutsideLoop, Ir::Break)
+            }
             Loop(maybe_label, body) => {
                 // Constructing a loop node is a kind of fixed-point operation, where
                 // any break and continue nodes within need to know the index of their
@@ -180,32 +185,34 @@ impl Spanned<Syntax> {
                 let ir_node = cfg.spanned(Ir::Loop(None), self.span);
 
                 // Convert the body in the environment with this loop label
-                env.push((maybe_label, ir_node));
+                env.push((maybe_label, ir_node)); // NOTE: this is the only `push` in this function!
                 let head = body.to_cfg(cfg, env).0;
-                let _ = env.pop();
+                let _ = env.pop(); // NOTE: this is the only `pop` in this function!
 
                 // Close out that fixed point; the loop block is now correctly built.
                 cfg[ir_node].expr = Ir::Loop(head);
 
                 // Check to ensure the environment does not already contain this label
-                if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
-                    let node = Some(cfg.create_error(
-                        CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
-                        self.span,
-                    ));
-                    return (node, node);
-                } else {
-                    // Like the `Block` clause, we've already calculated and used this
-                    // node's index, so we don't want to construct a new node from it.
-                    // So, we need to return here, before the code after the match
-                    // constructs a new `Index` from a returned `Ir` variant.
-                    return (Some(ir_node), Some(ir_node));
-                }
+                let node =
+                    if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
+                        cfg.create_error(
+                            CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
+                            self.span,
+                        )
+                    } else {
+                        ir_node
+                    };
+
+                // Because we already know the index we must return and cannot allow another
+                // index to be created for this node, we have to early-return here.
+                return (Some(node), Some(node));
             }
-            Block(stmts) => {
+            Block(statements) => {
+                // Connect the continuations of each statement in the block to the subsequent
+                // statement in the block, by inserting them in reverse order into the graph
                 let mut next_head = None;
                 let mut next_tail = None;
-                for stmt in stmts.iter().rev() {
+                for stmt in statements.iter().rev() {
                     let (head, tail) = stmt.to_cfg(cfg, env);
                     next_tail = next_tail.or(tail);
 
