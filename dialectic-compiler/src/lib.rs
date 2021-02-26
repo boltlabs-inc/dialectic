@@ -21,7 +21,7 @@ pub use crate::{
 };
 
 /// A compilation error due to invalid (but parseable) input in the surface macro syntax.
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CompileError {
     /// Error resulting from `'a loop { ... 'a loop { ... }}`.
     #[error("label name `'{0}` shadows a label name that is already in scope")]
