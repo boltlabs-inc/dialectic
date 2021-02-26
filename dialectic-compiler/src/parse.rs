@@ -15,17 +15,6 @@ use crate::{
     Spanned,
 };
 
-trait JoinSpansExt {
-    fn combine<T: SpannedExt>(&mut self, new: T) -> T;
-}
-
-impl JoinSpansExt for Span {
-    fn combine<T: SpannedExt>(&mut self, new: T) -> T {
-        *self = self.join(new.span()).unwrap_or(*self);
-        new
-    }
-}
-
 mod kw {
     syn::custom_keyword!(recv);
     syn::custom_keyword!(send);
@@ -35,12 +24,15 @@ mod kw {
     syn::custom_keyword!(split);
 }
 
+/// The direction of a split arm, either `->` or `<-`.
 #[derive(Clone, Copy, PartialEq)]
 enum Direction {
     Outbound,
     Inbound,
 }
 
+/// A split arm, consisting of a [`Direction`] and a ([`Spanned`]) [`Syntax`] for the body of the
+/// arm: `<- ...` or `-> ...`.
 struct SplitArm {
     dir: Direction,
     arm: Spanned<Syntax>,
@@ -63,28 +55,35 @@ impl Parse for SplitArm {
     }
 }
 
+/// An arm of a choice (either in `offer` or `choose`), consisting of an index and the code it
+/// refers to: `_N => ...`.
 struct ChoiceArm {
-    index: usize,
+    index: Spanned<usize>,
     arm: Spanned<Syntax>,
-    span: Span,
 }
 
 impl Parse for ChoiceArm {
     fn parse(input: ParseStream) -> Result<Self> {
         let index_ident = input.parse::<Ident>()?;
-        let mut span = index_ident.span();
+        let index_span = index_ident.span();
         let index = index_ident
             .to_string()
             .strip_prefix("_")
             .ok_or_else(|| input.error("expected index identifier starting with an underscore"))
             .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
         let _ = input.parse::<Token![=>]>()?;
-        span = span.join(input.span()).unwrap_or(span);
         let arm = input.parse::<Spanned<Syntax>>()?;
-        Ok(ChoiceArm { index, arm, span })
+        Ok(ChoiceArm {
+            index: Spanned {
+                inner: index,
+                span: index_span,
+            },
+            arm,
+        })
     }
 }
 
+/// A block of statements: `{ ... }`.
 struct Block(Spanned<Syntax>);
 
 impl Parse for Block {
@@ -107,6 +106,15 @@ impl Parse for Block {
 
 impl Parse for Spanned<Syntax> {
     fn parse(input: ParseStream) -> Result<Self> {
+        // Take a parsed, spanned piece of syntax, join its span with the mutably
+        // referenced span, and then return the unmodified thing; helper for joining
+        // spans of multiple bits of syntax together while parsing without lots of
+        // if-lets.
+        fn with_span<T: SpannedExt>(span: &mut Span, thing: T) -> T {
+            *span = span.join(thing.span()).unwrap_or(*span);
+            thing
+        }
+
         let lookahead = input.lookahead1();
         if lookahead.peek(kw::recv) {
             // Ast::Recv: recv <type>
@@ -158,12 +166,12 @@ impl Parse for Spanned<Syntax> {
 
             let mut arm_asts = Vec::new();
             for (i, choice_arm) in choice_arms.into_iter().enumerate() {
-                if i != choice_arm.index as usize {
+                if i != choice_arm.index.inner as usize {
                     return Err(Error::new(
-                        choice_arm.span,
+                        choice_arm.index.span,
                         format!(
                             "expected index {} in `choose` construct, found {}",
-                            i, choice_arm.index
+                            i, choice_arm.index.inner
                         ),
                     ));
                 }
@@ -186,12 +194,12 @@ impl Parse for Spanned<Syntax> {
 
             let mut arm_asts = Vec::new();
             for (i, choice_arm) in choice_arms.into_iter().enumerate() {
-                if i != choice_arm.index as usize {
+                if i != choice_arm.index.inner as usize {
                     return Err(Error::new(
-                        choice_arm.span,
+                        choice_arm.index.span,
                         format!(
                             "expected index {} in `offer` construct, found {}",
-                            i, choice_arm.index
+                            i, choice_arm.index.inner
                         ),
                     ));
                 }
@@ -204,6 +212,7 @@ impl Parse for Spanned<Syntax> {
                 span: offer_span,
             })
         } else if lookahead.peek(kw::split) {
+            // Ast::Split: split { <- ..., -> ... } or split { -> ..., <- ... }
             let kw_span = input.parse::<kw::split>()?.span();
             let split_span = kw_span.join(input.span()).unwrap_or(kw_span);
 
@@ -232,14 +241,14 @@ impl Parse for Spanned<Syntax> {
                 span: split_span,
             })
         } else if lookahead.peek(Token![loop]) || lookahead.peek(Lifetime) {
-            // Ast::Loop: 'label loop { ... }
+            // Ast::Loop: 'label: loop { ... }
             let mut loop_span;
             let label = if input.peek(Lifetime) {
                 loop_span = input.span();
-                let lifetime = loop_span.combine(input.parse::<Lifetime>()?);
+                let lifetime = with_span(&mut loop_span, input.parse::<Lifetime>()?);
                 let name = lifetime.ident.to_string();
-                let _ = loop_span.combine(input.parse::<Token![:]>()?);
-                let _ = loop_span.combine(input.parse::<Token![loop]>()?);
+                let _ = with_span(&mut loop_span, input.parse::<Token![:]>()?);
+                let _ = with_span(&mut loop_span, input.parse::<Token![loop]>()?);
                 Some(name)
             } else {
                 loop_span = input.parse::<Token![loop]>()?.span();
@@ -256,7 +265,7 @@ impl Parse for Spanned<Syntax> {
             let mut break_span = input.parse::<Token![break]>()?.span();
             let label = if input.peek(Lifetime) {
                 let lifetime = input.parse::<Lifetime>()?;
-                let _ = break_span.combine(&lifetime);
+                let _ = with_span(&mut break_span, &lifetime);
                 Some(lifetime.ident.to_string())
             } else {
                 None
@@ -271,7 +280,7 @@ impl Parse for Spanned<Syntax> {
             let mut continue_span = input.parse::<Token![continue]>()?.span();
             let label = if input.peek(Lifetime) {
                 let lifetime = input.parse::<Lifetime>()?;
-                let _ = continue_span.combine(&lifetime);
+                let _ = with_span(&mut continue_span, &lifetime);
                 Some(lifetime.ident.to_string())
             } else {
                 None
