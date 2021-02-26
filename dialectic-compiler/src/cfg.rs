@@ -99,14 +99,19 @@ impl Cfg {
         self[node].errors.push(kind);
     }
 
-    /// Create a dummy `Error` node.
+    /// Create a dummy `Error` node, as a stand-in for a node which should have
+    /// been generated but for some reason cannot be.
     pub fn create_error(&mut self, kind: CompileError, span: Span) -> Index {
         self.insert(CfgNode {
             expr: Ir::Error,
             next: None,
             span,
-            machine_generated: false,
             errors: vec![kind],
+
+            // This node is actually usually generated during parsing for things
+            // like a `break` or `continue`. So, we actually do want to treat it
+            // as if the user wrote it themselves.
+            machine_generated: false,
         })
     }
 
@@ -141,9 +146,23 @@ impl Cfg {
         while let Some((scope, node)) = queue.pop() {
             let CfgNode { expr, next, .. } = &mut self[node];
 
+            // This match is followed by a statement which checks for a continuation
+            // and adds it to the queue if it finds one. As such, any branch which needs
+            // specifically to not check its continuation and recursively resolve scopes
+            // inside it, will be ended with a `continue`, to skip this recursion.
+            //
+            // Specifically this is *very* important for nodes such as `Offer` and `Choose`,
+            // which will no longer have a continuation at all after this pass, as their
+            // continuations will be "lifted" into each arm of the node.
             match expr {
                 Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Error => {}
+
+                // For `break` and `continue`, we do not *need* to resolve following nodes'
+                // scopes... though we could, and it would not cause any issues (as for any
+                // break/continue w/ a continuation, the continuation will be unreachable code
+                // anyways and generate an error after flow analysis.)
                 Ir::Break(_) | Ir::Continue(_) => continue,
+
                 Ir::Call(child) => {
                     if let Some(child) = *child {
                         if visited.insert(child) {
@@ -224,17 +243,12 @@ impl Cfg {
             }
 
             match &self[node].expr {
-                Ir::Recv(_)
-                | Ir::Send(_)
-                | Ir::Type(_)
-                | Ir::Continue(_)
-                | Ir::Break(_)
-                | Ir::Error => {}
                 Ir::Loop(child) | Ir::Call(child) => stack.extend(*child),
                 Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
                 Ir::Choose(choices) | Ir::Offer(choices) => {
                     stack.extend(choices.iter().filter_map(Option::as_ref))
                 }
+                _ => {}
             }
 
             if let Some(cont) = self[node].next {
