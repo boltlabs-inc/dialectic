@@ -120,6 +120,6 @@ fn infinite_loop() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        CompileError::UnreachableStatement.to_string()
+        CompileError::FollowingCodeUnreachable.to_string()
     );
 }
