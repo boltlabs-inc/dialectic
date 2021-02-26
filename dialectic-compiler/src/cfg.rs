@@ -5,11 +5,7 @@ use {
     thunderdome::{Arena, Index},
 };
 
-use crate::{
-    flow::{FlowAnalysis, Solver},
-    target::Target,
-    CompileError, Spanned,
-};
+use crate::{flow::FlowAnalysis, target::Target, CompileError, Spanned};
 
 #[derive(Debug, Clone)]
 pub struct CfgNode {
@@ -17,7 +13,7 @@ pub struct CfgNode {
     pub next: Option<Index>,
     pub span: Span,
     pub machine_generated: bool,
-    pub errors: Vec<CompileError>,
+    pub errors: HashSet<CompileError>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +38,7 @@ impl CfgNode {
             next: None,
             span: Span::call_site(),
             machine_generated: false,
-            errors: Vec::new(),
+            errors: HashSet::new(),
         }
     }
 
@@ -52,7 +48,7 @@ impl CfgNode {
             next: None,
             span,
             machine_generated: false,
-            errors: Vec::new(),
+            errors: HashSet::new(),
         }
     }
 }
@@ -96,17 +92,19 @@ impl Cfg {
 
     /// Insert an `Error` node as a shim.
     pub fn insert_error_at(&mut self, node: Index, kind: CompileError) {
-        self[node].errors.push(kind);
+        self[node].errors.insert(kind);
     }
 
     /// Create a dummy `Error` node, as a stand-in for a node which should have
     /// been generated but for some reason cannot be.
     pub fn create_error(&mut self, kind: CompileError, span: Span) -> Index {
+        let mut errors = HashSet::new();
+        errors.insert(kind);
         self.insert(CfgNode {
             expr: Ir::Error,
             next: None,
             span,
-            errors: vec![kind],
+            errors,
 
             // This node is actually usually generated during parsing for things
             // like a `break` or `continue`. So, we actually do want to treat it
@@ -131,19 +129,25 @@ impl Cfg {
     /// In this type, the first parsing of the block will result in a `Choose` node with its
     /// continuation/"next" pointer set to point to a `Send(())` node. However, in order to ensure
     /// that the arms of the choose construct don't have to worry about the continuation that
-    /// comes "after" *in a higher/parent scope,* we have the resolve_scopes pass to "lift" this
+    /// comes "after" *in a higher/parent scope,* we have the resolve_scopes pass to "lower" this
     /// continuation which implicitly follows every arm of the `Choose`, into becoming the
     /// continuation of every relevant arm of the `Choose`. This does have some special cases,
     /// for example we don't want to change or set a next continuation for a `Break` node or
-    /// `Continuation` node
+    /// `Continue` node
     pub fn resolve_scopes(&mut self, node: Option<Index>) {
+        // Depth-first once-only traversal of CFG, skipping nodes we've already seen
         let mut visited = HashSet::new();
-        let mut queue = node
+
+        // The stack tracks pairs of implicit continuations (the absence of which indicates the
+        // `Done` continuation), and indices which might have that continuation or have children
+        // which might have that continuation. We push newly discovered nodes onto this stack, and
+        // pop from it to drive the traversal.
+        let mut stack = node
             .into_iter()
             .map(|node| (None, node))
             .collect::<Vec<(Option<Index>, Index)>>();
 
-        while let Some((scope, node)) = queue.pop() {
+        while let Some((scope, node)) = stack.pop() {
             let CfgNode { expr, next, .. } = &mut self[node];
 
             // This match is followed by a statement which checks for a continuation
@@ -155,31 +159,30 @@ impl Cfg {
             // which will no longer have a continuation at all after this pass, as their
             // continuations will be "lifted" into each arm of the node.
             match expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Error => {}
-
-                // For `break` and `continue`, we do not *need* to resolve following nodes'
-                // scopes... though we could, and it would not cause any issues (as for any
-                // break/continue w/ a continuation, the continuation will be unreachable code
-                // anyways and generate an error after flow analysis.)
-                Ir::Break(_) | Ir::Continue(_) => continue,
+                Ir::Recv(_)
+                | Ir::Send(_)
+                | Ir::Type(_)
+                | Ir::Break(_)
+                | Ir::Continue(_)
+                | Ir::Error => {}
 
                 Ir::Call(child) => {
                     if let Some(child) = *child {
                         if visited.insert(child) {
-                            queue.push((None, child));
+                            stack.push((None, child));
                         }
                     }
                 }
                 Ir::Split(tx_only, rx_only) => {
                     if let Some(tx_only) = *tx_only {
                         if visited.insert(tx_only) {
-                            queue.push((None, tx_only));
+                            stack.push((None, tx_only));
                         }
                     }
 
                     if let Some(rx_only) = *rx_only {
                         if visited.insert(rx_only) {
-                            queue.push((None, rx_only));
+                            stack.push((None, rx_only));
                         }
                     }
                 }
@@ -187,7 +190,7 @@ impl Cfg {
                     let cont = next.or(scope);
                     for &choice in choices.iter().filter_map(Option::as_ref) {
                         if visited.insert(choice) {
-                            queue.push((cont, choice));
+                            stack.push((cont, choice));
                         }
                     }
 
@@ -200,7 +203,7 @@ impl Cfg {
                         let continue0 = self.singleton(Ir::Continue(node));
                         self[continue0].machine_generated = true;
                         if visited.insert(body) {
-                            queue.push((Some(continue0), body));
+                            stack.push((Some(continue0), body));
                         }
                     } else {
                         // duplicated due to borrowck errors
@@ -215,7 +218,7 @@ impl Cfg {
             match &mut self[node].next {
                 Some(next) => {
                     if visited.insert(*next) {
-                        queue.push((scope, *next));
+                        stack.push((scope, *next));
                     }
                 }
                 next @ None => *next = scope,
@@ -223,26 +226,77 @@ impl Cfg {
         }
     }
 
-    pub fn analyze_control_flow(&self) -> FlowAnalysis {
-        Solver::new(self).solve()
+    /// Compute the set of nodes which are reachable from the root of the [`Cfg`], using the results
+    /// of the [`FlowAnalysis`] to determine whether nodes can be passed through.
+    fn analyze_reachability(&self, flow: &FlowAnalysis, root: Index) -> HashSet<Index> {
+        let mut stack = vec![root];
+        let mut reachable = HashSet::new();
+
+        while let Some(node_index) = stack.pop() {
+            if !reachable.insert(node_index) {
+                continue;
+            }
+
+            let node = &self[node_index];
+
+            match &node.expr {
+                Ir::Loop(child) | Ir::Call(child) => {
+                    stack.extend(child);
+
+                    if flow.is_passable(node_index) {
+                        stack.extend(node.next);
+                    }
+                }
+                Ir::Split(tx, rx) => {
+                    stack.extend(tx.iter().chain(rx));
+
+                    if flow.is_passable(node_index) {
+                        stack.extend(node.next);
+                    }
+                }
+                Ir::Choose(choices) | Ir::Offer(choices) => {
+                    stack.extend(choices.iter().filter_map(Option::as_ref));
+
+                    assert!(node.next.is_none(), "at this point in the compiler, all continuations of \
+                        `Choose` and `Offer` nodes should have been eliminated by the resolve_scopes pass.");
+                }
+                Ir::Send(_)
+                | Ir::Recv(_)
+                | Ir::Type(_)
+                | Ir::Break(_)
+                | Ir::Continue(_)
+                | Ir::Error => {
+                    if flow.is_passable(node_index) {
+                        stack.extend(node.next);
+                    }
+                }
+            }
+        }
+
+        reachable
     }
 
+    /// Attach errors to all dead code and code that leads to dead code, based on an internal call
+    /// to the flow analysis and reachability analysis on the graph.
     pub fn report_dead_code(&mut self, node: Option<Index>) {
         let root = match node {
             Some(node) => node,
             None => return,
         };
 
-        let flow = self.analyze_control_flow();
+        let flow = crate::flow::analyze(self);
+        let reachable = self.analyze_reachability(&flow, root);
         let mut stack = vec![root];
         let mut visited = HashSet::new();
 
-        while let Some(node) = stack.pop() {
-            if !visited.insert(node) {
-                break;
+        while let Some(node_index) = stack.pop() {
+            if !visited.insert(node_index) {
+                continue;
             }
 
-            match &self[node].expr {
+            let node = &self[node_index];
+
+            match &node.expr {
                 Ir::Loop(child) | Ir::Call(child) => stack.extend(*child),
                 Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
                 Ir::Choose(choices) | Ir::Offer(choices) => {
@@ -251,21 +305,23 @@ impl Cfg {
                 _ => {}
             }
 
-            if let Some(cont) = self[node].next {
-                if flow.is_passable(node) {
-                    stack.push(cont);
-                } else if !self[cont].machine_generated {
-                    self.insert_error_at(node, CompileError::FollowingCodeUnreachable);
-                    self.insert_error_at(cont, CompileError::UnreachableStatement);
+            if let Some(cont_index) = node.next {
+                let cont = &self[cont_index];
+                if flow.is_passable(node_index) {
+                    stack.push(cont_index);
+                } else if !cont.machine_generated && !reachable.contains(&cont_index) {
+                    self.insert_error_at(node_index, CompileError::FollowingCodeUnreachable);
+                    self.insert_error_at(cont_index, CompileError::UnreachableStatement);
                 }
             }
         }
     }
 
+    /// Starting with the empty environment of loops and the empty list of errors, convert a [`Cfg`]
+    /// rooted at a specific node into the target language representation, ready for output.
     fn to_target_inner(
         &self,
         errors: &mut Vec<Spanned<CompileError>>,
-        loop_base: usize,
         loop_env: &mut Vec<Index>,
         maybe_node: Option<Index>,
     ) -> Target {
@@ -281,31 +337,31 @@ impl Cfg {
 
         match &node.expr {
             Ir::Recv(t) => {
-                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                let cont = self.to_target_inner(errors, loop_env, node.next);
                 Target::Recv(t.clone(), Rc::new(cont))
             }
             Ir::Send(t) => {
-                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                let cont = self.to_target_inner(errors, loop_env, node.next);
                 Target::Send(t.clone(), Rc::new(cont))
             }
             Ir::Call(callee) => {
-                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
-                let callee = self.to_target_inner(errors, loop_base, loop_env, *callee);
+                let cont = self.to_target_inner(errors, loop_env, node.next);
+                let callee = self.to_target_inner(errors, loop_env, *callee);
 
                 Target::Call(Rc::new(callee), Rc::new(cont))
             }
             Ir::Split(tx_only, rx_only) => {
-                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                let cont = self.to_target_inner(errors, loop_env, node.next);
                 let (tx_only, rx_only) = (*tx_only, *rx_only);
-                let tx_target = self.to_target_inner(errors, loop_base, loop_env, tx_only);
-                let rx_target = self.to_target_inner(errors, loop_base, loop_env, rx_only);
+                let tx_target = self.to_target_inner(errors, loop_env, tx_only);
+                let rx_target = self.to_target_inner(errors, loop_env, rx_only);
 
                 Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
             }
             Ir::Choose(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(errors, loop_base, loop_env, choice))
+                    .map(|&choice| self.to_target_inner(errors, loop_env, choice))
                     .collect();
 
                 Target::Choose(targets)
@@ -313,7 +369,7 @@ impl Cfg {
             Ir::Offer(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(errors, loop_base, loop_env, choice))
+                    .map(|&choice| self.to_target_inner(errors, loop_env, choice))
                     .collect();
 
                 Target::Offer(targets)
@@ -321,9 +377,7 @@ impl Cfg {
             Ir::Loop(body) => {
                 loop_env.push(node_index);
 
-                let target = Target::Loop(Rc::new(
-                    self.to_target_inner(errors, loop_base, loop_env, *body),
-                ));
+                let target = Target::Loop(Rc::new(self.to_target_inner(errors, loop_env, *body)));
 
                 loop_env.pop();
 
@@ -331,7 +385,7 @@ impl Cfg {
             }
             Ir::Break(of_loop) => {
                 let jump = self[*of_loop].next;
-                self.to_target_inner(errors, loop_base + 1, loop_env, jump)
+                self.to_target_inner(errors, loop_env, jump)
             }
             Ir::Continue(of_loop) => {
                 let jump_target = *of_loop;
@@ -349,19 +403,24 @@ impl Cfg {
                 match node.next {
                     None => Target::Type(t.clone()),
                     Some(cont_index) => {
-                        let cont =
-                            self.to_target_inner(errors, loop_base, loop_env, Some(cont_index));
+                        let cont = self.to_target_inner(errors, loop_env, Some(cont_index));
                         Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont))
                     }
                 }
             }
-            Ir::Error => self.to_target_inner(errors, loop_base, loop_env, node.next),
+            Ir::Error => self.to_target_inner(errors, loop_env, node.next),
         }
     }
 
+    /// Traverse a [`Cfg`] rooted at the specified index to produce either a valid [`Target`]
+    /// corresponding to it, or a [`syn::Error`] corresponding to one or more compiler errors.
+    ///
+    /// **Important:** This function **must** be called **after** the scope resolution pass, or else
+    /// the resultant code may omit sections of the input control flow graph due to implicit
+    /// continuations which have not yet been resolved.
     pub fn to_target(&self, node: Option<Index>) -> Result<Target, Error> {
         let mut errors = Vec::new();
-        let output = self.to_target_inner(&mut errors, 0, &mut Vec::new(), node);
+        let output = self.to_target_inner(&mut errors, &mut Vec::new(), node);
 
         let mut maybe_error = None;
         for reported_error in errors.drain(..) {
