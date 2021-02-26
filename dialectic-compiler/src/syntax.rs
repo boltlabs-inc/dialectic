@@ -97,14 +97,13 @@ impl Spanned<Syntax> {
         let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
         cfg.resolve_scopes(head);
         cfg.report_dead_code(head);
-        cfg.eliminate_breaks(head);
         cfg.to_target(head)
     }
 
     fn to_cfg<'a>(
         &'a self,
         cfg: &mut Cfg,
-        env: &mut Vec<&'a Option<String>>,
+        env: &mut Vec<(&'a Option<String>, Index)>,
     ) -> (Option<Index>, Option<Index>) {
         use Syntax::*;
         let ir = match &self.inner {
@@ -134,56 +133,54 @@ impl Spanned<Syntax> {
                     .collect();
                 Ir::Offer(choice_nodes)
             }
+            Continue(label) => match env.last() {
+                None => Ir::Error(CompileError::ContinueOutsideLoop, None),
+                Some((_, index)) => match label {
+                    None => Ir::Continue(*index),
+                    Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
+                        None => Ir::Error(CompileError::UndeclaredLabel(label.clone()), None),
+                        Some((_, index)) => Ir::Continue(*index),
+                    },
+                },
+            },
+            Break(label) => match env.last() {
+                None => Ir::Error(CompileError::BreakOutsideLoop, None),
+                Some((_, index)) => match label {
+                    None => Ir::Break(*index),
+                    Some(label) => match env.iter().rev().find(|&l| l.0.as_ref() == Some(label)) {
+                        None => Ir::Error(CompileError::UndeclaredLabel(label.clone()), None),
+                        Some((_, index)) => Ir::Break(*index),
+                    },
+                },
+            },
             Loop(maybe_label, body) => {
+                // Constructing a loop node is a kind of fixed-point operation, where
+                // any break and continue nodes within need to know the index of their
+                // respective loop node. To solve this, we create an empty loop and use
+                // its index to hold the places of the data any break or continue needs,
+                // and then assign the correct `Ir::Loop(head)` value later.
+                let ir_node = cfg.spanned(Ir::Loop(None), self.span);
+
                 // Convert the body in the environment with this loop label
-                env.push(maybe_label);
+                env.push((maybe_label, ir_node));
                 let head = body.to_cfg(cfg, env).0;
                 let _ = env.pop();
 
-                let ir = Ir::Loop(head);
+                // Close out that fixed point; the loop block is now correctly built.
+                cfg[ir_node].expr = Ir::Loop(head);
 
                 // Check to ensure the environment does not already contain this label
-                if maybe_label.is_some() && env.contains(&maybe_label) {
+                if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
                     Ir::Error(
                         CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
-                        Some(cfg.spanned(ir, self.span)),
+                        Some(ir_node),
                     )
                 } else {
-                    ir
-                }
-            }
-            Continue(label) => {
-                if env.is_empty() {
-                    Ir::Error(CompileError::ContinueOutsideLoop, None)
-                } else {
-                    match label {
-                        None => Ir::Continue(0),
-                        Some(label) => {
-                            match env.iter().rev().position(|&l| l.as_ref() == Some(label)) {
-                                None => {
-                                    Ir::Error(CompileError::UndeclaredLabel(label.clone()), None)
-                                }
-                                Some(index) => Ir::Continue(index),
-                            }
-                        }
-                    }
-                }
-            }
-            Break(label) => {
-                if env.is_empty() {
-                    Ir::Error(CompileError::BreakOutsideLoop, None)
-                } else {
-                    match label {
-                        None => Ir::Break(0),
-                        Some(label) => {
-                            match env.iter().rev().position(|&l| l.as_ref() == Some(label)) {
-                                None => {
-                                    Ir::Error(CompileError::UndeclaredLabel(label.clone()), None)
-                                }
-                                Some(index) => Ir::Break(index),
-                            }
-                        }
-                    }
+                    // Like the `Block` clause, we've already calculated and used this
+                    // node's index, so we don't want to construct a new node from it.
+                    // So, we need to return here, before the code after the match
+                    // constructs a new `Index` from a returned `Ir` variant.
+                    return (Some(ir_node), Some(ir_node));
                 }
             }
             Block(stmts) => {

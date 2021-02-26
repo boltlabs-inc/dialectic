@@ -1,10 +1,6 @@
 use {
     proc_macro2::Span,
-    std::{
-        collections::{HashMap, HashSet},
-        ops,
-        rc::Rc,
-    },
+    std::{collections::HashSet, ops, rc::Rc},
     syn::{Error, Type},
     thunderdome::{Arena, Index},
 };
@@ -32,8 +28,8 @@ pub enum Ir {
     Offer(Vec<Option<Index>>),
     Split(Option<Index>, Option<Index>),
     Loop(Option<Index>),
-    Break(usize),
-    Continue(usize),
+    Break(Index),
+    Continue(Index),
     Type(Type),
     Error(CompileError, Option<Index>),
 }
@@ -107,6 +103,15 @@ impl Cfg {
 
         let new_child = self.insert(CfgNode::spanned(child, span));
         self[node].expr = Ir::Error(kind, Some(new_child));
+        self[new_child].next = self[node].next.take();
+    }
+
+    pub fn get_jump_target(&self, mut node: Index) -> Index {
+        while let Ir::Error(_, Some(child)) = &self[node].expr {
+            node = *child;
+        }
+
+        node
     }
 
     /// Create a new node containing only this expression with no next-node link.
@@ -177,14 +182,14 @@ impl Cfg {
                 }
                 Ir::Loop(body) => {
                     if let Some(body) = *body {
-                        let continue0 = self.singleton(Ir::Continue(0));
+                        let continue0 = self.singleton(Ir::Continue(node));
                         self[continue0].machine_generated = true;
                         if visited.insert(body) {
                             queue.push((Some(continue0), body));
                         }
                     } else {
                         // duplicated due to borrowck errors
-                        let continue0 = self.singleton(Ir::Continue(0));
+                        let continue0 = self.singleton(Ir::Continue(node));
                         self[continue0].machine_generated = true;
                         // reborrow here because we've lost the borrow on `body`
                         self[node].expr = Ir::Loop(Some(continue0));
@@ -203,50 +208,8 @@ impl Cfg {
         }
     }
 
-    pub fn jump_table(&self, root: Index) -> HashMap<Index, Index> {
-        let mut loop_env = Vec::new();
-        let mut stack = vec![root];
-        let mut jump_table = HashMap::new();
-
-        jump_table_inner(self, &mut jump_table, &mut loop_env, &mut stack);
-
-        return jump_table;
-
-        fn jump_table_inner(
-            cfg: &Cfg,
-            jump_table: &mut HashMap<Index, Index>,
-            loop_env: &mut Vec<Index>,
-            stack: &mut Vec<Index>,
-        ) {
-            while let Some(node_index) = stack.pop() {
-                let node = &cfg[node_index];
-                match &node.expr {
-                    Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) | Ir::Loop(None) => {}
-                    Ir::Call(child) | Ir::Error(_, child) => stack.extend(*child),
-                    Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
-                    Ir::Choose(choices) | Ir::Offer(choices) => {
-                        stack.extend(choices.iter().filter_map(Option::as_ref))
-                    }
-                    Ir::Break(debruijn_index) | Ir::Continue(debruijn_index) => {
-                        let _ = jump_table
-                            .insert(node_index, loop_env[loop_env.len() - 1 - *debruijn_index]);
-                    }
-                    Ir::Loop(Some(body)) => {
-                        loop_env.push(node_index);
-                        jump_table_inner(cfg, jump_table, loop_env, &mut vec![*body]);
-                        loop_env.pop();
-                    }
-                }
-
-                if let Some(cont) = node.next {
-                    stack.push(cont);
-                }
-            }
-        }
-    }
-
-    pub fn analyze_control_flow(&self, node: Index) -> FlowAnalysis {
-        Solver::new(self, node).solve()
+    pub fn analyze_control_flow(&self) -> FlowAnalysis {
+        Solver::new(self).solve()
     }
 
     pub fn report_dead_code(&mut self, node: Option<Index>) {
@@ -255,8 +218,8 @@ impl Cfg {
             None => return,
         };
 
-        let flow = self.analyze_control_flow(root);
-        let mut stack = node.into_iter().collect::<Vec<_>>();
+        let flow = self.analyze_control_flow();
+        let mut stack = vec![root];
         let mut visited = HashSet::new();
 
         while let Some(node) = stack.pop() {
@@ -284,275 +247,92 @@ impl Cfg {
         }
     }
 
-    /// Eliminate `Break` nodes, replacing them w/ redirections to the nodes they reference and
-    /// effectively dereferencing the continuations they represent.
-    pub fn eliminate_breaks(&mut self, node: Option<Index>) {
-        if let Some(node) = node {
-            let mut loop_env = Vec::new();
-            eliminate_inner(
-                self,
-                None,
-                &mut loop_env,
-                0,
-                |_| unreachable!("all breaks are valid before this pass"),
-                node,
-            );
-            debug_assert!(
-                loop_env.is_empty(),
-                "mismatched number of push/pop in `eliminate_breaks_and_labels`"
-            );
-        }
-
-        #[inline]
-        fn origin_next(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| &mut cfg[node].next
-        }
-
-        #[inline]
-        fn origin_child(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| match &mut cfg[node].expr {
-                Ir::Call(child) | Ir::Error(_, child) => child,
-                _ => panic!("parent node has unexpectedly mutated"),
-            }
-        }
-
-        #[inline]
-        fn origin_tx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| match &mut cfg[node].expr {
-                Ir::Split(tx_only, _) => tx_only,
-                _ => panic!("parent node has unexpectedly mutated"),
-            }
-        }
-
-        #[inline]
-        fn origin_rx_only(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| match &mut cfg[node].expr {
-                Ir::Split(_, rx_only) => rx_only,
-                _ => panic!("parent node has unexpectedly mutated"),
-            }
-        }
-
-        #[inline]
-        fn origin_choice_n(node: Index, i: usize) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| match &mut cfg[node].expr {
-                Ir::Choose(choices) | Ir::Offer(choices) => &mut choices[i],
-                _ => panic!("parent node has unexpectedly mutated"),
-            }
-        }
-
-        #[inline]
-        fn origin_body(node: Index) -> impl FnOnce(&mut Cfg) -> &mut Option<Index> {
-            move |cfg| match &mut cfg[node].expr {
-                Ir::Loop(body) => body,
-                _ => panic!("parent node has unexpectedly mutated"),
-            }
-        }
-
-        fn eliminate_inner<F>(
-            cfg: &mut Cfg,
-            next_env: Option<Index>,
-            loop_env: &mut Vec<Option<Index>>,
-            loop_offset: usize,
-            origin: F,
-            node: Index,
-        ) where
-            F: FnOnce(&mut Cfg) -> &mut Option<Index>,
-        {
-            match &cfg[node].expr {
-                Ir::Recv(_) | Ir::Send(_) | Ir::Type(_) => {
-                    if let Some(next) = cfg[node].next {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_next(node),
-                            next,
-                        );
-                    }
-                }
-                Ir::Call(child) | Ir::Error(_, child) => {
-                    let child = *child;
-
-                    if let Some(child) = child {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_child(node),
-                            child,
-                        );
-                    }
-
-                    if let Some(next) = cfg[node].next {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_next(node),
-                            next,
-                        );
-                    }
-                }
-                Ir::Split(tx_only, rx_only) => {
-                    let (tx_only, rx_only) = (*tx_only, *rx_only);
-
-                    if let Some(tx_only) = tx_only {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_tx_only(node),
-                            tx_only,
-                        );
-                    }
-
-                    if let Some(rx_only) = rx_only {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_rx_only(node),
-                            rx_only,
-                        );
-                    }
-
-                    if let Some(next) = cfg[node].next {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_next(node),
-                            next,
-                        );
-                    }
-                }
-                Ir::Choose(choices) | Ir::Offer(choices) => {
-                    // Pacify borrowck by reborrowing
-                    let choices = choices.clone();
-                    // For each choose/offer arm, eliminate whatever's inside, using that particular
-                    // arm's next pointer as the origin.
-                    for (i, choice) in choices.into_iter().filter_map(|x| x).enumerate() {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_choice_n(node, i),
-                            choice,
-                        );
-                    }
-
-                    if let Some(next) = cfg[node].next {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_next(node),
-                            next,
-                        );
-                    }
-                }
-                Ir::Loop(body) => {
-                    let maybe_body = *body; // Pacify borrowck, or else it thinks cfg is borrowed
-                    let cont = cfg[node].next;
-
-                    if let Some(body) = maybe_body {
-                        loop_env.push(cont); // Enter new loop environment
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset,
-                            origin_body(node),
-                            body,
-                        );
-                        let _ = loop_env.pop(); // Exit loop environment
-                    }
-
-                    if let Some(cont) = cont {
-                        eliminate_inner(
-                            cfg,
-                            next_env,
-                            loop_env,
-                            loop_offset + 1,
-                            origin_next(node),
-                            cont,
-                        );
-                    }
-                }
-                Ir::Break(index) => {
-                    // Pacify borrowck by reborrowing
-                    let index = *index;
-                    // Set the parent's corresponding next pointer to the continuation referenced by
-                    // this `break` statement, stored in the environment
-                    *origin(cfg) = loop_env[loop_env.len() - 1 - index];
-                }
-                Ir::Continue(_) => match &mut cfg[node].expr {
-                    Ir::Continue(debruijn_index) => *debruijn_index += loop_offset,
-                    _ => panic!(),
-                },
-            }
-        }
-    }
-
     fn to_target_inner(
         &self,
         errors: &mut Vec<Spanned<CompileError>>,
-        parent_cont: Target,
+        loop_base: usize,
+        loop_env: &mut Vec<Index>,
         maybe_node: Option<Index>,
     ) -> Target {
-        let node = match maybe_node {
-            Some(node) => &self[node],
+        let (node, node_index) = match maybe_node {
+            Some(node) => (&self[node], node),
             None => return Target::Done,
-        };
-        let cont = match node.next {
-            Some(i) => self.to_target_inner(errors, parent_cont, Some(i)),
-            None => parent_cont,
         };
 
         match &node.expr {
-            Ir::Recv(t) => Target::Recv(t.clone(), Rc::new(cont)),
-            Ir::Send(t) => Target::Send(t.clone(), Rc::new(cont)),
+            Ir::Recv(t) => {
+                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                Target::Recv(t.clone(), Rc::new(cont))
+            }
+            Ir::Send(t) => {
+                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                Target::Send(t.clone(), Rc::new(cont))
+            }
             Ir::Call(callee) => {
-                let callee = self.to_target_inner(errors, Target::Done, *callee);
+                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
+                let callee = self.to_target_inner(errors, loop_base, loop_env, *callee);
+
                 Target::Call(Rc::new(callee), Rc::new(cont))
             }
             Ir::Split(tx_only, rx_only) => {
+                let cont = self.to_target_inner(errors, loop_base, loop_env, node.next);
                 let (tx_only, rx_only) = (*tx_only, *rx_only);
-                let tx_target = self.to_target_inner(errors, Target::Done, tx_only);
-                let rx_target = self.to_target_inner(errors, Target::Done, rx_only);
+                let tx_target = self.to_target_inner(errors, loop_base, loop_env, tx_only);
+                let rx_target = self.to_target_inner(errors, loop_base, loop_env, rx_only);
+
                 Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
             }
             Ir::Choose(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(errors, cont.clone(), choice))
+                    .map(|&choice| self.to_target_inner(errors, loop_base, loop_env, choice))
                     .collect();
+
                 Target::Choose(targets)
             }
             Ir::Offer(choices) => {
                 let targets = choices
                     .iter()
-                    .map(|&choice| self.to_target_inner(errors, cont.clone(), choice))
+                    .map(|&choice| self.to_target_inner(errors, loop_base, loop_env, choice))
                     .collect();
+
                 Target::Offer(targets)
             }
-            Ir::Loop(body) => Target::Loop(Rc::new(self.to_target_inner(errors, cont, *body))),
-            Ir::Break(_) => panic!("uneliminated break in CFG"),
-            Ir::Continue(i) => Target::Continue(*i),
+            Ir::Loop(body) => {
+                loop_env.push(node_index);
+
+                let target = Target::Loop(Rc::new(
+                    self.to_target_inner(errors, loop_base, loop_env, *body),
+                ));
+
+                loop_env.pop();
+
+                target
+            }
+            Ir::Break(of_loop) => {
+                let jump = self[self.get_jump_target(*of_loop)].next;
+                self.to_target_inner(errors, loop_base + 1, loop_env, jump)
+            }
+            Ir::Continue(of_loop) => {
+                let jump_target = self.get_jump_target(*of_loop);
+                Target::Continue(
+                    loop_env
+                        .iter()
+                        .rev()
+                        .position(|&loop_node| loop_node == jump_target)
+                        .unwrap(),
+                )
+            }
             Ir::Type(t) => {
                 // Optimize a little bit by doing the `Then` transform ourselves if the next
                 // continuation is a `Done`.
-                match cont {
-                    Target::Done => Target::Type(t.clone()),
-                    _ => Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont)),
+                match node.next {
+                    None => Target::Type(t.clone()),
+                    Some(cont_index) => {
+                        let cont =
+                            self.to_target_inner(errors, loop_base, loop_env, Some(cont_index));
+                        Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont))
+                    }
                 }
             }
             Ir::Error(error, maybe_child) => {
@@ -561,17 +341,14 @@ impl Cfg {
                     span: node.span,
                 });
 
-                match *maybe_child {
-                    Some(child) => self.to_target_inner(errors, cont, Some(child)),
-                    None => cont,
-                }
+                self.to_target_inner(errors, loop_base, loop_env, *maybe_child)
             }
         }
     }
 
     pub fn to_target(&self, node: Option<Index>) -> Result<Target, Error> {
         let mut errors = Vec::new();
-        let output = self.to_target_inner(&mut errors, Target::Done, node);
+        let output = self.to_target_inner(&mut errors, 0, &mut Vec::new(), node);
 
         let mut maybe_error = None;
         for reported_error in errors.drain(..) {

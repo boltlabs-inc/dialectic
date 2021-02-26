@@ -64,69 +64,69 @@ impl<T> From<T> for Spanned<T> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::cfg::*;
-    use thunderdome::Index;
+// #[cfg(test)]
+// mod tests {
+//     use crate::cfg::*;
+//     use thunderdome::Index;
 
-    impl Cfg {
-        fn send(&mut self, ty: &str) -> Index {
-            self.singleton(Ir::Send(syn::parse_str(ty).unwrap()))
-        }
+//     impl Cfg {
+//         fn send(&mut self, ty: &str) -> Index {
+//             self.singleton(Ir::Send(syn::parse_str(ty).unwrap()))
+//         }
 
-        fn recv(&mut self, ty: &str) -> Index {
-            self.singleton(Ir::Recv(syn::parse_str(ty).unwrap()))
-        }
+//         fn recv(&mut self, ty: &str) -> Index {
+//             self.singleton(Ir::Recv(syn::parse_str(ty).unwrap()))
+//         }
 
-        fn type_(&mut self, ty: &str) -> Index {
-            self.singleton(Ir::Type(syn::parse_str(ty).unwrap()))
-        }
-    }
+//         fn type_(&mut self, ty: &str) -> Index {
+//             self.singleton(Ir::Type(syn::parse_str(ty).unwrap()))
+//         }
+//     }
 
-    #[test]
-    fn tally_client_cfg_direct_subst() {
-        let mut cfg = Cfg::new();
-        let send = cfg.send("i64");
-        let recv = cfg.recv("i64");
-        let continue0 = cfg.singleton(Ir::Continue(0));
-        cfg[send].next = Some(continue0);
-        let continue1 = cfg.singleton(Ir::Continue(1));
-        cfg[recv].next = Some(continue1);
-        let choose_opts = vec![Some(send), Some(recv)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client_tally = cfg.singleton(Ir::Loop(Some(choose)));
+//     #[test]
+//     fn tally_client_cfg_direct_subst() {
+//         let mut cfg = Cfg::new();
+//         let send = cfg.send("i64");
+//         let recv = cfg.recv("i64");
+//         let continue0 = cfg.singleton(Ir::Continue(0));
+//         cfg[send].next = Some(continue0);
+//         let continue1 = cfg.singleton(Ir::Continue(1));
+//         cfg[recv].next = Some(continue1);
+//         let choose_opts = vec![Some(send), Some(recv)];
+//         let choose = cfg.singleton(Ir::Choose(choose_opts));
+//         let client_tally = cfg.singleton(Ir::Loop(Some(choose)));
 
-        let break0 = cfg.singleton(Ir::Break(0));
-        let send = cfg.send("Operation");
-        cfg[send].next = Some(client_tally);
-        let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client = cfg.singleton(Ir::Loop(Some(choose)));
+//         let break0 = cfg.singleton(Ir::Break(0));
+//         let send = cfg.send("Operation");
+//         cfg[send].next = Some(client_tally);
+//         let choose_opts = vec![Some(break0), Some(send)];
+//         let choose = cfg.singleton(Ir::Choose(choose_opts));
+//         let client = cfg.singleton(Ir::Loop(Some(choose)));
 
-        cfg.eliminate_breaks(Some(client));
-        let s = format!("{}", cfg.to_target(Some(client)).unwrap());
-        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
-    }
+//         cfg.eliminate_breaks(Some(client));
+//         let s = format!("{}", cfg.to_target(Some(client)).unwrap());
+//         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
+//     }
 
-    #[test]
-    fn tally_client_cfg_call() {
-        let mut cfg = Cfg::new();
-        let break0 = cfg.singleton(Ir::Break(0));
-        let send = cfg.send("Operation");
-        let callee = cfg.type_("ClientTally");
-        let call = cfg.singleton(Ir::Call(Some(callee)));
-        cfg[send].next = Some(call);
-        let continue0 = cfg.singleton(Ir::Continue(0));
-        cfg[call].next = Some(continue0);
-        let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
-        let client = cfg.singleton(Ir::Loop(Some(choose)));
+//     #[test]
+//     fn tally_client_cfg_call() {
+//         let mut cfg = Cfg::new();
+//         let break0 = cfg.singleton(Ir::Break(0));
+//         let send = cfg.send("Operation");
+//         let callee = cfg.type_("ClientTally");
+//         let call = cfg.singleton(Ir::Call(Some(callee)));
+//         cfg[send].next = Some(call);
+//         let continue0 = cfg.singleton(Ir::Continue(0));
+//         cfg[call].next = Some(continue0);
+//         let choose_opts = vec![Some(break0), Some(send)];
+//         let choose = cfg.singleton(Ir::Choose(choose_opts));
+//         let client = cfg.singleton(Ir::Loop(Some(choose)));
 
-        cfg.eliminate_breaks(Some(client));
-        let s = format!("{}", cfg.to_target(Some(client)).unwrap());
-        assert_eq!(
-            s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
-        );
-    }
-}
+//         cfg.eliminate_breaks(Some(client));
+//         let s = format!("{}", cfg.to_target(Some(client)).unwrap());
+//         assert_eq!(
+//             s,
+//             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+//         );
+//     }
+// }

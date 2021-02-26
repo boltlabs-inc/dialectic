@@ -1,5 +1,5 @@
 use {
-    std::collections::{HashMap, HashSet, VecDeque},
+    std::collections::{HashSet, VecDeque},
     thunderdome::Index,
 };
 
@@ -9,7 +9,6 @@ use crate::cfg::{Cfg, Ir};
 pub struct FlowAnalysis {
     pub passable: HashSet<Index>,
     pub haltable: HashSet<Index>,
-    pub jumps: HashMap<Index, Index>,
 }
 
 impl FlowAnalysis {
@@ -80,7 +79,6 @@ pub enum Validity {
 #[derive(Debug)]
 pub struct Solver<'a> {
     cfg: &'a Cfg,
-    jumps: HashMap<Index, Index>,
     passable: HashSet<Index>,
     haltable: HashSet<Index>,
     breakable_to: HashSet<(Index, Index)>,
@@ -90,10 +88,9 @@ pub struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
-    pub fn new(cfg: &'a Cfg, root: Index) -> Self {
+    pub fn new(cfg: &'a Cfg) -> Self {
         let mut this = Self {
             cfg,
-            jumps: cfg.jump_table(root),
             passable: HashSet::new(),
             haltable: HashSet::new(),
             breakable_to: HashSet::new(),
@@ -196,7 +193,6 @@ impl<'a> Solver<'a> {
         FlowAnalysis {
             passable: self.passable,
             haltable: self.haltable,
-            jumps: self.jumps,
         }
     }
 }
@@ -250,8 +246,10 @@ fn construct_haltable_preconditions(solver: &Solver, node_index: Index) -> Dnf {
             .map(|&c| vec![Constraint::Haltable(c)])
             .collect()),
 
-        Ir::Continue(_) => Dnf::only_if(vec![Constraint::Haltable(solver.jumps[&node_index])]),
-        Ir::Break(_) => match solver.cfg[solver.jumps[&node_index]].next {
+        Ir::Continue(of_loop) => {
+            Dnf::only_if(vec![Constraint::Haltable(cfg.get_jump_target(*of_loop))])
+        }
+        Ir::Break(of_loop) => match solver.cfg[cfg.get_jump_target(*of_loop)].next {
             Some(cont) => Dnf::only_if(vec![Constraint::Haltable(cont)]),
             None => Dnf::trivially_true(),
         },
@@ -324,7 +322,7 @@ fn construct_breakable_to_preconditions(
 
             Dnf(disj)
         }
-        Ir::Break(_) if solver.jumps[&breaks_from] == breaks_to => Dnf::trivially_true(),
+        Ir::Break(of_loop) if *of_loop == breaks_to => Dnf::trivially_true(),
         Ir::Break(_) | Ir::Continue(_) => Dnf::trivially_false(),
 
         // Control flow through an error node is undefined, so for now we ask
