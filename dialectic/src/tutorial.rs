@@ -20,6 +20,19 @@ This type specifies a very simple protocol: "send a string, then finish." The fi
 `Send` is the type sent, and the second is the rest of the protocol, which in this case is the
 empty protocol [`Done`].
 
+While the types needed to express simple session types like the above are easy enough to read,
+they can become quite difficult to parse for more complex sessions. For this reason, Dialectic
+has the [`Session!`](crate::Session@macro) macro, which defines a simple domain specific language
+for specifying session types. We'll use both the `Session!` macro and the raw session types in
+this tutorial, to help the reader understand the relationship between the two.
+
+```
+# use dialectic::prelude::*;
+type JustSendOneString = Session! {
+    send String;
+};
+```
+
 Every session type has a [`Dual`](crate::Session::Dual), which describes what the other end of
 the channel must do to follow the channel's protocol; if one end [`Send`]s, the other end must
 [`Recv`]:
@@ -28,6 +41,17 @@ the channel must do to follow the channel's protocol; if one end [`Send`]s, the 
 # use dialectic::prelude::*;
 # use static_assertions::assert_type_eq_all;
 assert_type_eq_all!(<Send<String, Done> as Session>::Dual, Recv<String, Done>);
+```
+
+And now, expressing the same thing in terms of the `Session!` macro:
+
+```
+# use dialectic::prelude::*;
+# use static_assertions::assert_type_eq_all;
+assert_type_eq_all!(
+    <Session! { send String } as Session>::Dual,
+    Session! { recv String },
+);
 ```
 
 (Here and elsewhere in this tutorial, we use the
@@ -67,8 +91,8 @@ to the given session type, and `c2`'s type corresponds to its dual:
 # use dialectic::backend::mpsc;
 # type JustSendOneString = Send<String, Done>;
 # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
-let _: Chan<Send<String, Done>, mpsc::Sender, mpsc::Receiver> = c1;
-let _: Chan<Recv<String, Done>, mpsc::Sender, mpsc::Receiver> = c2;
+let _: Chan<Session! { send String }, mpsc::Sender, mpsc::Receiver> = c1;
+let _: Chan<Session! { recv String }, mpsc::Sender, mpsc::Receiver> = c2;
 ```
 
 Now that we have the two ends of a bidirectional session-typed channel, we can use them to
@@ -118,7 +142,12 @@ to a new channel.
 # type JustSendOneString = Send<String, Done>;
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-type ParityOfLength = Send<String, Recv<usize, Send<bool, Done>>>;
+type ParityOfLength = Session! {
+    send String;
+    recv usize;
+    send bool;
+};
+
 let (c1, c2) = ParityOfLength::channel(|| mpsc::channel(1));
 
 // The string whose length's parity we'll compute
@@ -170,7 +199,7 @@ channel from above:
 
 ```
 # use dialectic::prelude::*;
-type JustSendOneString = Send<String, Done>;
+type JustSendOneString = Session! { send String };
 ```
 
 Trying to do any of the below things results in a compile-time type error (edited for brevity).
@@ -270,10 +299,33 @@ from:
 ```
 # use dialectic::prelude::*;
 # use static_assertions::assert_type_eq_all;
-assert_type_eq_all!(
-    <Offer<(Send<String, Done>, Recv<i64, Done>)> as Session>::Dual,
-    Choose<(Recv<String, Done>, Send<i64, Done>)>,
-);
+type P = Offer<(Send<String, Done>, Recv<i64, Done>)>;
+type Q = Choose<(Recv<String, Done>, Send<i64, Done>)>;
+
+assert_type_eq_all!( <P as Session>::Dual, Q);
+```
+
+To express these types in the [`Session!`](crate::Session@macro) macro, we can use the `offer`
+and `choose` keywords:
+
+```
+# use dialectic::prelude::*;
+# use static_assertions::assert_type_eq_all;
+type P = Session! {
+    offer {
+        _0 => send String,
+        _1 => recv i64,
+    }
+};
+
+type Q = Session! {
+    choose {
+        _0 => recv String,
+        _1 => send i64,
+    }
+};
+
+assert_type_eq_all!( <P as Session>::Dual, Q);
 ```
 
 Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the [`Send`] and
@@ -292,7 +344,14 @@ result of either selection by enacting the protocol chosen.
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-let (c1, c2) = <Offer<(Send<i64, Done>, Recv<String, Done>)>>::channel(|| mpsc::channel(1));
+type P = Session! {
+    offer {
+        _0 => send i64,
+        _1 => recv String,
+    }
+};
+
+let (c1, c2) = P::channel(|| mpsc::channel(1));
 
 // Offer a choice
 let t1 = tokio::spawn(async move {
@@ -349,17 +408,47 @@ could describe this protocol using the [`Loop`] and [`Continue`] types:
 type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
 ```
 
-**Notice:** We have to *explicitly* use [`Continue`] to reiterate the [`Loop`]: even inside a
-[`Loop`], [`Done`] means that the session is over.
+In terms of the [`Session!`](crate::Session@macro) macro, this would be:
 
-The dual to `Loop<P>` is `Loop<P::Dual>`, the dual to `Continue` is `Continue`, and the dual to
-`Done` is `Done`, so we know the other end of this channel will need to implement:
+```
+# use dialectic::prelude::*;
+type QuerySum = Session! {
+    loop {
+        choose {
+            _0 => send i64,
+            _1 => {
+                recv i64;
+                break;
+            }
+        }
+    }
+};
+```
+
+**Notice:** When working with session types directly, we have to *explicitly* use [`Continue`]
+to reiterate the [`Loop`]: even inside a [`Loop`], [`Done`] means that the session is over.
+However, in the [`Session!`](crate::Session@macro) macro, `loop`s repeat themselves by default,
+unless explicitly broken by a `break` statement (just like in Rust!).
+
+By taking the dual of each part of the session type, we know the other end of this channel
+will need to implement:
 
 ```
 # use dialectic::prelude::*;
 # use static_assertions::assert_type_eq_all;
 # type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
-type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64, Done>)>>;
+type ComputeSum = Session! {
+    loop {
+        offer {
+            _0 => recv i64,
+            _1 => {
+                send i64;
+                break;
+            }
+        }
+    }
+};
+
 assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
 ```
 
@@ -421,6 +510,37 @@ the optional parameter of `Continue`. By default, `Continue` jumps to the innerm
 however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc.
 The types [`_0`](type@_0), [`_1`](type@_1), [`_2`](type@_2), etc. are imported by default in the
 [`dialectic::prelude::*`](crate::prelude) namespace.
+
+In the [`Session!`](crate::Session@macro) macro, loops may optionally be *lableled*, using
+identical syntax to Rust. Rather than referring to loops by index, we can `break` or `continue`
+a loop using its label:
+
+```
+# use dialectic::prelude::*;
+# use static_assertions::assert_type_eq_all;
+type LabelExample = Session! {
+    'outer: loop {
+        send i64;
+        loop {
+            recv bool;
+            offer {
+                _0 => break 'outer,
+                _1 => continue 'outer,
+                _2 => break,
+                _3 => continue,
+                _4 => send String,
+            };
+            send bool;
+        };
+        recv i64;
+    }
+};
+
+assert_type_eq_all!(
+    LabelExample,
+    Loop<Send<i64, Loop<Recv<bool, Offer<(Done, Continue<_1>, Recv<i64, Continue<_1>>, Continue, Send<String, Send<bool, Continue>>)>>>>>,
+);
+```
 
 ## Automatic looping
 
