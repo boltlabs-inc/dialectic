@@ -336,9 +336,9 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case() {
+    ///     match c2.offer().await?.case(Z) {
     ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case() {
+    ///         Err(rest) => match rest.case(Z) {
     ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
     ///             Err(rest) => rest.empty_case(),
     ///         }
@@ -793,7 +793,7 @@ where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
-    Choices::AsList: EachScoped + EachHasDual,
+    Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
     variant: u8,
     tx: Option<Tx>,
@@ -808,7 +808,7 @@ where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
-    Choices::AsList: EachScoped + EachHasDual,
+    Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
     fn drop(&mut self) {
         // A `Branches` is never an end-state for a channel, so we always say it wasn't done
@@ -830,19 +830,28 @@ where
     }
 }
 
-impl<Tx, Rx, Choices, P, Ps> Branches<Choices, Tx, Rx>
+impl<Tx, Rx, Choices> Branches<Choices, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    Choices: Tuple<AsList = (P, Ps)>,
-    (P, Ps): List<AsTuple = Choices>,
-    P: Session,
-    Ps: EachScoped + EachHasDual + List,
+    Choices: Tuple + 'static,
+    Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
-    /// Check if the selected protocol in this [`Branches`] was `P`. If so, return the corresponding
-    /// channel; otherwise, return all the other possibilities.
+    /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
+    /// so, return the corresponding channel; otherwise, return all the other possibilities.
     #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
-    pub fn case(mut self) -> Result<Chan<P, Tx, Rx>, Branches<Ps::AsTuple, Tx, Rx>> {
+    pub fn case<N: Unary>(
+        mut self,
+        _branch: N,
+    ) -> Result<
+        Chan<<Choices::AsList as Select<N>>::Selected, Tx, Rx>,
+        Branches<<<Choices::AsList as Select<N>>::Remainder as List>::AsTuple, Tx, Rx>,
+    >
+    where
+        Choices::AsList: Select<N>,
+        <Choices::AsList as Select<N>>::Selected: Session,
+        <Choices::AsList as Select<N>>::Remainder: EachScoped + EachHasDual + HasLength + List,
+    {
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
@@ -850,7 +859,10 @@ where
         let drop_rx = self.drop_rx.clone();
         // We have to manually drop because the drop glue assumes tx and rx are present
         let _ = ManuallyDrop::new(self);
-        if variant == 0 {
+        let branch: u8 = N::VALUE
+            .try_into()
+            .expect("Branch discriminant exceeded u8::MAX in `case`");
+        if variant == branch {
             Ok(Chan {
                 tx,
                 rx,
@@ -860,7 +872,12 @@ where
             })
         } else {
             Err(Branches {
-                variant: variant - 1,
+                // Subtract 1 from variant if we've eliminated a branch with a lower discriminant
+                variant: if variant > branch {
+                    variant - 1
+                } else {
+                    variant
+                },
                 tx,
                 rx,
                 drop_tx,
@@ -868,6 +885,17 @@ where
                 protocols: PhantomData,
             })
         }
+    }
+
+    /// Determine the [`Choice`] which was made by the other party, indicating which of these
+    /// [`Branches`] should be taken.
+    ///
+    /// Ordinarily, you should prefer the [`offer!`](crate::offer) macro in situations where you
+    /// need to know this value.
+    pub fn choice(&self) -> Choice<<Choices::AsList as HasLength>::Length> {
+        self.variant
+            .try_into()
+            .expect("Internal variant for `Branches` exceeds number of choices")
     }
 }
 

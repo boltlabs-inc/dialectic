@@ -226,18 +226,23 @@ where
 /// # Examples
 ///
 /// ```
-/// # use static_assertions::assert_type_eq_all;
+/// use static_assertions::{assert_impl_all, assert_not_impl_any};
 /// use dialectic::types::*;
 /// use dialectic::prelude::*;
 ///
-/// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_0>>::Selected, _0);
-/// assert_type_eq_all!(<(_0, (_1, (_2, ()))) as Select<_2>>::Selected, _2);
+/// type L = (_0, (_1, (_2, ())));
+///
+/// assert_impl_all!(L: Select<_0, Selected = _0, Remainder = (_1, (_2, ()))>);
+/// assert_impl_all!(L: Select<_1, Selected = _1, Remainder = (_0, (_2, ()))>);
+/// assert_impl_all!(L: Select<_2, Selected = _2, Remainder = (_0, (_1, ()))>);
+///
+/// assert_not_impl_any!(L: Select<_3>);
 /// ```
 pub trait Select<N: Unary>: sealed::Select<N> {
     /// The thing which is selected from this list by the index `N`.
     type Selected;
 
-    /// The rest of the list after the selected thing.
+    /// The list with the selected thing removed.
     type Remainder;
 }
 
@@ -251,7 +256,7 @@ where
     (P, Rest): Select<N>,
 {
     type Selected = <(P, Rest) as Select<N>>::Selected;
-    type Remainder = <(P, Rest) as Select<N>>::Remainder;
+    type Remainder = (T, <(P, Rest) as Select<N>>::Remainder);
 }
 
 mod sealed {
