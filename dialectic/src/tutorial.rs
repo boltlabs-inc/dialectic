@@ -625,7 +625,7 @@ type MultiQuery = Session! {
 // (here's how MultiQuery compiles to a session type)
 assert_type_eq_all!(
     MultiQuery,
-    Loop<Choose<(Done, Call<Query, Continue>)>>;
+    Loop<Choose<(Done, Call<Query, Continue>)>>,
 );
 
 async fn query_all(
@@ -696,7 +696,7 @@ type SwapVecString = Session! {
 assert_type_eq_all!(
     SwapVecString,
     Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>,
-)
+);
 ```
 
 The dual of `Split<P, Q, R>` is `Split<Q::Dual, P::Dual, R::Dual>`. Notice that `P` and `Q`
