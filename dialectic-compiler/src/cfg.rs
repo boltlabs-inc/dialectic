@@ -176,12 +176,12 @@ impl Cfg {
                 | Ir::Error => {}
 
                 Ir::Call(child) => {
-                    // `call` expresssions evaluate until done; there is no implicit continuation
+                    // `call` expressions evaluate until done; there is no implicit continuation
                     // this is why we pass the `None` implicit continuation to `follow`
                     follow(None, *child);
                 }
                 Ir::Split(tx_only, rx_only) => {
-                    // `split` expresssions evaluate until done; there is no implicit continuation
+                    // `split` expressions evaluate until done; there is no implicit continuation
                     // this is why we pass the `None` implicit continuation to `follow`
                     follow(None, *tx_only);
                     follow(None, *rx_only);
