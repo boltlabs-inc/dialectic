@@ -187,7 +187,9 @@ impl Cfg {
                     }
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
-                    let cont = next.or(scope);
+                    // *Take* the next pointer out so that it is now None, as we are eliminating
+                    // the continuation of this node.
+                    let cont = next.take().or(scope);
                     for &choice in choices.iter().filter_map(Option::as_ref) {
                         if visited.insert(choice) {
                             stack.push((cont, choice));
