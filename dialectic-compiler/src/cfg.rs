@@ -147,8 +147,16 @@ impl Cfg {
             .map(|node| (None, node))
             .collect::<Vec<(Option<Index>, Index)>>();
 
-        while let Some((scope, node)) = stack.pop() {
-            let CfgNode { expr, next, .. } = &mut self[node];
+        while let Some((implicit_cont, node)) = stack.pop() {
+            // "Follow" a node by checking to see if we have visited it, and if not, pushing it on
+            // to the stack to be visited later along with the supplied scoped implicit continuation.
+            let mut follow = |implicit_cont, node| {
+                if let Some(node) = node {
+                    if visited.insert(node) {
+                        stack.push((implicit_cont, node));
+                    }
+                }
+            };
 
             // This match is followed by a statement which checks for a continuation
             // and adds it to the queue if it finds one. As such, any branch which needs
@@ -158,6 +166,7 @@ impl Cfg {
             // Specifically this is *very* important for nodes such as `Offer` and `Choose`,
             // which will no longer have a continuation at all after this pass, as their
             // continuations will be "lifted" into each arm of the node.
+            let CfgNode { expr, next, .. } = &mut self[node];
             match expr {
                 Ir::Recv(_)
                 | Ir::Send(_)
@@ -167,63 +176,70 @@ impl Cfg {
                 | Ir::Error => {}
 
                 Ir::Call(child) => {
-                    if let Some(child) = *child {
-                        if visited.insert(child) {
-                            stack.push((None, child));
-                        }
-                    }
+                    // `call` expresssions evaluate until done; there is no implicit continuation
+                    // this is why we pass the `None` implicit continuation to `follow`
+                    follow(None, *child);
                 }
                 Ir::Split(tx_only, rx_only) => {
-                    if let Some(tx_only) = *tx_only {
-                        if visited.insert(tx_only) {
-                            stack.push((None, tx_only));
-                        }
-                    }
-
-                    if let Some(rx_only) = *rx_only {
-                        if visited.insert(rx_only) {
-                            stack.push((None, rx_only));
-                        }
-                    }
+                    // `split` expresssions evaluate until done; there is no implicit continuation
+                    // this is why we pass the `None` implicit continuation to `follow`
+                    follow(None, *tx_only);
+                    follow(None, *rx_only);
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
                     // *Take* the next pointer out so that it is now None, as we are eliminating
                     // the continuation of this node.
-                    let cont = next.take().or(scope);
-                    for &choice in choices.iter().filter_map(Option::as_ref) {
-                        if visited.insert(choice) {
-                            stack.push((cont, choice));
+                    let cont = match next.take() {
+                        // If we find an explicit continuation, we need to lower it into the arms
+                        // of the `Choose` or `Offer`.
+                        Some(next) => {
+                            follow(implicit_cont, Some(next));
+                            Some(next)
                         }
-                    }
+                        // If there is no explicit continuation, then in lieu of replacing the
+                        // explicit continuation of the `Choose` and `Offer` node with the scoped
+                        // implicit continuation, we want to lower the implicit continuation into
+                        // the arms of the `Choose` or `Offer`.
+                        None => implicit_cont,
+                    };
 
-                    // We do not want to resolve the `next` of the `Choose` to anything,
-                    // because we no longer need to "scope" it.
-                    continue;
+                    // Follow every arm of the `Choose` / `Offer` using the continuation computed
+                    // above.
+                    for &choice in choices.iter().filter_map(Option::as_ref) {
+                        follow(cont, Some(choice));
+                    }
                 }
                 Ir::Loop(body) => {
-                    if let Some(body) = *body {
-                        let continue0 = self.singleton(Ir::Continue(node));
-                        self[continue0].machine_generated = true;
-                        if visited.insert(body) {
-                            stack.push((Some(continue0), body));
-                        }
+                    let body = *body;
+                    let continue0 = self.singleton(Ir::Continue(node));
+                    self[continue0].machine_generated = true;
+                    if let Some(body) = body {
+                        // If the loop has a body, process it using the implicit continuation that
+                        // continues to the loop itself
+                        follow(Some(continue0), Some(body));
                     } else {
-                        // duplicated due to borrowck errors
-                        let continue0 = self.singleton(Ir::Continue(node));
-                        self[continue0].machine_generated = true;
-                        // reborrow here because we've lost the borrow on `body`
+                        // Assign the body of the loop to `continue`: this will become an error in a
+                        // later pass, because `loop { continue }` is unproductive
                         self[node].expr = Ir::Loop(Some(continue0));
                     }
                 }
             }
 
-            match &mut self[node].next {
-                Some(next) => {
-                    if visited.insert(*next) {
-                        stack.push((scope, *next));
-                    }
-                }
-                next @ None => *next = scope,
+            // reborrow here because the `Loop` clause loses the borrow on self from expr/next.
+            let CfgNode { expr, next, .. } = &mut self[node];
+            match next {
+                // If the next pointer exists, follow it and continue converting its syntax tree,
+                // with the implicit continuation of *our current scope* (i.e. if we're in a `Loop`,
+                // we're still in that `Loop` after following the continuation)
+                Some(next) => follow(implicit_cont, Some(*next)),
+                // If there is no explicit continuation for this node, *and* it is not a `Choose` or
+                // `Offer` (which have had their explicit continuations erased and lowered into the
+                // arms) then we need to assign the scoped implicit continuation, if there is one,
+                // as the new explicit continuation
+                None if !matches!(expr, Ir::Choose(_) | Ir::Offer(_)) => *next = implicit_cont,
+                // This will only be reached if there is no explicit continuation and the node is a
+                // `Choose` or `Offer`, in which case we want to do nothing.
+                _ => {}
             }
         }
     }

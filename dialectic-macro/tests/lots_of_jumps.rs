@@ -1,4 +1,5 @@
 use dialectic::prelude::*;
+use static_assertions::assert_type_eq_all;
 
 #[allow(dead_code)]
 type LabelExample = Session! {
@@ -18,3 +19,24 @@ type LabelExample = Session! {
         recv i64;
     }
 };
+
+assert_type_eq_all!(
+    LabelExample,
+    Loop<
+        Send<
+            i64,
+            Loop<
+                Recv<
+                    bool,
+                    Offer<(
+                        Done,
+                        Continue<_1>,
+                        Recv<i64, Continue<_1>>,
+                        Continue,
+                        Send<String, Send<bool, Continue>>
+                    )>,
+                >,
+            >,
+        >,
+    >,
+);
