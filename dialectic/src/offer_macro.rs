@@ -61,7 +61,7 @@ macro_rules! offer {
         @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr $(,)?
     ) =>
     (
-        match $crate::Branches::case($branch) {
+        match $crate::Branches::case($branch, $crate::unary::Z) {
             std::result::Result::Ok($chan) => {
                 let _: $n = $label;
                 $code
@@ -72,7 +72,7 @@ macro_rules! offer {
     (
         @branches $branch:ident, $chan:ident, $n:ty, $label:expr => $code:expr, $($t:tt)+
     ) => (
-        match $crate::Branches::case($branch) {
+        match $crate::Branches::case($branch, $crate::unary::Z) {
             std::result::Result::Ok($chan) => {
                 let _: $n = $label;
                 $code
