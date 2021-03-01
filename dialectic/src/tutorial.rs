@@ -511,7 +511,7 @@ however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-
 The types [`_0`](type@_0), [`_1`](type@_1), [`_2`](type@_2), etc. are imported by default in the
 [`dialectic::prelude::*`](crate::prelude) namespace.
 
-In the [`Session!`](crate::Session@macro) macro, loops may optionally be *lableled*, using
+In the [`Session!`](crate::Session@macro) macro, loops may optionally be *labelled*, using
 identical syntax to Rust. Rather than referring to loops by index, we can `break` or `continue`
 a loop using its label:
 
@@ -559,7 +559,7 @@ follows entering the loop(s), with the loop body unrolled by one iteration.
 
 # Sequencing and Modularity
 
-The final session type provided by Dialectic is the [`Call`] type, which permits a more modular
+The penultimate session type provided by Dialectic is the [`Call`] type, which permits a modular
 way of constructing session types and their implementations. At first, you will likely not need
 to use [`Call`]; however, as you build larger programs, it makes it a lot easier to split them up
 into smaller, independent specifications and components.
@@ -573,7 +573,7 @@ already written the following:
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-type Query = Send<String, Recv<String, Done>>;
+type Query = Session! { send String; recv String };
 
 async fn query(
     question: String,
@@ -600,6 +600,7 @@ channel.
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
+# use static_assertions::assert_type_eq_all;
 # type Query = Send<String, Recv<String, Done>>;
 #
 # async fn query(
@@ -612,7 +613,20 @@ channel.
 #     Ok(answer)
 # }
 #
-type MultiQuery = Loop<Choose<(Done, Call<Query, Continue>)>>;
+type MultiQuery = Session! {
+    loop {
+        choose {
+            _0 => break,
+            _1 => call Query,
+        }
+    }
+};
+
+// (here's how MultiQuery compiles to a session type)
+assert_type_eq_all!(
+    MultiQuery,
+    Loop<Choose<(Done, Call<Query, Continue>)>>;
+);
 
 async fn query_all(
     mut questions: Vec<String>,
@@ -671,22 +685,43 @@ large, this could represent a significant reduction in runtime.
 
 ```
 # use dialectic::prelude::*;
-type SwapVecString = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
+# use static_assertions::assert_type_eq_all;
+type SwapVecString = Session! {
+    split {
+        -> send Vec<usize>,
+        <- recv String,
+    }
+};
+
+assert_type_eq_all!(
+    SwapVecString,
+    Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>,
+)
 ```
 
-The dual of `Split<P, Q, R>` is `Split<Q::Dual, P::Dual, R::Dual>`:
+The dual of `Split<P, Q, R>` is `Split<Q::Dual, P::Dual, R::Dual>`. Notice that `P` and `Q`
+switch places! This is because the left-hand `P` is always the send-only session, and the
+right-hand `Q` is always the receive-only session. This is easier to keep track of using the
+[`Session!`](crate::Session@macro) macro:
 
 ```
 # use dialectic::prelude::*;
 # use static_assertions::assert_type_eq_all;
 assert_type_eq_all!(
-    <Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done> as Session>::Dual,
-    Split<Send<String, Done>, Recv<Vec<usize>, Done>, Done>,
+    <Session! {
+        split {
+            -> send Vec<usize>,
+            <- recv String,
+        }
+    } as Session>::Dual,
+    Session! {
+        split {
+            -> send String,
+            <- recv Vec<usize>,
+        }
+    },
 );
 ```
-
-Notice that `P` and `Q` switch places! This is because the left-hand `P` is always the send-only
-session, and the right-hand `Q` is always the receive-only session.
 
 Now, let's use a channel of this session type to enact a concurrent swap of a `String` and a
 `Vec<usize>`:
@@ -697,9 +732,14 @@ use dialectic::backend::mpsc;
 
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
+type SwapVecString = Session! {
+    split {
+        -> send Vec<usize>,
+        <- recv String,
+    }
+};
 
-let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
+let (c1, c2) = SwapVecString::channel(|| mpsc::channel(1));
 
 // Spawn a thread to simultaneously send a `Vec<usize>` and receive a `String`:
 let t1 = tokio::spawn(async move {
@@ -748,7 +788,7 @@ c2.split(|tx, rx| async move {
 # }
 ```
 
-When using [`Split`], keep in mind that it is subject to some limitations, in addition to the
+When using [`Split`], keep in mind that it is subject to some limitations in addition to the
 caveats of [`Call`], of which it is a close relative:
 
 - It's a type error to [`Send`] or [`Choose`] on the receive-only end.
