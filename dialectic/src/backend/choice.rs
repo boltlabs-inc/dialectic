@@ -119,9 +119,9 @@ impl<N: Unary> TryFrom<u8> for Choice<N> {
     }
 }
 
-impl<N: Unary> Into<u8> for Choice<N> {
-    fn into(self) -> u8 {
-        self.choice
+impl<N: Unary> From<Choice<N>> for u8 {
+    fn from(Choice { choice, .. }: Choice<N>) -> u8 {
+        choice
     }
 }
 

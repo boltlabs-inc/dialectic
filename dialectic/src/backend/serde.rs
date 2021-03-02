@@ -259,10 +259,9 @@ where
                 .await
                 .ok_or(RecvError::Closed)?
                 .map_err(RecvError::Decode)?;
-            Ok(self
-                .deserializer
+            self.deserializer
                 .deserialize(&unframed)
-                .map_err(RecvError::Deserialize)?)
+                .map_err(RecvError::Deserialize)
         })
     }
 }
