@@ -115,7 +115,7 @@ fn server(
                     let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
                     chan.send(&string.to_uppercase()).await?       // Send back that pushed value
                 },
-            })
+            })?;
         }
         Ok(())
     })
