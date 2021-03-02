@@ -1,10 +1,6 @@
 use {
     proc_macro2::Span,
-    std::{
-        collections::{HashMap, HashSet},
-        ops,
-        rc::Rc,
-    },
+    std::{collections::HashSet, ops, rc::Rc},
     syn::{Error, Type},
     thunderdome::{Arena, Index},
 };
@@ -339,225 +335,199 @@ impl Cfg {
         }
     }
 
-    /// Attach errors to all "unproductive" loops, meaning loops that when lowered to the target language
-    /// would produce valid target output that would nonetheless hit infinite recursion in the Rust
-    /// typechecker/trait resolver.
-    pub fn report_unproductive_loops(&mut self, root: Option<Index>) {
-        enum Productivity {
-            Unproductive(Index),
-            Productive,
-        }
-
-        fn report_unproductive_loops(
-            cfg: &Cfg,
-            productivity: &mut HashMap<Index, Productivity>,
-            loop_env: &mut HashSet<Index>,
-            node_index: Option<Index>,
-        ) {
-            let node_index = match node_index {
-                Some(index) => index,
-                None => {
-                    for &loop_index in loop_env.iter() {
-                        productivity
-                            .entry(loop_index)
-                            .or_insert(Productivity::Productive);
-                    }
-
-                    return;
-                }
-            };
-
-            let node = &cfg[node_index];
-
-            match &node.expr {
-                Ir::Loop(body) => {
-                    let body_index = body.expect("loop bodies are always nonempty");
-
-                    if loop_env.insert(node_index) {
-                        report_unproductive_loops(cfg, productivity, loop_env, Some(body_index));
-                        report_unproductive_loops(cfg, productivity, loop_env, node.next);
-                    }
-                }
-                Ir::Break(to_index) => {
-                    report_unproductive_loops(cfg, productivity, loop_env, cfg[*to_index].next);
-                }
-                Ir::Continue(to_index) => {
-                    productivity
-                        .entry(*to_index)
-                        .or_insert(Productivity::Unproductive(node_index));
-                }
-                _ => {
-                    for loop_index in loop_env.drain() {
-                        productivity
-                            .entry(loop_index)
-                            .or_insert(Productivity::Productive);
-                    }
-
-                    match &node.expr {
-                        Ir::Send(_)
-                        | Ir::Recv(_)
-                        | Ir::Type(_)
-                        | Ir::Error
-                        | Ir::Loop(_)
-                        | Ir::Continue(_)
-                        | Ir::Break(_) => {}
-                        Ir::Call(child) => report_unproductive_loops(
-                            cfg,
-                            productivity,
-                            &mut HashSet::new(),
-                            *child,
-                        ),
-                        Ir::Split(tx_only, rx_only) => {
-                            report_unproductive_loops(
-                                cfg,
-                                productivity,
-                                &mut HashSet::new(),
-                                *tx_only,
-                            );
-                            report_unproductive_loops(
-                                cfg,
-                                productivity,
-                                &mut HashSet::new(),
-                                *rx_only,
-                            );
-                        }
-                        Ir::Offer(choices) | Ir::Choose(choices) => {
-                            for &choice in choices {
-                                report_unproductive_loops(
-                                    cfg,
-                                    productivity,
-                                    &mut HashSet::new(),
-                                    choice,
-                                );
-                            }
-                        }
-                    }
-
-                    report_unproductive_loops(cfg, productivity, loop_env, node.next);
-                }
-            }
-        }
-
-        let mut productivity = HashMap::new();
-        let mut loop_env = HashSet::new();
-
-        report_unproductive_loops(self, &mut productivity, &mut loop_env, root);
-
-        for (loop_index, output) in productivity {
-            if let Productivity::Unproductive(cause_index) = output {
-                self.insert_error_at(loop_index, CompileError::UnproductiveLoop);
-                self.insert_error_at(cause_index, CompileError::UnproductiveJump);
-            }
-        }
-    }
-
-    /// Starting with the empty environment of loops and the empty list of errors, convert a [`Cfg`]
-    /// rooted at a specific node into the target language representation, ready for output.
-    fn to_target_inner(
-        &self,
-        errors: &mut Vec<Spanned<CompileError>>,
-        loop_env: &mut Vec<Index>,
-        maybe_node: Option<Index>,
-    ) -> Target {
-        let (node, node_index) = match maybe_node {
-            Some(node) => (&self[node], node),
-            None => return Target::Done,
-        };
-
-        errors.extend(node.errors.iter().map(|err| Spanned {
-            inner: err.clone(),
-            span: node.span,
-        }));
-
-        match &node.expr {
-            Ir::Recv(t) => {
-                let cont = self.to_target_inner(errors, loop_env, node.next);
-                Target::Recv(t.clone(), Rc::new(cont))
-            }
-            Ir::Send(t) => {
-                let cont = self.to_target_inner(errors, loop_env, node.next);
-                Target::Send(t.clone(), Rc::new(cont))
-            }
-            Ir::Call(callee) => {
-                let cont = self.to_target_inner(errors, loop_env, node.next);
-                let callee = self.to_target_inner(errors, loop_env, *callee);
-
-                Target::Call(Rc::new(callee), Rc::new(cont))
-            }
-            Ir::Split(tx_only, rx_only) => {
-                let cont = self.to_target_inner(errors, loop_env, node.next);
-                let (tx_only, rx_only) = (*tx_only, *rx_only);
-                let tx_target = self.to_target_inner(errors, loop_env, tx_only);
-                let rx_target = self.to_target_inner(errors, loop_env, rx_only);
-
-                Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
-            }
-            Ir::Choose(choices) => {
-                let targets = choices
-                    .iter()
-                    .map(|&choice| self.to_target_inner(errors, loop_env, choice))
-                    .collect();
-
-                Target::Choose(targets)
-            }
-            Ir::Offer(choices) => {
-                let targets = choices
-                    .iter()
-                    .map(|&choice| self.to_target_inner(errors, loop_env, choice))
-                    .collect();
-
-                Target::Offer(targets)
-            }
-            Ir::Loop(body) => {
-                loop_env.push(node_index);
-
-                let target = Target::Loop(Rc::new(self.to_target_inner(errors, loop_env, *body)));
-
-                loop_env.pop();
-
-                target
-            }
-            Ir::Break(of_loop) => {
-                let jump = self[*of_loop].next;
-                self.to_target_inner(errors, loop_env, jump)
-            }
-            Ir::Continue(of_loop) => {
-                let jump_target = *of_loop;
-                Target::Continue(
-                    loop_env
-                        .iter()
-                        .rev()
-                        .position(|&loop_node| loop_node == jump_target)
-                        .unwrap(),
-                )
-            }
-            Ir::Type(t) => {
-                // Optimize a little bit by doing the `Then` transform ourselves if the next
-                // continuation is a `Done`.
-                match node.next {
-                    None => Target::Type(t.clone()),
-                    Some(cont_index) => {
-                        let cont = self.to_target_inner(errors, loop_env, Some(cont_index));
-                        Target::Then(Rc::new(Target::Type(t.clone())), Rc::new(cont))
-                    }
-                }
-            }
-            Ir::Error => self.to_target_inner(errors, loop_env, node.next),
-        }
-    }
-
     /// Traverse a [`Cfg`] rooted at the specified index to produce either a valid [`Target`]
     /// corresponding to it, or a [`syn::Error`] corresponding to one or more compiler errors.
     ///
     /// **Important:** This function **must** be called **after** the scope resolution pass, or else
     /// the resultant code may omit sections of the input control flow graph due to implicit
     /// continuations which have not yet been resolved.
-    pub fn to_target(&self, node: Option<Index>) -> Result<Target, Error> {
+    pub fn generate_target(&mut self, node: Option<Index>) -> Result<Spanned<Target>, Error> {
+        // The loop environment is a stack of loop head indices, paired with whether or not they are
+        // currently known to be "productive": i.e., whether they contain something other than
+        // another loop before they hit their corresponding continue.
+        struct LoopEnv {
+            stack: Vec<(Index, bool)>,
+        }
+
+        impl LoopEnv {
+            // Make a new loop environment.
+            fn new() -> Self {
+                Self { stack: Vec::new() }
+            }
+
+            // Push a new loop index (initially tagged un-productive) onto the stack.
+            fn push(&mut self, index: Index) {
+                self.stack.push((index, false));
+            }
+
+            // Mark the most inner loop as being productive, if one exists.
+            fn mark_productive(&mut self) {
+                if let Some(top) = self.stack.last_mut() {
+                    top.1 = true;
+                }
+            }
+
+            // Check if the loop corresponding to the specified de Bruijn index is currently known
+            // to be productive.
+            fn productive_for_continue(&self, n: usize) -> bool {
+                self.stack.iter().rev().take(n + 1).any(|&(_, p)| p)
+            }
+
+            // Compute the de Bruijn index of a loop given its CFG index.
+            fn debruijn_index_of(&self, jump_target: Index) -> Option<usize> {
+                self.stack
+                    .iter()
+                    .rev()
+                    .position(|&(loop_node, _)| loop_node == jump_target)
+            }
+
+            fn pop(&mut self) {
+                self.stack.pop();
+            }
+        }
+
+        fn generate_inner(
+            cfg: &Cfg,
+            errors: &mut Vec<(Index, CompileError)>,
+            loop_env: &mut LoopEnv,
+            maybe_node: Option<Index>,
+        ) -> Spanned<Target> {
+            let (node, node_index) = match maybe_node {
+                Some(node) => (&cfg[node], node),
+                None => {
+                    return Spanned {
+                        inner: Target::Done,
+                        span: Span::call_site(),
+                    }
+                }
+            };
+
+            // In all cases except for `loop`, `continue`, and `break` nodes, we mark the node's
+            // current loop environment as being productive.
+            match &node.expr {
+                Ir::Loop(_) | Ir::Continue(_) | Ir::Break(_) => {}
+                _ => loop_env.mark_productive(),
+            }
+
+            let target = match &node.expr {
+                Ir::Recv(t) => {
+                    let t = t.clone();
+                    let cont = generate_inner(cfg, errors, loop_env, node.next);
+                    Target::Recv(t, Rc::new(cont))
+                }
+                Ir::Send(t) => {
+                    let cont = generate_inner(cfg, errors, loop_env, node.next);
+                    Target::Send(t.clone(), Rc::new(cont))
+                }
+                Ir::Call(callee) => {
+                    let cont = generate_inner(cfg, errors, loop_env, node.next);
+                    let callee = generate_inner(cfg, errors, loop_env, *callee);
+
+                    Target::Call(Rc::new(callee), Rc::new(cont))
+                }
+                Ir::Split(tx_only, rx_only) => {
+                    let cont = generate_inner(cfg, errors, loop_env, node.next);
+                    let (tx_only, rx_only) = (*tx_only, *rx_only);
+                    let tx_target = generate_inner(cfg, errors, loop_env, tx_only);
+                    let rx_target = generate_inner(cfg, errors, loop_env, rx_only);
+
+                    Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
+                }
+                Ir::Choose(choices) => {
+                    let targets = choices
+                        .iter()
+                        .map(|&choice| generate_inner(cfg, errors, loop_env, choice))
+                        .collect();
+                    debug_assert!(node.next.is_none(), "non-`Done` continuation for `Choose`");
+
+                    Target::Choose(targets)
+                }
+                Ir::Offer(choices) => {
+                    let targets = choices
+                        .iter()
+                        .map(|&choice| generate_inner(cfg, errors, loop_env, choice))
+                        .collect();
+                    debug_assert!(node.next.is_none(), "non-`Done` continuation for `Offer`");
+
+                    Target::Offer(targets)
+                }
+                Ir::Loop(body) => {
+                    loop_env.push(node_index);
+
+                    let target =
+                        Target::Loop(Rc::new(generate_inner(cfg, errors, loop_env, *body)));
+
+                    loop_env.pop();
+
+                    target
+                }
+                Ir::Continue(of_loop) => {
+                    let jump_target = *of_loop;
+                    let debruijn_index = loop_env
+                        .debruijn_index_of(jump_target)
+                        .expect("continues are always well-scoped in the CFG");
+                    // Check if we are within a productive loop, and generate errors otherwise
+                    if !loop_env.productive_for_continue(debruijn_index) {
+                        // Emit an error for the unproductive loop
+                        errors.push((jump_target, CompileError::UnproductiveLoop));
+
+                        if !node.machine_generated {
+                            // We don't emit errors for machine-generated `continue`s, because they
+                            // would be unilluminating to the user
+                            errors.push((node_index, CompileError::UnproductiveContinue));
+                        }
+                    }
+                    Target::Continue(debruijn_index)
+                }
+                Ir::Type(t) => {
+                    // Optimize a little bit by doing the `Then` transform ourselves if the next
+                    // continuation is a `Done`.
+                    match node.next {
+                        None => Target::Type(t.clone()),
+                        Some(cont_index) => {
+                            let cont = generate_inner(cfg, errors, loop_env, Some(cont_index));
+                            Target::Then(
+                                Rc::new(Spanned {
+                                    inner: Target::Type(t.clone()),
+                                    span: node.span,
+                                }),
+                                Rc::new(cont),
+                            )
+                        }
+                    }
+                }
+                // Early return cases: we inline these recursive calls, but we don't want to change
+                // their spans because they are already correct.
+                Ir::Break(of_loop) => {
+                    return generate_inner(cfg, errors, loop_env, cfg[*of_loop].next);
+                }
+                Ir::Error => {
+                    return generate_inner(cfg, errors, loop_env, node.next);
+                }
+            };
+
+            Spanned {
+                inner: target,
+                span: node.span,
+            }
+        }
+
         let mut errors = Vec::new();
-        let output = self.to_target_inner(&mut errors, &mut Vec::new(), node);
+        let output = generate_inner(self, &mut errors, &mut LoopEnv::new(), node);
+
+        for (index, kind) in errors {
+            self.insert_error_at(index, kind);
+        }
+
+        let all_errors = self.arena.iter().flat_map(|(_, node)| {
+            node.errors.iter().map(move |err| Spanned {
+                inner: err.clone(),
+                span: node.span,
+            })
+        });
 
         let mut maybe_error = None;
-        for reported_error in errors.drain(..) {
+        for reported_error in all_errors {
             let new_error = Error::new(reported_error.span, reported_error.inner.to_string());
             match maybe_error.as_mut() {
                 None => maybe_error = Some(new_error),

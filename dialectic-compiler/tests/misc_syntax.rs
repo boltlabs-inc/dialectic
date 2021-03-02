@@ -1,4 +1,6 @@
-use dialectic_compiler::{CompileError, Invocation};
+use dialectic_compiler::Invocation;
+
+mod common;
 
 #[test]
 fn hello_invocation() {
@@ -56,126 +58,124 @@ fn continued_split() {
 
 #[test]
 fn simple_break_outside_of_loop() {
-    let to_parse = "break";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::BreakOutsideLoop.to_string()
-    );
+    expect_errors! {
+        {
+            break;
+        } => [
+            CompileError::BreakOutsideLoop,
+        ]
+    };
 }
 
 #[test]
 fn simple_continue_outside_of_loop() {
-    let to_parse = "continue";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::ContinueOutsideLoop.to_string()
-    );
+    expect_errors! {
+        {
+            continue;
+        } => [
+            CompileError::ContinueOutsideLoop,
+        ]
+    };
 }
 
 #[test]
 fn shadowed_label() {
-    let to_parse = "'foo: loop { 'foo: loop {} }";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::ShadowedLabel("foo".to_owned()).to_string()
-    );
+    expect_errors! {
+        {
+            'foo: loop {
+                'foo: loop {}
+            }
+        } => [
+            CompileError::ShadowedLabel("foo".to_owned()),
+        ]
+    };
 }
 
 #[test]
 fn undeclared_label() {
-    let to_parse = "{ continue 'foo; }";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::ContinueOutsideLoop.to_string()
-    );
+    expect_errors! {
+        {
+            continue 'foo;
+        } => [
+            CompileError::ContinueOutsideLoop,
+        ]
+    };
 }
 
 #[test]
 fn infinite_loop() {
-    let to_parse = "loop { send (); }; send ()";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::FollowingCodeUnreachable.to_string()
-    );
+    expect_errors! {
+        {
+            loop {
+                send ();
+            };
+            send ()
+        } => [
+            CompileError::UnreachableStatement,
+            CompileError::FollowingCodeUnreachable,
+        ]
+    };
 }
 
 #[test]
 fn simple_unproductive_loop() {
-    let to_parse = "loop {}";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::UnproductiveLoop.to_string()
-    );
+    expect_errors! {
+        {
+            loop {}
+        } => [
+            CompileError::UnproductiveLoop,
+        ]
+    };
 }
 
 #[test]
 fn nested_unproductive_loop() {
-    let to_parse = "'outer: loop { loop { continue 'outer } }";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::UnproductiveLoop.to_string()
-    );
+    expect_errors! {
+        {
+            'outer: loop {
+                loop {
+                    continue 'outer;
+                }
+            }
+        } => [
+            CompileError::UnproductiveLoop,
+            CompileError::UnproductiveContinue,
+        ]
+    };
 }
 
 #[test]
 fn break_unproductive_loop() {
-    let to_parse = "loop { loop { break } }";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::UnproductiveLoop.to_string()
-    );
+    expect_errors! {
+        {
+            loop {
+                loop {
+                    break;
+                }
+            }
+        } => [
+            CompileError::UnproductiveLoop,
+        ]
+    };
 }
 
 #[test]
 fn very_unproductive_loop() {
-    let to_parse = "loop { loop { break; }; 'outer: loop { loop { break 'outer; }; send (); }; }";
-    let error = syn::parse_str::<Invocation>(to_parse)
-        .unwrap()
-        .syntax
-        .to_session()
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        CompileError::UnproductiveLoop.to_string()
-    );
+    expect_errors! {
+        {
+            loop {
+                loop { break; };
+                'outer: loop {
+                    loop {
+                        break 'outer;
+                    };
+                    send ();
+                };
+            }
+        } => [
+            CompileError::UnreachableStatement,
+            CompileError::FollowingCodeUnreachable,
+            CompileError::UnproductiveLoop,
+        ]
+    };
 }
