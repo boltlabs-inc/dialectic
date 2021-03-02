@@ -132,7 +132,7 @@ async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
             },
             // Client wants to quit
             _1 => break chan.close(),
-        })
+        })?;
     }
     Ok(())
 }
@@ -159,7 +159,7 @@ async fn server_tally(
                 chan.send(&tally).await?.close();
                 break Ok(());
             }
-        })
+        })?;
     }
 }
 

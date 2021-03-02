@@ -98,11 +98,10 @@ pub mod unary;
 
 mod chan;
 mod error;
-mod offer_macro;
 mod session;
 
 pub use chan::{Branches, Chan};
-pub use dialectic_macro::Session;
+pub use dialectic_macro::{offer, Session};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;
 
