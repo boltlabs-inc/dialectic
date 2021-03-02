@@ -358,7 +358,7 @@ let t1 = tokio::spawn(async move {
     let c1 = offer!(c1 => {
         _0 => c1.send(42).await?,  // handle `c2.choose(_0)`
         _1 => c1.recv().await?.1,  // handle `c2.choose(_1)`
-    });
+    })?;
 #   c1.close();
     Ok::<_, mpsc::Error>(())
 });
@@ -479,7 +479,7 @@ tokio::spawn(async move {
                 c2
             },
             _1 => break c2,
-        });
+        })?;
     };
     c2.send(sum).await?.close();
     Ok::<_, mpsc::Error>(())
