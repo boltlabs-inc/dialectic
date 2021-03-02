@@ -112,7 +112,7 @@ fn undeclared_label() {
 
 #[test]
 fn infinite_loop() {
-    let to_parse = "loop {}; send ()";
+    let to_parse = "loop { send (); }; send ()";
     let error = syn::parse_str::<Invocation>(to_parse)
         .unwrap()
         .syntax
@@ -121,5 +121,61 @@ fn infinite_loop() {
     assert_eq!(
         error.to_string(),
         CompileError::FollowingCodeUnreachable.to_string()
+    );
+}
+
+#[test]
+fn simple_unproductive_loop() {
+    let to_parse = "loop {}";
+    let error = syn::parse_str::<Invocation>(to_parse)
+        .unwrap()
+        .syntax
+        .to_session()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        CompileError::UnproductiveLoop.to_string()
+    );
+}
+
+#[test]
+fn nested_unproductive_loop() {
+    let to_parse = "'outer: loop { loop { continue 'outer } }";
+    let error = syn::parse_str::<Invocation>(to_parse)
+        .unwrap()
+        .syntax
+        .to_session()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        CompileError::UnproductiveLoop.to_string()
+    );
+}
+
+#[test]
+fn break_unproductive_loop() {
+    let to_parse = "loop { loop { break } }";
+    let error = syn::parse_str::<Invocation>(to_parse)
+        .unwrap()
+        .syntax
+        .to_session()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        CompileError::UnproductiveLoop.to_string()
+    );
+}
+
+#[test]
+fn very_unproductive_loop() {
+    let to_parse = "loop { loop { break; }; 'outer: loop { loop { break 'outer; }; send (); }; }";
+    let error = syn::parse_str::<Invocation>(to_parse)
+        .unwrap()
+        .syntax
+        .to_session()
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        CompileError::UnproductiveLoop.to_string()
     );
 }

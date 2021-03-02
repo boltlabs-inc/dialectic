@@ -97,6 +97,7 @@ impl Spanned<Syntax> {
         let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
         cfg.resolve_scopes(head);
         cfg.report_dead_code(head);
+        cfg.report_unproductive_loops(head);
         cfg.to_target(head)
     }
 
