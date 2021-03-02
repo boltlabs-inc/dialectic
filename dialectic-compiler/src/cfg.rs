@@ -1,6 +1,10 @@
 use {
     proc_macro2::Span,
-    std::{collections::HashSet, ops, rc::Rc},
+    std::{
+        collections::{HashMap, HashSet},
+        ops,
+        rc::Rc,
+    },
     syn::{Error, Type},
     thunderdome::{Arena, Index},
 };
@@ -331,6 +335,118 @@ impl Cfg {
                     self.insert_error_at(node_index, CompileError::FollowingCodeUnreachable);
                     self.insert_error_at(cont_index, CompileError::UnreachableStatement);
                 }
+            }
+        }
+    }
+
+    /// Attach errors to all "unproductive" loops, meaning loops that when lowered to the target language
+    /// would produce valid target output that would nonetheless hit infinite recursion in the Rust
+    /// typechecker/trait resolver.
+    pub fn report_unproductive_loops(&mut self, root: Option<Index>) {
+        enum Productivity {
+            Unproductive(Index),
+            Productive,
+        }
+
+        fn report_unproductive_loops(
+            cfg: &Cfg,
+            productivity: &mut HashMap<Index, Productivity>,
+            loop_env: &mut HashSet<Index>,
+            node_index: Option<Index>,
+        ) {
+            let node_index = match node_index {
+                Some(index) => index,
+                None => {
+                    for &loop_index in loop_env.iter() {
+                        productivity
+                            .entry(loop_index)
+                            .or_insert(Productivity::Productive);
+                    }
+
+                    return;
+                }
+            };
+
+            let node = &cfg[node_index];
+
+            match &node.expr {
+                Ir::Loop(body) => {
+                    let body_index = body.expect("loop bodies are always nonempty");
+
+                    if loop_env.insert(node_index) {
+                        report_unproductive_loops(cfg, productivity, loop_env, Some(body_index));
+                        report_unproductive_loops(cfg, productivity, loop_env, node.next);
+                    }
+                }
+                Ir::Break(to_index) => {
+                    report_unproductive_loops(cfg, productivity, loop_env, cfg[*to_index].next);
+                }
+                Ir::Continue(to_index) => {
+                    productivity
+                        .entry(*to_index)
+                        .or_insert(Productivity::Unproductive(node_index));
+                }
+                _ => {
+                    for loop_index in loop_env.drain() {
+                        productivity
+                            .entry(loop_index)
+                            .or_insert(Productivity::Productive);
+                    }
+
+                    match &node.expr {
+                        Ir::Send(_)
+                        | Ir::Recv(_)
+                        | Ir::Type(_)
+                        | Ir::Error
+                        | Ir::Loop(_)
+                        | Ir::Continue(_)
+                        | Ir::Break(_) => {}
+                        Ir::Call(child) => report_unproductive_loops(
+                            cfg,
+                            productivity,
+                            &mut HashSet::new(),
+                            *child,
+                        ),
+                        Ir::Split(tx_only, rx_only) => {
+                            report_unproductive_loops(
+                                cfg,
+                                productivity,
+                                &mut HashSet::new(),
+                                *tx_only,
+                            );
+                            report_unproductive_loops(
+                                cfg,
+                                productivity,
+                                &mut HashSet::new(),
+                                *rx_only,
+                            );
+                        }
+                        Ir::Offer(choices) | Ir::Choose(choices) => {
+                            for &choice in choices {
+                                report_unproductive_loops(
+                                    cfg,
+                                    productivity,
+                                    &mut HashSet::new(),
+                                    choice,
+                                );
+                            }
+                        }
+                    }
+
+                    report_unproductive_loops(cfg, productivity, loop_env, node.next);
+                }
+            }
+        }
+
+        let mut productivity = HashMap::new();
+        let mut loop_env = HashSet::new();
+
+        report_unproductive_loops(self, &mut productivity, &mut loop_env, root);
+
+        for (loop_index, output) in productivity {
+            if let Productivity::Unproductive(cause_index) = output {
+                self.insert_error_at(loop_index, CompileError::UnproductiveLoop);
+                self.insert_error_at(cause_index, CompileError::UnproductiveJump);
             }
         }
     }

@@ -44,6 +44,13 @@ pub enum CompileError {
     /// because of preceding control flow.
     #[error("unreachable statement")]
     UnreachableStatement,
+    /// Error resulting from unproductive loop analysis finding that a loop is unproductive and
+    /// cannot be compiled without resulting in typechecker overflow.
+    #[error("loop is unproductive (does nothing before always continuing)")]
+    UnproductiveLoop,
+    /// Error resulting from any `continue` or `break` which produce an unproductive loop.
+    #[error("unproductive jump causes an unproductive loop")]
+    UnproductiveJump,
 }
 
 #[derive(Debug, Clone, Copy)]
