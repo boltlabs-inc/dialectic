@@ -2,11 +2,13 @@
 
 use {
     lazy_static::lazy_static,
-    proc_macro2::{Span, TokenStream},
-    quote::{quote, ToTokens},
+    proc_macro2::TokenStream,
+    quote::{quote_spanned, ToTokens},
     std::{fmt, rc::Rc},
     syn::{Ident, Type},
 };
+
+use crate::Spanned;
 
 /// The target language of the macro: the type level language of session types in Dialectic.
 ///
@@ -20,23 +22,27 @@ pub enum Target {
     /// Session type: `Done`.
     Done,
     /// Session type: `Recv<T, P>`.
-    Recv(Type, Rc<Target>),
+    Recv(Type, Rc<Spanned<Target>>),
     /// Session type: `Send<T, P>`.
-    Send(Type, Rc<Target>),
+    Send(Type, Rc<Spanned<Target>>),
     /// Session type: `Choose<(P, ...)>`.
-    Choose(Vec<Target>),
+    Choose(Vec<Spanned<Target>>),
     /// Session type: `Offer<(P, ...)>`.
-    Offer(Vec<Target>),
+    Offer(Vec<Spanned<Target>>),
     /// Session type: `Loop<...>`.
-    Loop(Rc<Target>),
+    Loop(Rc<Spanned<Target>>),
     /// Session type: `Continue<_N>`.
     Continue(usize),
     /// Session type: `Split<P, Q, R>`.
-    Split(Rc<Target>, Rc<Target>, Rc<Target>),
+    Split(
+        Rc<Spanned<Target>>,
+        Rc<Spanned<Target>>,
+        Rc<Spanned<Target>>,
+    ),
     /// Session type: `Call<P, Q>`.
-    Call(Rc<Target>, Rc<Target>),
+    Call(Rc<Spanned<Target>>, Rc<Spanned<Target>>),
     /// Session type: `<P as Then<Q>>::Combined`.
-    Then(Rc<Target>, Rc<Target>),
+    Then(Rc<Spanned<Target>>, Rc<Spanned<Target>>),
     /// Some arbitrary session type referenced by name.
     Type(Type),
 }
@@ -92,7 +98,7 @@ impl fmt::Display for Target {
     }
 }
 
-impl ToTokens for Target {
+impl ToTokens for Spanned<Target> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         use Target::*;
 
@@ -101,29 +107,32 @@ impl ToTokens for Target {
                 .unwrap_or_else(|_| "dialectic".to_owned());
         }
 
-        let c = Ident::new(&**CRATE_NAME, Span::call_site());
+        let sp = self.span;
+        let c = Ident::new(&**CRATE_NAME, sp);
 
-        match self {
-            Done => quote! { #c::types::Done }.to_tokens(tokens),
-            Recv(t, s) => quote! { #c::types::Recv<#t, #s> }.to_tokens(tokens),
-            Send(t, s) => quote! { #c::types::Send<#t, #s> }.to_tokens(tokens),
-            Loop(s) => quote! { #c::types::Loop<#s> }.to_tokens(tokens),
-            Split(s, p, q) => quote! { #c::types::Split<#s, #p, #q> }.to_tokens(tokens),
-            Call(s, p) => quote! { #c::types::Call<#s, #p> }.to_tokens(tokens),
-            Then(s, p) => quote! { <#s as #c::types::Then<#p>>::Combined }.to_tokens(tokens),
-            Choose(cs) => quote! { #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
-            Offer(cs) => quote! { #c::types::Offer<(#(#cs,)*)> }.to_tokens(tokens),
+        match &self.inner {
+            Done => quote_spanned! {sp=> #c::types::Done }.to_tokens(tokens),
+            Recv(t, s) => quote_spanned! {sp=> #c::types::Recv<#t, #s> }.to_tokens(tokens),
+            Send(t, s) => quote_spanned! {sp=> #c::types::Send<#t, #s> }.to_tokens(tokens),
+            Loop(s) => quote_spanned! {sp=> #c::types::Loop<#s> }.to_tokens(tokens),
+            Split(s, p, q) => quote_spanned!(sp=> #c::types::Split<#s, #p, #q>).to_tokens(tokens),
+            Call(s, p) => quote_spanned! {sp=> #c::types::Call<#s, #p> }.to_tokens(tokens),
+            Then(s, p) => {
+                quote_spanned!(sp=> <#s as #c::types::Then<#p>>::Combined).to_tokens(tokens)
+            }
+            Choose(cs) => quote_spanned! {sp=> #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
+            Offer(cs) => quote_spanned! {sp=> #c::types::Offer<(#(#cs,)*)> }.to_tokens(tokens),
             Continue(n) => {
                 if *n > 0 {
-                    (quote! { #c::types::Continue< }).to_tokens(tokens);
-                    (0..*n).for_each(|_| (quote! { #c::unary::S< }).to_tokens(tokens));
-                    (quote! { #c::unary::Z }).to_tokens(tokens);
-                    (0..=*n).for_each(|_| (quote! { > }).to_tokens(tokens));
+                    (quote_spanned! {sp=> #c::types::Continue< }).to_tokens(tokens);
+                    (0..*n).for_each(|_| (quote_spanned! {sp=> #c::unary::S< }).to_tokens(tokens));
+                    (quote_spanned! {sp=> #c::unary::Z }).to_tokens(tokens);
+                    (0..=*n).for_each(|_| (quote_spanned! {sp=> > }).to_tokens(tokens));
                 } else {
-                    (quote! { #c::types::Continue }).to_tokens(tokens);
+                    (quote_spanned! {sp=> #c::types::Continue }).to_tokens(tokens);
                 }
             }
-            Type(s) => quote! { #s }.to_tokens(tokens),
+            Type(s) => quote_spanned! {sp=> #s }.to_tokens(tokens),
         }
     }
 }

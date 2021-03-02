@@ -92,13 +92,12 @@ impl Syntax {
 impl Spanned<Syntax> {
     /// Compile a spanned syntax tree into either a representation of a valid session type
     /// [`Target`], or an [`Error`].
-    pub fn to_session(&self) -> Result<Target, Error> {
+    pub fn to_session(&self) -> Result<Spanned<Target>, Error> {
         let mut cfg = Cfg::new();
         let head = self.to_cfg(&mut cfg, &mut Vec::new()).0;
         cfg.resolve_scopes(head);
         cfg.report_dead_code(head);
-        cfg.report_unproductive_loops(head);
-        cfg.to_target(head)
+        cfg.generate_target(head)
     }
 
     /// Converts surface [`Syntax`] to a control-flow graph intermediate representation, suitable

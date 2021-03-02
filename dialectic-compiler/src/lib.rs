@@ -7,7 +7,11 @@
 
 //! This is a crate. FIXME.
 
-use {proc_macro2::Span, thiserror::Error};
+use {
+    proc_macro2::Span,
+    std::fmt::{Display, Formatter},
+    thiserror::Error,
+};
 
 mod cfg;
 mod flow;
@@ -46,11 +50,11 @@ pub enum CompileError {
     UnreachableStatement,
     /// Error resulting from unproductive loop analysis finding that a loop is unproductive and
     /// cannot be compiled without resulting in typechecker overflow.
-    #[error("loop is unproductive (does nothing before always continuing)")]
+    #[error("this `loop` statement is unproductive (it takes no actions before repeating)")]
     UnproductiveLoop,
     /// Error resulting from any `continue` or `break` which produce an unproductive loop.
-    #[error("unproductive jump causes an unproductive loop")]
-    UnproductiveJump,
+    #[error("this `continue` statement causes an unproductive `loop`")]
+    UnproductiveContinue,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +72,12 @@ impl<T> From<T> for Spanned<T> {
             inner,
             span: Span::call_site(),
         }
+    }
+}
+
+impl<T: Display> Display for Spanned<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.inner)
     }
 }
 
@@ -115,7 +125,7 @@ mod tests {
 
         cfg[client].expr = Ir::Loop(Some(choose));
 
-        let s = format!("{}", cfg.to_target(Some(client)).unwrap());
+        let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
         assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
     }
 
@@ -135,7 +145,7 @@ mod tests {
 
         cfg[client].expr = Ir::Loop(Some(choose));
 
-        let s = format!("{}", cfg.to_target(Some(client)).unwrap());
+        let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
         assert_eq!(
             s,
             "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
