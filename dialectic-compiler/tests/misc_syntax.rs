@@ -86,6 +86,7 @@ fn shadowed_label() {
                 'foo: loop {}
             }
         } => [
+            CompileError::UnproductiveLoop,
             CompileError::ShadowedLabel("foo".to_owned()),
         ]
     };
