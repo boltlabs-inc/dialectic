@@ -7,31 +7,71 @@ use {
 
 use crate::{flow::FlowAnalysis, target::Target, CompileError, Spanned};
 
+/// A single entry for a node in the CFG.
 #[derive(Debug, Clone)]
 pub struct CfgNode {
+    /// The variant of this node.
     pub expr: Ir,
+    /// The continuation of the node, if present. Absence of a continuation indicates the `Done` or
+    /// "halting" continuation.
     pub next: Option<Index>,
+    /// The associated syntactic span of this node. If an error is emitted regarding this node, this
+    /// span may be used to correctly map it to a location in the surface syntax.
     pub span: Span,
+    /// "Machine-generated" nodes are allowed to be unreachable. This is used when automatically
+    /// inserting continues when resolving scopes, so that if a continue is inserted which isn't
+    /// actually reachable, an error isn't emitted.
     pub machine_generated: bool,
+    /// Nodes keep a hashset of errors in order to deduplicate any errors which are emitted multiple
+    /// times for the same node. Errors are traversed when code is emitted during
+    /// [`Cfg::generate_target`].
     pub errors: HashSet<CompileError>,
 }
 
+/// The "kind" of a CFG node. CFG nodes have additional data stored in [`CfgNode`] which is always
+/// the same types and fields for every node, so we separate into the `Ir` variant and `CfgNode`
+/// wrapper/entry struct.
 #[derive(Debug, Clone)]
 pub enum Ir {
+    /// Indicating receiving a value of some type.
     Recv(Type),
+    /// Indicating sending a value of some type.
     Send(Type),
+    /// `Call` nodes act somewhat like a call/cc, and run their body continuation in the same scope
+    /// as they are called all the way to "Done" before running their own continuation.
     Call(Option<Index>),
+    /// `Choose` nodes have a list of continuations which supersede their "next" pointer. Before
+    /// scope resolution, these continuations may be extended by their "implicit" subsequent
+    /// continuation, which is stored in the "next" pointer of the node. The scope resolution pass
+    /// "lowers" this next pointer continuation into the arms of the `Choose`, and so after scope
+    /// resolution all `Choose` nodes' next pointers should be `None`.
     Choose(Vec<Option<Index>>),
+    /// Like `Choose`, `Offer` nodes have a list of choices, and after scope resolution have no
+    /// continuation.
     Offer(Vec<Option<Index>>),
+    /// `Split` nodes have a transmit-only half and a receive-only half, in that order. The nodes'
+    /// semantics are similar to `Call`
     Split(Option<Index>, Option<Index>),
+    /// Early on, loops *may* have a body; however, after scope resolution, all loops should have
+    /// their bodies be `Some`. So post scope resolution, this field may be unwrapped.
     Loop(Option<Index>),
+    /// `Break` nodes directly reference the loop that they break. They can be considered as a
+    /// direct reference to the "next" pointer of the referenced loop node.
     Break(Index),
+    /// Like break nodes, `Continue` nodes directly reference the loop that they continue.
+    /// Semantically they can be considered a reference to the body of the loop, but as they are a
+    /// special construct in the target language, we don't resolve them that way.
     Continue(Index),
+    /// A "directly injected" type.
     Type(Type),
+    /// Emitted when we need to have a node to put errors on but need to not reason about its
+    /// behavior.
     Error,
 }
 
 impl CfgNode {
+    /// Shorthand for creating a [`CfgNode`] with a bunch of default values for its fields, which
+    /// you normally want, as well as a default span.
     fn singleton(expr: Ir) -> Self {
         Self {
             expr,
@@ -42,6 +82,8 @@ impl CfgNode {
         }
     }
 
+    /// Shorthand for creating a [`CfgNode`] similarly to [`CfgNode::singleton`], but with an
+    /// associated span.
     fn spanned(expr: Ir, span: Span) -> Self {
         Self {
             expr,
@@ -95,8 +137,8 @@ impl Cfg {
         self[node].errors.insert(kind);
     }
 
-    /// Create a dummy `Error` node, as a stand-in for a node which should have
-    /// been generated but for some reason cannot be.
+    /// Create a dummy `Error` node, as a stand-in for a node which should have been generated but
+    /// for some reason cannot be.
     pub fn create_error(&mut self, kind: CompileError, span: Span) -> Index {
         let mut errors = HashSet::new();
         errors.insert(kind);
@@ -106,9 +148,8 @@ impl Cfg {
             span,
             errors,
 
-            // This node is actually usually generated during parsing for things
-            // like a `break` or `continue`. So, we actually do want to treat it
-            // as if the user wrote it themselves.
+            // This node is actually usually generated during parsing for things like a `break` or
+            // `continue`. So, we actually do want to treat it as if the user wrote it themselves.
             machine_generated: false,
         })
     }
@@ -128,12 +169,12 @@ impl Cfg {
     /// "explicit" continuations. For example, consider the session type `choose { ... }; send ()`.
     /// In this type, the first parsing of the block will result in a `Choose` node with its
     /// continuation/"next" pointer set to point to a `Send(())` node. However, in order to ensure
-    /// that the arms of the choose construct don't have to worry about the continuation that
-    /// comes "after" *in a higher/parent scope,* we have the resolve_scopes pass to "lower" this
+    /// that the arms of the choose construct don't have to worry about the continuation that comes
+    /// "after" *in a higher/parent scope,* we have the resolve_scopes pass to "lower" this
     /// continuation which implicitly follows every arm of the `Choose`, into becoming the
-    /// continuation of every relevant arm of the `Choose`. This does have some special cases,
-    /// for example we don't want to change or set a next continuation for a `Break` node or
-    /// `Continue` node
+    /// continuation of every relevant arm of the `Choose`. This does have some special cases, for
+    /// example we don't want to change or set a next continuation for a `Break` node or `Continue`
+    /// node
     pub fn resolve_scopes(&mut self, node: Option<Index>) {
         // Depth-first once-only traversal of CFG, skipping nodes we've already seen
         let mut visited = HashSet::new();
@@ -149,7 +190,8 @@ impl Cfg {
 
         while let Some((implicit_cont, node)) = stack.pop() {
             // "Follow" a node by checking to see if we have visited it, and if not, pushing it on
-            // to the stack to be visited later along with the supplied scoped implicit continuation.
+            // to the stack to be visited later along with the supplied scoped implicit
+            // continuation.
             let mut follow = |implicit_cont, node| {
                 if let Some(node) = node {
                     if visited.insert(node) {
@@ -158,14 +200,14 @@ impl Cfg {
                 }
             };
 
-            // This match is followed by a statement which checks for a continuation
-            // and adds it to the queue if it finds one. As such, any branch which needs
-            // specifically to not check its continuation and recursively resolve scopes
-            // inside it, will be ended with a `continue`, to skip this recursion.
+            // This match is followed by a statement which checks for a continuation and adds it to
+            // the queue if it finds one. As such, any branch which needs specifically to not check
+            // its continuation and recursively resolve scopes inside it, will be ended with a
+            // `continue`, to skip this recursion.
             //
-            // Specifically this is *very* important for nodes such as `Offer` and `Choose`,
-            // which will no longer have a continuation at all after this pass, as their
-            // continuations will be "lifted" into each arm of the node.
+            // Specifically this is *very* important for nodes such as `Offer` and `Choose`, which
+            // will no longer have a continuation at all after this pass, as their continuations
+            // will be "lifted" into each arm of the node.
             let CfgNode { expr, next, .. } = &mut self[node];
             match expr {
                 Ir::Recv(_)
@@ -187,11 +229,11 @@ impl Cfg {
                     follow(None, *rx_only);
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
-                    // *Take* the next pointer out so that it is now None, as we are eliminating
-                    // the continuation of this node.
+                    // *Take* the next pointer out so that it is now None, as we are eliminating the
+                    // continuation of this node.
                     let cont = match next.take() {
-                        // If we find an explicit continuation, we need to lower it into the arms
-                        // of the `Choose` or `Offer`.
+                        // If we find an explicit continuation, we need to lower it into the arms of
+                        // the `Choose` or `Offer`.
                         Some(next) => {
                             follow(implicit_cont, Some(next));
                             Some(next)
@@ -219,7 +261,7 @@ impl Cfg {
                         follow(Some(continue0), Some(body));
                     } else {
                         // Assign the body of the loop to `continue`: this will become an error in a
-                        // later pass, because `loop { continue }` is unproductive
+                        // later pass, because `loop {continue }` is unproductive
                         self[node].expr = Ir::Loop(Some(continue0));
                     }
                 }
@@ -541,6 +583,7 @@ impl Cfg {
         }
     }
 
+    /// Iterate over all nodes in the CFG. The order is not defined.
     pub fn iter(&self) -> impl Iterator<Item = (Index, &CfgNode)> + '_ {
         self.arena.iter()
     }

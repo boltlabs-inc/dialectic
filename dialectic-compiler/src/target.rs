@@ -107,6 +107,8 @@ impl ToTokens for Spanned<Target> {
                 .unwrap_or_else(|_| "dialectic".to_owned());
         }
 
+        // We assign the associated span of the target to any type tokens generated, in an attempt
+        // to get at least some type errors/issues to show up in the right place.
         let sp = self.span;
         let c = Ident::new(&**CRATE_NAME, sp);
 
