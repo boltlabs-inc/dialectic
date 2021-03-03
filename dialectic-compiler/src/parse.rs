@@ -86,16 +86,36 @@ impl Parse for ChoiceArm {
 /// A block of statements: `{ ... }`.
 struct Block(Spanned<Syntax>);
 
+fn requires_terminator(input: ParseStream) -> bool {
+    // It's easier to check if a terminator isn't required because checking to see whether a
+    // terminator *is* required means checking to see if we're looking at a directly injected type,
+    // which means checking to see whether it fits Rust type syntax. This is highly
+    // complex/downright ridiculous to do using just syn's peek functionality.
+    let terminator_not_required = input.peek(token::Brace)
+        || (input.peek(kw::call) && input.peek2(token::Brace))
+        || input.peek(kw::split)
+        || input.peek(kw::choose)
+        || input.peek(kw::offer)
+        || input.peek(Token![loop])
+        || input.peek(Lifetime);
+    !terminator_not_required
+}
+
 impl Parse for Block {
     fn parse(input: ParseStream) -> Result<Self> {
         // Ast::Block: { <Ast>; <Ast>; ... }
         let block_span = input.span();
         let content;
         braced!(content in input);
-        let nodes = content
-            .parse_terminated::<Spanned<Syntax>, Token![;]>(Spanned::parse)?
-            .into_iter()
-            .collect();
+        let mut nodes = Vec::new();
+        while !content.is_empty() {
+            let terminator_required = requires_terminator(&content);
+            nodes.push(content.parse::<Spanned<Syntax>>()?);
+
+            if !content.is_empty() && (terminator_required || content.peek(Token![;])) {
+                content.parse::<Token![;]>()?;
+            }
+        }
 
         Ok(Block(Spanned {
             inner: Syntax::Block(nodes),

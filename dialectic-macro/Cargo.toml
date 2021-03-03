@@ -20,3 +20,4 @@ lazy_static = "1.4.0"
 [dev-dependencies]
 dialectic = { path = "../dialectic" }
 static_assertions = "1.1"
+tokio = "1.2.0"

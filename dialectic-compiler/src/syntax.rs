@@ -177,11 +177,11 @@ impl Spanned<Syntax> {
                 return convert_jump_to_cfg(label, CompileError::BreakOutsideLoop, Ir::Break)
             }
             Loop(maybe_label, body) => {
-                // Constructing a loop node is a kind of fixed-point operation, where
-                // any break and continue nodes within need to know the index of their
-                // respective loop node. To solve this, we create an empty loop and use
-                // its index to hold the places of the data any break or continue needs,
-                // and then assign the correct `Ir::Loop(head)` value later.
+                // Constructing a loop node is a kind of fixed-point operation, where any break and
+                // continue nodes within need to know the index of their respective loop node. To
+                // solve this, we create an empty loop and use its index to hold the places of the
+                // data any break or continue needs, and then assign the correct `Ir::Loop(head)`
+                // value later.
                 let ir_node = cfg.spanned(Ir::Loop(None), self.span);
 
                 // Convert the body in the environment with this loop label
@@ -192,20 +192,18 @@ impl Spanned<Syntax> {
                 // Close out that fixed point; the loop block is now correctly built.
                 cfg[ir_node].expr = Ir::Loop(head);
 
-                // Check to ensure the environment does not already contain this label
-                let node =
-                    if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
-                        cfg.create_error(
-                            CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
-                            self.span,
-                        )
-                    } else {
-                        ir_node
-                    };
+                // Check to ensure the environment does not already contain this label. If it does,
+                // keep going, but insert an error on the relevant loop node.
+                if maybe_label.is_some() && env.iter().any(|scope| scope.0 == maybe_label) {
+                    cfg.insert_error_at(
+                        ir_node,
+                        CompileError::ShadowedLabel(maybe_label.clone().unwrap()),
+                    );
+                }
 
-                // Because we already know the index we must return and cannot allow another
-                // index to be created for this node, we have to early-return here.
-                return (Some(node), Some(node));
+                // Because we already know the index we must return and cannot allow another index
+                // to be created for this node, we have to early-return here.
+                return (Some(ir_node), Some(ir_node));
             }
             Block(statements) => {
                 // Connect the continuations of each statement in the block to the subsequent
