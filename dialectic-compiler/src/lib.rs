@@ -11,7 +11,7 @@ After parsing, the `Syntax` AST only really undergoes one transformation, when i
 
 ## Conversion to CFG - [`Syntax::to_cfg`]
 
-During this conversion, we resolve labels in the AST and ensure that all `break` and `continue` constructs refer to valid nodes and emit errors for malformed loop nodes and such.
+During this conversion, we resolve labels in the AST and ensure that all `break` and `continue` constructs refer to valid nodes and emit errors for malformed loop nodes and such. Also, please note this method is often referred to as `Syntax::to_cfg` but the method is *actually* implemented on `Spanned<Syntax>`.
 
 ### Errors
 
@@ -46,7 +46,7 @@ Most other passes will make use these assumptions.
 
 The scope resolution algorithm looks something like this:
 
-```text
+```rust,ignore
 fn resolve_scopes(implicit_scope, node) {
     if the node is a Recv, Send, Type, Break, Continue, Call, Split, or Error {
         // The implicit continuation of the callee of a Call node or arm of a Split node is always
@@ -119,7 +119,7 @@ The dead core reporting pass itself is responsible for running the flow analysis
 
 The dead code reporting algorithm looks something like this:
 
-```text
+```rust,ignore
 fn report_dead_code(node) {
     // We want to follow every child node except for the node's continuation. If we did follow the
     // continuation, we would end up reporting every unreachable node instead of just the
@@ -163,7 +163,7 @@ For most nodes, generating the corresponding target code is trivial - `Send`, `R
 
 The codegen algorithm looks something like this:
 
-```text
+```rust,ignore
 fn generate_target(loop_env, maybe_node) {
     if maybe_node is None {
         // If the node is empty, that's the "done" continuation.
@@ -226,6 +226,18 @@ This pass emits two types of errors:
 At current, the target AST does not undergo any kind of transform before it is converted very transparently to its destination format (whether that's to be displayed as a string or emitted as a Rust token tree.)
 
 <!-- snip -->
+
+[`Syntax::to_cfg`]: crate::Spanned::to_cfg
+[`Cfg`]: crate::cfg::Cfg
+[`Cfg::resolve_scopes`]: crate::cfg::Cfg::resolve_scopes
+[`Cfg::report_dead_code`]: crate::cfg::Cfg::report_dead_code
+[`Cfg::generate_target`]: crate::cfg::Cfg::generate_target
+[`Ir`]: crate::cfg::Ir
+[`Ir::Offer`]: crate::cfg::Ir::Offer
+[`Ir::Choose`]: crate::cfg::Ir::Choose
+[`Ir::Loop`]: crate::cfg::Ir::Loop
+[`Ir::Break`]: crate::cfg::Ir::Break
+[`Ir::Continue`]: crate::cfg::Ir::Continue
 */
 
 #![warn(missing_docs)]
