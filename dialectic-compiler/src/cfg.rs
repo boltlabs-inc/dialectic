@@ -1,3 +1,5 @@
+//! The control flow graph representation of a session type.
+
 use {
     proc_macro2::Span,
     std::{collections::HashSet, ops, rc::Rc},
@@ -122,12 +124,14 @@ impl Default for Cfg {
 }
 
 impl Cfg {
+    /// Construct an empty control flow graph.
     pub fn new() -> Self {
         Self {
             arena: Arena::new(),
         }
     }
 
+    /// Insert a constructed `CfgNode` into the CFG, and get back its newly minted index.
     pub fn insert(&mut self, node: CfgNode) -> Index {
         self.arena.insert(node)
     }

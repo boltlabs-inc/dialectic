@@ -1,3 +1,5 @@
+//! Control flow analysis for the session type CFG.
+
 use {
     std::collections::{HashSet, VecDeque},
     thunderdome::Index,
@@ -10,11 +12,12 @@ use crate::cfg::{Cfg, Ir};
 /// nodes can possibly be run all the way to `Done`.
 #[derive(Debug, Clone)]
 pub struct FlowAnalysis {
-    pub passable: HashSet<Index>,
-    pub haltable: HashSet<Index>,
+    passable: HashSet<Index>,
+    haltable: HashSet<Index>,
 }
 
 impl FlowAnalysis {
+    /// Shorthand for checking whether a node is passable.
     pub fn is_passable(&self, node: Index) -> bool {
         self.passable.contains(&node)
     }
@@ -38,7 +41,9 @@ pub enum Constraint {
     /// A `BreakableTo` constraint for checking whether or not a loop can be "broken to" by a node
     /// within its body.
     BreakableTo {
+        /// The node we want to check for a `Break`.
         breaks_from: Index,
+        /// The loop we want to `Break` to.
         breaks_to: Index,
     },
 }
