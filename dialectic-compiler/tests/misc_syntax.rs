@@ -180,3 +180,17 @@ fn very_unproductive_loop() {
         ]
     };
 }
+
+#[test]
+fn loop_de_loop() {
+    expect_errors! {
+        {
+            loop {} loop {}
+        }
+        => [
+            CompileError::UnproductiveLoop,
+            CompileError::UnreachableStatement,
+            CompileError::FollowingCodeUnreachable,
+        ]
+    }
+}
