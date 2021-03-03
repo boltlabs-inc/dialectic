@@ -1,4 +1,19 @@
 #[macro_export]
+macro_rules! expect_parse {
+    ({$($syntax:tt)*} => $output:expr) => {{
+        use dialectic_compiler::Invocation;
+
+        let syntax = stringify!($($syntax)*);
+        let ast = syn::parse_str::<Invocation>(syntax)
+            .unwrap()
+            .syntax;
+
+        let s = format!("{}", ast.to_session().unwrap());
+        assert_eq!(s, $output);
+    }};
+}
+
+#[macro_export]
 macro_rules! expect_errors {
     ({$($syntax:tt)*} => [$($err:expr,)*]) => {{
         use {
