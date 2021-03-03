@@ -1,7 +1,9 @@
 //! The abstract surface syntax for the `Session!` macro, produced by the parser.
 
 use {
-    syn::{Error, Type},
+    proc_macro2::TokenStream,
+    quote::{format_ident, quote_spanned, ToTokens},
+    syn::{Error, Lifetime, Type},
     thunderdome::Index,
 };
 
@@ -229,5 +231,53 @@ impl Spanned<Syntax> {
 
         let node = cfg.spanned(ir, self.span);
         (Some(node), Some(node))
+    }
+}
+
+impl ToTokens for Spanned<Syntax> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        use Syntax::*;
+
+        let sp = self.span;
+        match &self.inner {
+            Recv(t) => quote_spanned! {sp=> recv #t },
+            Send(t) => quote_spanned! {sp=> send #t },
+            Call(callee) => quote_spanned! {sp=> call #callee },
+            Split(tx, rx) => quote_spanned! {sp=> split { -> #tx, <- #rx, } },
+            Choose(choices) => {
+                let mut acc = TokenStream::new();
+                for (i, choice) in choices.iter().enumerate() {
+                    let idx = format_ident!("_{}", i, span = sp);
+                    quote_spanned!(sp=> #idx => #choice, ).to_tokens(&mut acc);
+                }
+                quote_spanned! {sp=> choose { #acc } }
+            }
+            Offer(choices) => {
+                let mut acc = TokenStream::new();
+                for (i, choice) in choices.iter().enumerate() {
+                    let idx = format_ident!("_{}", i, span = sp);
+                    quote_spanned!(sp=> #idx => #choice, ).to_tokens(&mut acc);
+                }
+                quote_spanned! {sp=> offer { #acc } }
+            }
+            Loop(None, body) => quote_spanned! {sp=> loop #body },
+            Loop(Some(label), body) => {
+                let lt = Lifetime::new(&format!("'{}", label), sp);
+                quote_spanned! {sp=> #lt: loop #body }
+            }
+            Break(None) => quote_spanned! {sp=> break },
+            Break(Some(label)) => {
+                let lt = Lifetime::new(&format!("'{}", label), sp);
+                quote_spanned! {sp=> break #lt }
+            }
+            Continue(None) => quote_spanned! {sp=> continue },
+            Continue(Some(label)) => {
+                let lt = Lifetime::new(&format!("'{}", label), sp);
+                quote_spanned! {sp=> continue #lt }
+            }
+            Block(stmts) => quote_spanned! {sp=> { #(#stmts;)* } },
+            Type(ty) => quote_spanned! {sp=> #ty },
+        }
+        .to_tokens(tokens);
     }
 }
