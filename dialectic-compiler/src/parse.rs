@@ -32,7 +32,7 @@ enum Direction {
 }
 
 /// A split arm, consisting of a [`Direction`] and a ([`Spanned`]) [`Syntax`] for the body of the
-/// arm: `<- ...` or `-> ...`.
+/// arm: `<- ...` or `-> ...`. This parser also parses a terminator, if necessary or present.
 struct SplitArm {
     dir: Direction,
     arm: Spanned<Syntax>,
@@ -50,13 +50,18 @@ impl Parse for SplitArm {
         } else {
             return Err(lookahead.error());
         };
+        let terminator_required = requires_terminator(&input);
         let arm = input.parse::<Spanned<Syntax>>()?;
+        if !input.is_empty() && (terminator_required || input.peek(Token![,])) {
+            input.parse::<Token![,]>()?;
+        }
         Ok(SplitArm { dir, arm })
     }
 }
 
 /// An arm of a choice (either in `offer` or `choose`), consisting of an index and the code it
-/// refers to: `_N => ...`.
+/// refers to: `_N => ...`. This parser also parses a terminator, if necessary or if it is simply
+/// present.
 struct ChoiceArm {
     index: Spanned<usize>,
     arm: Spanned<Syntax>,
@@ -72,7 +77,11 @@ impl Parse for ChoiceArm {
             .ok_or_else(|| input.error("expected index identifier starting with an underscore"))
             .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
         let _ = input.parse::<Token![=>]>()?;
+        let terminator_required = requires_terminator(&input);
         let arm = input.parse::<Spanned<Syntax>>()?;
+        if !input.is_empty() && (terminator_required || input.peek(Token![,])) {
+            input.parse::<Token![,]>()?;
+        }
         Ok(ChoiceArm {
             index: Spanned {
                 inner: index,
@@ -126,10 +135,9 @@ impl Parse for Block {
 
 impl Parse for Spanned<Syntax> {
     fn parse(input: ParseStream) -> Result<Self> {
-        // Take a parsed, spanned piece of syntax, join its span with the mutably
-        // referenced span, and then return the unmodified thing; helper for joining
-        // spans of multiple bits of syntax together while parsing without lots of
-        // if-lets.
+        // Take a parsed, spanned piece of syntax, join its span with the mutably referenced span,
+        // and then return the unmodified thing; helper for joining spans of multiple bits of syntax
+        // together while parsing without lots of if-lets.
         fn with_span<T: SpannedExt>(span: &mut Span, thing: T) -> T {
             *span = span.join(thing.span()).unwrap_or(*span);
             thing
@@ -182,7 +190,10 @@ impl Parse for Spanned<Syntax> {
 
             let content;
             braced!(content in input);
-            let choice_arms = content.parse_terminated::<ChoiceArm, Token![,]>(ChoiceArm::parse)?;
+            let mut choice_arms = Vec::new();
+            while !content.is_empty() {
+                choice_arms.push(content.parse::<ChoiceArm>()?);
+            }
 
             let mut arm_asts = Vec::new();
             for (i, choice_arm) in choice_arms.into_iter().enumerate() {
@@ -210,7 +221,10 @@ impl Parse for Spanned<Syntax> {
 
             let content;
             braced!(content in input);
-            let choice_arms = content.parse_terminated::<ChoiceArm, Token![,]>(ChoiceArm::parse)?;
+            let mut choice_arms = Vec::new();
+            while !content.is_empty() {
+                choice_arms.push(content.parse::<ChoiceArm>()?);
+            }
 
             let mut arm_asts = Vec::new();
             for (i, choice_arm) in choice_arms.into_iter().enumerate() {
@@ -238,10 +252,10 @@ impl Parse for Spanned<Syntax> {
 
             let content;
             braced!(content in input);
-            let mut split_arms = content
-                .parse_terminated::<SplitArm, Token![,]>(SplitArm::parse)?
-                .into_iter()
-                .collect::<Vec<_>>();
+            let mut split_arms = Vec::new();
+            while !content.is_empty() {
+                split_arms.push(content.parse::<SplitArm>()?);
+            }
 
             if split_arms.len() != 2 || split_arms[0].dir == split_arms[1].dir {
                 return Err(input.error(
@@ -314,8 +328,8 @@ impl Parse for Spanned<Syntax> {
             // Ast::Block: { <Ast>; <Ast>; ... }
             Ok(input.parse::<Block>()?.0)
         } else {
-            // Attempt to parse as a direct type Ast::Type: <type>
-            // Otherwise, fail and report all other errors from the lookahead.
+            // Attempt to parse as a direct type Ast::Type: <type> Otherwise, fail and report all
+            // other errors from the lookahead.
             let ty = match input.parse::<Type>() {
                 Ok(ty) => ty,
                 Err(e) => {
@@ -338,10 +352,16 @@ impl Parse for Spanned<Syntax> {
 
 impl Parse for Invocation {
     fn parse(input: ParseStream) -> Result<Self> {
-        let nodes = input
-            .parse_terminated::<Spanned<Syntax>, Token![;]>(Spanned::parse)?
-            .into_iter()
-            .collect::<Vec<_>>();
+        let mut nodes = Vec::new();
+        while !input.is_empty() {
+            let terminator_required = requires_terminator(&input);
+            nodes.push(input.parse::<Spanned<Syntax>>()?);
+
+            if !input.is_empty() && (terminator_required || input.peek(Token![;])) {
+                input.parse::<Token![;]>()?;
+            }
+        }
+
         let ast = Spanned {
             inner: Syntax::Block(nodes),
             span: Span::call_site(),
