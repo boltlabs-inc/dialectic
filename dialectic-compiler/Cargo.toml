@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Shea Leffler <shea@errno.com>", "Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
 
+[features]
+default = []
+
 [dependencies]
 thunderdome = "0.4.0"
 syn = { version = "1.0.60", features = ["full", "extra-traits"] }
@@ -12,7 +15,9 @@ quote = "1.0.9"
 proc-macro-crate = "0.1.5"
 lazy_static = "1.4.0"
 thiserror = "1.0.23"
+quickcheck = { version = "1.0.3", optional = true }
 
-[dev-dependencies]
-quickcheck = "1.0.3"
-quickcheck_macros = "1.0.0"
+[[test]]
+name = "parser_roundtrip"
+path = "tests/parser_roundtrip.rs"
+required-features = ["quickcheck"]
