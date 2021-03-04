@@ -234,24 +234,59 @@ impl Spanned<Syntax> {
     }
 }
 
-impl ToTokens for Spanned<Syntax> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
+impl Spanned<Syntax> {
+    /// Convenience function for converting a `Spanned<Syntax>` into a `TokenStream` via [`Spanned::to_tokens_with`].
+    fn to_token_stream_with<F>(&self, add_optional: &mut F) -> TokenStream
+    where
+        F: FnMut() -> bool,
+    {
+        let mut acc = TokenStream::new();
+        self.to_tokens_with(add_optional, &mut acc);
+        acc
+    }
+
+    /// Convert a `Spanned<Syntax>` into tokens and append them to the provided token stream, with a
+    /// predicate to determine whether or not optional syntax should be added or not.
+    ///
+    /// The added optional syntax predicate is an `FnMut` closure so that we can randomly choose to
+    /// add or not add optional trailing commas and similar during testing.
+    fn to_tokens_with<F>(&self, add_optional: &mut F, tokens: &mut TokenStream)
+    where
+        F: FnMut() -> bool,
+    {
         use Syntax::*;
 
         let sp = self.span;
         match &self.inner {
             Recv(t) => quote_spanned! {sp=> recv #t },
             Send(t) => quote_spanned! {sp=> send #t },
-            Call(callee) if matches!(callee.inner, Block(_) | Type(_)) => {
-                quote_spanned! {sp=> call #callee }
+            Call(callee) => {
+                let mut acc = TokenStream::new();
+                quote_spanned!(sp=> call ).to_tokens(&mut acc);
+
+                if matches!(callee.inner, Block(_) | Type(_)) {
+                    callee.to_tokens_with(add_optional, &mut acc);
+                } else {
+                    let callee_tokens = callee.to_token_stream_with(add_optional);
+                    quote_spanned!(sp=> { #callee_tokens }).to_tokens(&mut acc);
+                }
+
+                acc
             }
-            Call(callee) => quote_spanned! {sp=> call { #callee } },
-            Split(tx, rx) => quote_spanned! {sp=> split { -> #tx, <- #rx, } },
+            Split(tx, rx) => {
+                let tx = tx.to_token_stream_with(add_optional);
+                let rx = rx.to_token_stream_with(add_optional);
+                quote_spanned! {sp=> split { -> #tx, <- #rx, } }
+            }
             Choose(choices) => {
                 let mut acc = TokenStream::new();
                 for (i, choice) in choices.iter().enumerate() {
                     let idx = format_ident!("_{}", i, span = sp);
-                    quote_spanned!(sp=> #idx => #choice, ).to_tokens(&mut acc);
+                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
+                    choice.to_tokens_with(add_optional, &mut acc);
+                    if i < choices.len() - 1 || add_optional() {
+                        quote_spanned!(sp=> ,).to_tokens(&mut acc);
+                    }
                 }
                 quote_spanned! {sp=> choose { #acc } }
             }
@@ -259,14 +294,22 @@ impl ToTokens for Spanned<Syntax> {
                 let mut acc = TokenStream::new();
                 for (i, choice) in choices.iter().enumerate() {
                     let idx = format_ident!("_{}", i, span = sp);
-                    quote_spanned!(sp=> #idx => #choice, ).to_tokens(&mut acc);
+                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
+                    choice.to_tokens_with(add_optional, &mut acc);
+                    if i < choices.len() - 1 || add_optional() {
+                        quote_spanned!(sp=> ,).to_tokens(&mut acc);
+                    }
                 }
                 quote_spanned! {sp=> offer { #acc } }
             }
-            Loop(None, body) => quote_spanned! {sp=> loop #body },
+            Loop(None, body) => {
+                let body_tokens = body.to_token_stream_with(add_optional);
+                quote_spanned! {sp=> loop #body_tokens }
+            }
             Loop(Some(label), body) => {
                 let lt = Lifetime::new(&format!("'{}", label), sp);
-                quote_spanned! {sp=> #lt: loop #body }
+                let body_tokens = body.to_token_stream_with(add_optional);
+                quote_spanned! {sp=> #lt: loop #body_tokens }
             }
             Break(None) => quote_spanned! {sp=> break },
             Break(Some(label)) => {
@@ -278,21 +321,55 @@ impl ToTokens for Spanned<Syntax> {
                 let lt = Lifetime::new(&format!("'{}", label), sp);
                 quote_spanned! {sp=> continue #lt }
             }
-            Block(stmts) => quote_spanned! {sp=> { #(#stmts;)* } },
+            Block(stmts) => {
+                let mut acc = TokenStream::new();
+
+                if let Some((last, up_to_penultimate)) = stmts.split_last() {
+                    for stmt in up_to_penultimate {
+                        stmt.to_tokens_with(add_optional, &mut acc);
+
+                        let is_call_of_block = matches!(
+                            &stmt.inner,
+                            Call(callee) if matches!(&callee.inner, Block(_)),
+                        );
+
+                        let ends_with_block = matches!(
+                            &stmt.inner,
+                            Block(_) | Split(_, _) | Offer(_) | Choose(_) | Loop(_, _),
+                        );
+
+                        if !(is_call_of_block || ends_with_block) || add_optional() {
+                            quote_spanned!(sp=> ;).to_tokens(&mut acc);
+                        }
+                    }
+
+                    last.to_tokens_with(add_optional, &mut acc);
+
+                    if add_optional() {
+                        quote_spanned!(sp=> ;).to_tokens(&mut acc);
+                    }
+                }
+
+                quote_spanned!(sp=> { #acc })
+            }
             Type(ty) => quote_spanned! {sp=> #ty },
         }
         .to_tokens(tokens);
     }
 }
 
+impl ToTokens for Spanned<Syntax> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.to_tokens_with(&mut || false, tokens);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use quickcheck::TestResult;
-
     use super::*;
 
     use {
-        quickcheck::{Arbitrary, Gen, QuickCheck},
+        quickcheck::{Arbitrary, Gen, QuickCheck, TestResult},
         syn::parse_quote,
     };
 
@@ -378,7 +455,10 @@ mod tests {
 
     fn parser_roundtrip_property(syntax: Spanned<Syntax>) -> TestResult {
         let syntax_tokens = syntax.to_token_stream();
-        match syn::parse2::<Spanned<Syntax>>(syntax_tokens.clone()) {
+        let mut g = Gen::new(0);
+        match syn::parse2::<Spanned<Syntax>>(
+            syntax.to_token_stream_with(&mut || *g.choose(&[true, false]).unwrap()),
+        ) {
             Ok(parsed) => TestResult::from_bool(
                 syntax_tokens.to_string() == parsed.to_token_stream().to_string(),
             ),
@@ -392,7 +472,7 @@ mod tests {
     #[test]
     fn parser_roundtrip() {
         QuickCheck::new()
-            .gen(Gen::new(14))
+            .gen(Gen::new(13))
             .quickcheck(parser_roundtrip_property as fn(_) -> TestResult)
     }
 }
