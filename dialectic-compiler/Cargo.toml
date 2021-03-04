@@ -14,3 +14,7 @@ quote = "1.0.9"
 proc-macro-crate = "0.1.5"
 lazy_static = "1.4.0"
 thiserror = "1.0.23"
+
+[dev-dependencies]
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"

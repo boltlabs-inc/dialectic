@@ -16,12 +16,23 @@ use crate::{
 };
 
 mod kw {
+    use super::*;
+
     syn::custom_keyword!(recv);
     syn::custom_keyword!(send);
     syn::custom_keyword!(call);
     syn::custom_keyword!(choose);
     syn::custom_keyword!(offer);
     syn::custom_keyword!(split);
+
+    pub fn peek_any(input: ParseStream) -> bool {
+        input.peek(recv)
+            || input.peek(send)
+            || input.peek(call)
+            || input.peek(choose)
+            || input.peek(offer)
+            || input.peek(split)
+    }
 }
 
 /// The direction of a split arm, either `->` or `<-`.
@@ -165,6 +176,8 @@ impl Parse for Spanned<Syntax> {
 
             let callee = if lookahead.peek(token::Brace) {
                 input.parse::<Block>()?.0
+            } else if kw::peek_any(input) {
+                return Err(input.error("expected a block or a type, but found a keyword"));
             } else {
                 let ty = input.parse::<Type>().map_err(|mut e| {
                     e.combine(lookahead.error());

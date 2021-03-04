@@ -242,7 +242,10 @@ impl ToTokens for Spanned<Syntax> {
         match &self.inner {
             Recv(t) => quote_spanned! {sp=> recv #t },
             Send(t) => quote_spanned! {sp=> send #t },
-            Call(callee) => quote_spanned! {sp=> call #callee },
+            Call(callee) if matches!(callee.inner, Block(_) | Type(_)) => {
+                quote_spanned! {sp=> call #callee }
+            }
+            Call(callee) => quote_spanned! {sp=> call { #callee } },
             Split(tx, rx) => quote_spanned! {sp=> split { -> #tx, <- #rx, } },
             Choose(choices) => {
                 let mut acc = TokenStream::new();
@@ -279,5 +282,117 @@ impl ToTokens for Spanned<Syntax> {
             Type(ty) => quote_spanned! {sp=> #ty },
         }
         .to_tokens(tokens);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quickcheck::TestResult;
+
+    use super::*;
+
+    use {
+        quickcheck::{Arbitrary, Gen, QuickCheck},
+        syn::parse_quote,
+    };
+
+    #[derive(Debug, Clone)]
+    struct Label(String);
+
+    impl Arbitrary for Label {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let s = *g
+                .choose(&[
+                    "foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply", "waldo",
+                    "fred", "plugh", "xyzzy", "thud", "wibble", "wobble", "wubble", "flob",
+                ])
+                .unwrap();
+            Label(s.to_owned())
+        }
+    }
+
+    impl Arbitrary for Spanned<Syntax> {
+        fn arbitrary(g: &mut Gen) -> Self {
+            use Syntax::*;
+            // Ensure that the size of the syntax tree strictly decreases as we progress. This makes
+            // sure that the generator size parameter decreases by one, down to a minimum of 1 (if
+            // the generator size becomes zero, quickcheck will panic.)
+            let g = &mut Gen::new(g.size().max(2) - 1);
+            let syntax = match *g
+                .choose(&[
+                    "recv", "send", "call", "choose", "offer", "split", "loop", "break",
+                    "continue", "block", "type",
+                ])
+                .unwrap()
+            {
+                "recv" => Recv(parse_quote!(())),
+                "send" => Send(parse_quote!(())),
+                "call" => match *g.choose(&["block", "type"]).unwrap() {
+                    "block" => Call(Box::new(Spanned::from(Block(Arbitrary::arbitrary(g))))),
+                    "type" => Type(parse_quote!(())),
+                    other => unreachable!("{}", other),
+                },
+                "choose" => Choose(Arbitrary::arbitrary(g)),
+                "offer" => Offer(Arbitrary::arbitrary(g)),
+                "split" => Split(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+                "loop" => Loop(
+                    <Option<Label>>::arbitrary(g).map(|l| l.0),
+                    Box::new(Spanned::from(Block(Arbitrary::arbitrary(g)))),
+                ),
+                "break" => Break(<Option<Label>>::arbitrary(g).map(|l| l.0)),
+                "continue" => Continue(<Option<Label>>::arbitrary(g).map(|l| l.0)),
+                "block" => Block(Arbitrary::arbitrary(g)),
+                "type" => Type(parse_quote!(())),
+                other => unreachable!("{}", other),
+            };
+
+            Spanned::from(syntax)
+        }
+
+        fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+            use Syntax::*;
+            let span = self.span;
+            let v = match &self.inner {
+                Recv(_) | Send(_) | Type(_) => vec![],
+                Call(callee) => callee.shrink().map(Call).collect(),
+                Split(tx, rx) => tx
+                    .shrink()
+                    .flat_map(|tx_shrunk| {
+                        rx.shrink()
+                            .map(move |rx_shrunk| Split(tx_shrunk.clone(), rx_shrunk))
+                    })
+                    .collect(),
+                Choose(choices) => choices.shrink().map(Choose).collect(),
+                Offer(choices) => choices.shrink().map(Offer).collect(),
+                Loop(label, body) => body
+                    .shrink()
+                    .map(|body_shrunk| Loop(label.clone(), body_shrunk))
+                    .collect(),
+                Block(stmts) => stmts.shrink().map(Block).collect(),
+                Break(_) | Continue(_) => vec![],
+            };
+
+            Box::new(v.into_iter().map(move |inner| Spanned { inner, span }))
+        }
+    }
+
+    fn parser_roundtrip_property(syntax: Spanned<Syntax>) -> TestResult {
+        let syntax_tokens = syntax.to_token_stream();
+        match syn::parse2::<Spanned<Syntax>>(syntax_tokens.clone()) {
+            Ok(parsed) => TestResult::from_bool(
+                syntax_tokens.to_string() == parsed.to_token_stream().to_string(),
+            ),
+            Err(error) => TestResult::error(format!(
+                "failed w/ parse string {}, error: {}",
+                syntax_tokens, error
+            )),
+        }
+    }
+
+    #[test]
+    fn parser_roundtrip() {
+        QuickCheck::new()
+            .gen(Gen::new(14))
+            .quickcheck(parser_roundtrip_property as fn(_) -> TestResult)
     }
 }
