@@ -237,7 +237,7 @@ impl Spanned<Syntax> {
 impl Spanned<Syntax> {
     /// Convenience function for converting a `Spanned<Syntax>` into a `TokenStream` via
     /// [`Spanned::to_tokens_with`].
-    fn to_token_stream_with<F: ?Sized>(&self, add_optional: &mut F) -> TokenStream
+    pub fn to_token_stream_with<F: ?Sized>(&self, add_optional: &mut F) -> TokenStream
     where
         F: FnMut() -> bool,
     {
@@ -251,7 +251,7 @@ impl Spanned<Syntax> {
     ///
     /// The added optional syntax predicate is an `FnMut` closure so that we can randomly choose to
     /// add or not add optional trailing commas and similar during testing.
-    fn to_tokens_with<F: ?Sized>(&self, mut add_optional: &mut F, tokens: &mut TokenStream)
+    pub fn to_tokens_with<F: ?Sized>(&self, mut add_optional: &mut F, tokens: &mut TokenStream)
     where
         F: FnMut() -> bool,
     {
@@ -371,12 +371,12 @@ impl ToTokens for Spanned<Syntax> {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "quickcheck")]
 mod tests {
     use super::*;
 
     use {
-        quickcheck::{Arbitrary, Gen, QuickCheck, TestResult},
+        quickcheck::{Arbitrary, Gen},
         syn::parse_quote,
     };
 
@@ -449,7 +449,7 @@ mod tests {
             use Syntax::*;
             let span = self.span;
             let v = match &self.inner {
-                Recv(_) | Send(_) | Type(_) => vec![],
+                Recv(_) | Send(_) | Type(_) | Break(None) | Continue(None) => vec![],
                 Call(callee) => callee.shrink().map(Call).collect(),
                 Split(tx, rx) => tx
                     .shrink()
@@ -463,35 +463,14 @@ mod tests {
                 Loop(label, body) => body
                     .shrink()
                     .map(|body_shrunk| Loop(label.clone(), body_shrunk))
+                    .chain(label.as_ref().map(|_| Loop(None, body.clone())))
                     .collect(),
                 Block(stmts) => stmts.shrink().map(Block).collect(),
-                Break(_) | Continue(_) => vec![],
+                Break(Some(_)) => vec![Break(None)],
+                Continue(Some(_)) => vec![Continue(None)],
             };
 
             Box::new(v.into_iter().map(move |inner| Spanned { inner, span }))
         }
-    }
-
-    fn parser_roundtrip_property(syntax: Spanned<Syntax>) -> TestResult {
-        let syntax_tokens = syntax.to_token_stream();
-        let mut g = Gen::new(0);
-        match syn::parse2::<Spanned<Syntax>>(
-            syntax.to_token_stream_with(&mut || *g.choose(&[true, false]).unwrap()),
-        ) {
-            Ok(parsed) => TestResult::from_bool(
-                syntax_tokens.to_string() == parsed.to_token_stream().to_string(),
-            ),
-            Err(error) => TestResult::error(format!(
-                "failed w/ parse string {}, error: {}",
-                syntax_tokens, error
-            )),
-        }
-    }
-
-    #[test]
-    fn parser_roundtrip() {
-        QuickCheck::new()
-            .gen(Gen::new(13))
-            .quickcheck(parser_roundtrip_property as fn(_) -> TestResult)
     }
 }
