@@ -235,8 +235,9 @@ impl Spanned<Syntax> {
 }
 
 impl Spanned<Syntax> {
-    /// Convenience function for converting a `Spanned<Syntax>` into a `TokenStream` via [`Spanned::to_tokens_with`].
-    fn to_token_stream_with<F>(&self, add_optional: &mut F) -> TokenStream
+    /// Convenience function for converting a `Spanned<Syntax>` into a `TokenStream` via
+    /// [`Spanned::to_tokens_with`].
+    fn to_token_stream_with<F: ?Sized>(&self, add_optional: &mut F) -> TokenStream
     where
         F: FnMut() -> bool,
     {
@@ -250,13 +251,28 @@ impl Spanned<Syntax> {
     ///
     /// The added optional syntax predicate is an `FnMut` closure so that we can randomly choose to
     /// add or not add optional trailing commas and similar during testing.
-    fn to_tokens_with<F>(&self, add_optional: &mut F, tokens: &mut TokenStream)
+    fn to_tokens_with<F: ?Sized>(&self, mut add_optional: &mut F, tokens: &mut TokenStream)
     where
         F: FnMut() -> bool,
     {
         use Syntax::*;
 
         let sp = self.span;
+
+        let choice_arms_to_tokens =
+            |add_optional: &mut dyn FnMut() -> bool, arms: &[Spanned<Syntax>]| -> TokenStream {
+                let mut acc = TokenStream::new();
+                for (i, choice) in arms.iter().enumerate() {
+                    let idx = format_ident!("_{}", i, span = sp);
+                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
+                    choice.to_tokens_with(add_optional, &mut acc);
+                    if i < arms.len() - 1 || add_optional() {
+                        quote_spanned!(sp=> ,).to_tokens(&mut acc);
+                    }
+                }
+                acc
+            };
+
         match &self.inner {
             Recv(t) => quote_spanned! {sp=> recv #t },
             Send(t) => quote_spanned! {sp=> send #t },
@@ -279,28 +295,12 @@ impl Spanned<Syntax> {
                 quote_spanned! {sp=> split { -> #tx, <- #rx, } }
             }
             Choose(choices) => {
-                let mut acc = TokenStream::new();
-                for (i, choice) in choices.iter().enumerate() {
-                    let idx = format_ident!("_{}", i, span = sp);
-                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
-                    choice.to_tokens_with(add_optional, &mut acc);
-                    if i < choices.len() - 1 || add_optional() {
-                        quote_spanned!(sp=> ,).to_tokens(&mut acc);
-                    }
-                }
-                quote_spanned! {sp=> choose { #acc } }
+                let arms = choice_arms_to_tokens(&mut add_optional, choices);
+                quote_spanned! {sp=> choose { #arms } }
             }
             Offer(choices) => {
-                let mut acc = TokenStream::new();
-                for (i, choice) in choices.iter().enumerate() {
-                    let idx = format_ident!("_{}", i, span = sp);
-                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
-                    choice.to_tokens_with(add_optional, &mut acc);
-                    if i < choices.len() - 1 || add_optional() {
-                        quote_spanned!(sp=> ,).to_tokens(&mut acc);
-                    }
-                }
-                quote_spanned! {sp=> offer { #acc } }
+                let arms = choice_arms_to_tokens(&mut add_optional, choices);
+                quote_spanned! {sp=> offer { #arms } }
             }
             Loop(None, body) => {
                 let body_tokens = body.to_token_stream_with(add_optional);
@@ -324,15 +324,22 @@ impl Spanned<Syntax> {
             Block(stmts) => {
                 let mut acc = TokenStream::new();
 
+                // We want to separate the last statement from the rest so that we can decide
+                // whether or not to put an (optional) terminator on it.
                 if let Some((last, up_to_penultimate)) = stmts.split_last() {
                     for stmt in up_to_penultimate {
                         stmt.to_tokens_with(add_optional, &mut acc);
 
+                        // If the statement is a call w/ a block argument then a semicolon is
+                        // optional, rather than required.
                         let is_call_of_block = matches!(
                             &stmt.inner,
                             Call(callee) if matches!(&callee.inner, Block(_)),
                         );
 
+                        // If the statement is a block, split, offer, choose, or loop construct,
+                        // then it ends with a block/brace, and therefore a semicolon is optional,
+                        // rather than required.
                         let ends_with_block = matches!(
                             &stmt.inner,
                             Block(_) | Split(_, _) | Offer(_) | Choose(_) | Loop(_, _),
@@ -388,6 +395,12 @@ mod tests {
         }
     }
 
+    /// Currently, we have a bit of a limitation on the arbitrary impl for syntax. The first part of
+    /// this is that it's annoying to generate valid labels for lifetimes, so for now we're using a
+    /// set of known valid lifetime names (see the [`Label`] type.) The second is that generating
+    /// valid Rust types is somewhat nontrivial and the syn crate does not have a way to ask it to
+    /// implement `Arbitrary` for its `Type` AST node. So currently we just use the unit type `()`
+    /// wherever we may need to place a type.
     impl Arbitrary for Spanned<Syntax> {
         fn arbitrary(g: &mut Gen) -> Self {
             use Syntax::*;
@@ -404,6 +417,10 @@ mod tests {
             {
                 "recv" => Recv(parse_quote!(())),
                 "send" => Send(parse_quote!(())),
+                // During parsing, call nodes are only allowed to contain blocks or types, and
+                // anything else triggers a parse-time error. We want to generate something which
+                // could conceivably come from a valid parse operation, so we must limit our call
+                // nodes to be either blocks or types.
                 "call" => match *g.choose(&["block", "type"]).unwrap() {
                     "block" => Call(Box::new(Spanned::from(Block(Arbitrary::arbitrary(g))))),
                     "type" => Type(parse_quote!(())),
@@ -426,6 +443,8 @@ mod tests {
             Spanned::from(syntax)
         }
 
+        // We need to be careful here not to shrink the labels because shrinking a string can result
+        // in the empty string, which will panic when we try to construct a syn `Lifetime` from it.
         fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
             use Syntax::*;
             let span = self.span;

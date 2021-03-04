@@ -1,10 +1,8 @@
 [package]
 name = "dialectic-compiler"
 version = "0.1.0"
-authors = ["Sean Leffler <sean@errno.com>"]
+authors = ["Shea Leffler <shea@errno.com>", "Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 thunderdome = "0.4.0"
