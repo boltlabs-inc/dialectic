@@ -23,7 +23,7 @@ pub struct CfgNode {
     /// "Machine-generated" nodes are allowed to be unreachable. This is used when automatically
     /// inserting continues when resolving scopes, so that if a continue is inserted which isn't
     /// actually reachable, an error isn't emitted.
-    pub machine_generated: bool,
+    pub allow_unreachable: bool,
     /// Nodes keep a hashset of errors in order to deduplicate any errors which are emitted multiple
     /// times for the same node. Errors are traversed when code is emitted during
     /// [`Cfg::generate_target`].
@@ -84,7 +84,7 @@ impl CfgNode {
             expr,
             next: None,
             span: Span::call_site(),
-            machine_generated: false,
+            allow_unreachable: false,
             errors: HashSet::new(),
         }
     }
@@ -96,7 +96,7 @@ impl CfgNode {
             expr,
             next: None,
             span,
-            machine_generated: false,
+            allow_unreachable: false,
             errors: HashSet::new(),
         }
     }
@@ -159,7 +159,7 @@ impl Cfg {
 
             // This node is actually usually generated during parsing for things like a `break` or
             // `continue`. So, we actually do want to treat it as if the user wrote it themselves.
-            machine_generated: false,
+            allow_unreachable: false,
         })
     }
 
@@ -183,7 +183,7 @@ impl Cfg {
     /// continuation which implicitly follows every arm of the `Choose`, into becoming the
     /// continuation of every relevant arm of the `Choose`. This does have some special cases, for
     /// example we don't want to change or set a next continuation for a `Break` node or `Continue`
-    /// node
+    /// node.
     pub fn resolve_scopes(&mut self, node: Option<Index>) {
         // Depth-first once-only traversal of CFG, skipping nodes we've already seen
         let mut visited = HashSet::new();
@@ -191,11 +191,10 @@ impl Cfg {
         // The stack tracks pairs of implicit continuations (the absence of which indicates the
         // `Done` continuation), and indices which might have that continuation or have children
         // which might have that continuation. We push newly discovered nodes onto this stack, and
-        // pop from it to drive the traversal.
-        let mut stack = node
-            .into_iter()
-            .map(|node| (None, node))
-            .collect::<Vec<(Option<Index>, Index)>>();
+        // pop from it to drive the traversal. We initialize the stack with the root node, if it is
+        // present.
+        let mut stack = vec![];
+        stack.extend(node.map(|root| (None, root)));
 
         while let Some((implicit_cont, node)) = stack.pop() {
             // "Follow" a node by checking to see if we have visited it, and if not, pushing it on
@@ -238,45 +237,38 @@ impl Cfg {
                     follow(None, *rx_only);
                 }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
+                    // Inline the current implicit continuation into the next pointer of the node,
+                    // if it is `Some`
+                    follow(implicit_cont, *next);
                     // *Take* the next pointer out so that it is now None, as we are eliminating the
-                    // continuation of this node.
-                    let cont = match next.take() {
-                        // If we find an explicit continuation, we need to lower it into the arms of
-                        // the `Choose` or `Offer`.
-                        Some(next) => {
-                            follow(implicit_cont, Some(next));
-                            Some(next)
-                        }
-                        // If there is no explicit continuation, then in lieu of replacing the
-                        // explicit continuation of the `Choose` and `Offer` node with the scoped
-                        // implicit continuation, we want to lower the implicit continuation into
-                        // the arms of the `Choose` or `Offer`.
-                        None => implicit_cont,
-                    };
+                    // continuation of this node
+                    let new_implicit_cont = next.take().or(implicit_cont);
 
-                    // Follow every arm of the `Choose` / `Offer` using the continuation computed
-                    // above.
+                    // Follow each arm of the `choose`/`offer` using the new implicit continuation
                     for &choice in choices.iter().filter_map(Option::as_ref) {
-                        follow(cont, Some(choice));
+                        follow(new_implicit_cont, Some(choice));
                     }
                 }
                 Ir::Loop(body) => {
                     let body = *body;
                     let continue0 = self.singleton(Ir::Continue(node));
-                    self[continue0].machine_generated = true;
+                    // We generated this without knowing for sure whether it is reachable or not, so
+                    // mark it machine-generated so that it doesn't trigger an unreachable code
+                    // error.
+                    self[continue0].allow_unreachable = true;
                     if let Some(body) = body {
                         // If the loop has a body, process it using the implicit continuation that
                         // continues to the loop itself
                         follow(Some(continue0), Some(body));
                     } else {
                         // Assign the body of the loop to `continue`: this will become an error in a
-                        // later pass, because `loop {continue }` is unproductive
+                        // later pass, because `loop { continue }` is unproductive
                         self[node].expr = Ir::Loop(Some(continue0));
                     }
                 }
             }
 
-            // reborrow here because the `Loop` clause loses the borrow on self from expr/next.
+            // Reborrow here because the `Loop` clause loses the borrow on self from expr/next.
             let CfgNode { expr, next, .. } = &mut self[node];
             match next {
                 // If the next pointer exists, follow it and continue converting its syntax tree,
@@ -355,36 +347,27 @@ impl Cfg {
 
         let flow = crate::flow::analyze(self);
         let reachable = self.analyze_reachability(&flow, root);
-        let mut stack = vec![root];
-        let mut visited = HashSet::new();
 
-        while let Some(node_index) = stack.pop() {
-            if !visited.insert(node_index) {
-                continue;
-            }
-
-            let node = &self[node_index];
-
-            match &node.expr {
-                Ir::Loop(child) | Ir::Call(child) => stack.extend(*child),
-                Ir::Split { tx_only, rx_only } => {
-                    stack.extend(tx_only.iter().chain(rx_only.iter()))
-                }
-                Ir::Choose(choices) | Ir::Offer(choices) => {
-                    stack.extend(choices.iter().filter_map(Option::as_ref))
-                }
-                _ => {}
-            }
-
+        let mut errors = Vec::new();
+        for (node_index, node) in self.iter().filter(|(i, _)| reachable.contains(i)) {
+            // The boundary of dead code is: when an *impassable* node has a continuation which
+            // itself is *unreachable*.
             if let Some(cont_index) = node.next {
-                let cont = &self[cont_index];
-                if flow.is_passable(node_index) {
-                    stack.push(cont_index);
-                } else if !cont.machine_generated && !reachable.contains(&cont_index) {
-                    self.insert_error_at(node_index, CompileError::FollowingCodeUnreachable);
-                    self.insert_error_at(cont_index, CompileError::UnreachableStatement);
+                if !flow.is_passable(node_index)
+                    && !self[cont_index].allow_unreachable
+                    && !reachable.contains(&cont_index)
+                {
+                    // Emit an error for the node which causes the unreachability, and the node
+                    // which is made to be unreachable.
+                    errors.push((node_index, CompileError::FollowingCodeUnreachable));
+                    errors.push((cont_index, CompileError::UnreachableStatement));
                 }
             }
+        }
+
+        // Insert all the discovered errors at once
+        for (index, error) in errors {
+            self.insert_error_at(index, error);
         }
     }
 
@@ -484,7 +467,11 @@ impl Cfg {
                     let tx_target = generate_inner(cfg, errors, loop_env, tx_only);
                     let rx_target = generate_inner(cfg, errors, loop_env, rx_only);
 
-                    Target::Split(Rc::new(tx_target), Rc::new(rx_target), Rc::new(cont))
+                    Target::Split {
+                        tx_only: Rc::new(tx_target),
+                        rx_only: Rc::new(rx_target),
+                        cont: Rc::new(cont),
+                    }
                 }
                 Ir::Choose(choices) => {
                     let targets = choices
@@ -524,7 +511,7 @@ impl Cfg {
                         // Emit an error for the unproductive loop
                         errors.push((jump_target, CompileError::UnproductiveLoop));
 
-                        if !node.machine_generated {
+                        if !node.allow_unreachable {
                             // We don't emit errors for machine-generated `continue`s, because they
                             // would be unilluminating to the user
                             errors.push((node_index, CompileError::UnproductiveContinue));
@@ -533,8 +520,8 @@ impl Cfg {
                     Target::Continue(debruijn_index)
                 }
                 Ir::Type(t) => {
-                    // Optimize a little bit by doing the `Then` transform ourselves if the next
-                    // continuation is a `Done`.
+                    // Optimize a little bit by emitting the `Then` trait invocation only when
+                    // necessary (when the continuation is not `Done`)
                     match node.next {
                         None => Target::Type(t.clone()),
                         Some(cont_index) => {
@@ -565,13 +552,16 @@ impl Cfg {
             }
         }
 
+        // Generate the target, collecting unproductivity errors if any are discovered
         let mut errors = Vec::new();
         let output = generate_inner(self, &mut errors, &mut LoopEnv::new(), node);
 
+        // Insert all the found errors at once
         for (index, kind) in errors {
             self.insert_error_at(index, kind);
         }
 
+        // Collect all the errors attached to any node in the syntax tree
         let all_errors = self.arena.iter().flat_map(|(_, node)| {
             node.errors.iter().map(move |err| Spanned {
                 inner: err.clone(),
@@ -579,6 +569,7 @@ impl Cfg {
             })
         });
 
+        // Merge all collected errors into one `syn::Error`, if any were discovered
         let mut maybe_error = None;
         for reported_error in all_errors {
             let new_error = Error::new(reported_error.span, reported_error.inner.to_string());

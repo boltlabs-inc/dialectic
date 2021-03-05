@@ -10,7 +10,7 @@ fn hello_invocation() {
             ";
 
     let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
-    let s = ast.to_session().unwrap().to_string();
+    let s = ast.compile().unwrap().to_string();
     assert_eq!(s, "Send<String, Recv<String, Done>>");
 }
 
@@ -22,7 +22,7 @@ fn hello_invocation_double_block() {
             }";
 
     let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
-    let s = ast.to_session().unwrap().to_string();
+    let s = ast.compile().unwrap().to_string();
     assert_eq!(s, "Send<String, Recv<String, Done>>");
 }
 
@@ -34,7 +34,7 @@ fn basic_split() {
             }";
 
     let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
-    let s = ast.to_session().unwrap().to_string();
+    let s = ast.compile().unwrap().to_string();
     assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>, Done>");
 }
 
@@ -49,7 +49,7 @@ fn continued_split() {
         }";
 
     let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
-    let s = ast.to_session().unwrap().to_string();
+    let s = ast.compile().unwrap().to_string();
     assert_eq!(
         s,
         "Split<Send<String, Done>, Recv<String, Done>, Send<bool, Done>>"

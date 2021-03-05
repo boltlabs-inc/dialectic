@@ -6,7 +6,7 @@ macro_rules! expect_parse {
         let syntax = stringify!($($syntax)*);
         let s = syn::parse_str::<Invocation>(syntax)
             .unwrap()
-            .to_session()
+            .compile()
             .to_string();
 
         assert_eq!(s, $output);
@@ -24,7 +24,7 @@ macro_rules! expect_errors {
         let syntax = stringify!($($syntax)*);
         let err_set = syn::parse_str::<Invocation>(syntax)
             .unwrap()
-            .to_session()
+            .compile()
             .unwrap_err()
             .into_iter()
             .map(|err| err.to_string())

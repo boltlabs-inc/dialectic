@@ -23,8 +23,8 @@ pub struct Invocation {
 
 impl Invocation {
     /// Compile this invocation into the corresponding target syntax.
-    pub fn to_session(&self) -> Result<Spanned<Target>, Error> {
-        to_session(&self.syntax)
+    pub fn compile(&self) -> Result<Spanned<Target>, Error> {
+        compile(&self.syntax)
     }
 }
 
@@ -105,7 +105,7 @@ impl Syntax {
 
 /// Compile a spanned syntax tree into either a representation of a valid session type
 /// [`Target`], or an [`Error`].
-pub fn to_session(syntax: &Spanned<Syntax>) -> Result<Spanned<Target>, Error> {
+pub fn compile(syntax: &Spanned<Syntax>) -> Result<Spanned<Target>, Error> {
     let mut cfg = Cfg::new();
     let head = to_cfg(syntax, &mut cfg, &mut Vec::new()).0;
     cfg.resolve_scopes(head);
@@ -115,6 +115,9 @@ pub fn to_session(syntax: &Spanned<Syntax>) -> Result<Spanned<Target>, Error> {
 
 /// Converts surface [`Syntax`] to a control-flow graph intermediate representation, suitable
 /// for further analysis and error reporting.
+///
+/// It should be passed the empty `Cfg` and empty environment to start, as it adds to these during
+/// recursive calls.
 fn to_cfg<'a>(
     syntax: &'a Spanned<Syntax>,
     cfg: &mut Cfg,
@@ -407,10 +410,10 @@ mod tests {
 
     /// Currently, we have a bit of a limitation on the arbitrary impl for syntax. The first part of
     /// this is that it's annoying to generate valid labels for lifetimes, so for now we're using a
-    /// set of known valid lifetime names (see the [`Label`] type.) The second is that generating
-    /// valid Rust types is somewhat nontrivial and the syn crate does not have a way to ask it to
-    /// implement `Arbitrary` for its `Type` AST node. So currently we just use the unit type `()`
-    /// wherever we may need to place a type.
+    /// set of known valid lifetime names. The second is that generating valid Rust types is
+    /// somewhat nontrivial and the syn crate does not have a way to ask it to implement `Arbitrary`
+    /// for its `Type` AST node. So currently we just use the unit type `()` wherever we may need to
+    /// place a type.
     impl Arbitrary for Spanned<Syntax> {
         fn arbitrary(g: &mut Gen) -> Self {
             use Syntax::*;
