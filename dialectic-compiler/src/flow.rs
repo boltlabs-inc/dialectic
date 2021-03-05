@@ -279,7 +279,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // `Call` nodes are only passable if their continuations are haltable.
             Ir::Call(Some(callee)) => Dnf::only_if(vec![Constraint::Haltable(*callee)]),
             // Similarly to call, split nodes are only passable if both arms are haltable.
-            Ir::Split(tx_only, rx_only) => {
+            Ir::Split { tx_only, rx_only } => {
                 let arms = tx_only.iter().chain(rx_only);
                 Dnf::only_if(arms.map(|&arm| Constraint::Haltable(arm)).collect())
             }
@@ -318,7 +318,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // definition of passability. Note that if the continuation is `None`, then the node
             // halts only if it is passable, so in that case a `Haltable` constraint on it is not
             // generated.
-            Ir::Call(_) | Ir::Split(_, _) | Ir::Loop(_) => {
+            Ir::Call(_) | Ir::Split { .. } | Ir::Loop(_) => {
                 let mut conj = vec![Constraint::Passable(node_index)];
                 conj.extend(node.next.map(Constraint::Haltable));
                 Dnf::only_if(conj)
@@ -360,7 +360,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // being breakable to a loop. Instead, similarly to `Send`, `Recv`, and `Type`, they are
             // `BreakableTo` only if their continuation is, but we must also know whether they are
             // passable (so that we can know if control flow can reach that break if it is present.)
-            Ir::Call(_) | Ir::Split(_, _) => {
+            Ir::Call(_) | Ir::Split { .. } => {
                 let mut conj = vec![Constraint::Passable(breaks_from)];
                 conj.extend(node.next.map(|cont| Constraint::BreakableTo {
                     breaks_from: cont,
