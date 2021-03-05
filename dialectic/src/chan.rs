@@ -15,10 +15,7 @@ use pin_project::pin_project;
 use crate::tuple::{HasLength, List, Tuple};
 use crate::Unavailable;
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
-use crate::{
-    prelude::*,
-    types::{EachHasDual, EachScoped, Select},
-};
+use crate::{prelude::*, types::*, unary::*};
 use futures::Future;
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
@@ -26,10 +23,10 @@ use futures::Future;
 ///
 /// # Creating new `Chan`s: use [`Session`]
 ///
-/// The [`Session`] trait is implemented for all valid session types. To create a
-/// new [`Chan`] for some session type, use one of the provided static methods. Here, we create two
-/// `Chan`s with the session type `Send<String, Done>` and its dual `Recv<String, Done>`, wrapping
-/// an underlying bidirectional transport built from a pair of [`tokio::sync::mpsc::channel`]s:
+/// The [`Session`] trait is implemented for all valid session types. To create a new [`Chan`] for
+/// some session type, use one of the provided static methods. Here, we create two `Chan`s with the
+/// session type `send String` and its dual `recv String`, wrapping an underlying bidirectional
+/// transport built from a pair of [`tokio::sync::mpsc::channel`]s:
 ///
 /// ```
 /// use dialectic::prelude::*;
@@ -38,9 +35,9 @@ use futures::Future;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Make a pair of channels:
-/// // - `c1` with the session type `Send<String, Done>`, and
-/// // - `c2` with the dual session type `Recv<String, Done>`
-/// let (c1, c2) = <Send<String, Done>>::channel(|| mpsc::channel(1));
+/// // - `c1` with the session type `send String`, and
+/// // - `c2` with the dual session type `recv String`
+/// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
 /// # Ok(())
 /// # }
 /// ```
@@ -58,7 +55,7 @@ use futures::Future;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let (tx, rx) = mpsc::channel(1);
-/// let c = <Send<String, Done>>::wrap(tx, rx);
+/// let c = <Session! { send String }>::wrap(tx, rx);
 /// # Ok(())
 /// # }
 /// ```
@@ -66,9 +63,9 @@ use futures::Future;
 /// [`Session`]: trait@crate::Session
 #[derive(Derivative)]
 #[derivative(Debug)]
-#[must_use]
 #[repr(C)]
-pub struct Chan<S: Session, Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static> {
+#[must_use]
+pub struct Chan<S: Session, Tx: marker::Send + 'static, Rx: marker::Send + 'static> {
     tx: Option<Tx>,
     rx: Option<Rx>,
     drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -78,8 +75,8 @@ pub struct Chan<S: Session, Tx: std::marker::Send + 'static, Rx: std::marker::Se
 
 impl<Tx, Rx, S> Drop for Chan<S, Tx, Rx>
 where
-    Tx: std::marker::Send + 'static,
-    Rx: std::marker::Send + 'static,
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
     S: Session,
 {
     fn drop(&mut self) {
@@ -111,7 +108,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # Examples
     ///
-    /// Starting with a channel whose session type is already `Done`, we can immediately close the
+    /// Starting with a channel whose session type is already [`Done`], we can immediately close the
     /// channel.
     ///
     /// ```
@@ -120,7 +117,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = Done::channel(mpsc::unbounded_channel);
+    /// let (c1, c2) = <Session! {}>::channel(mpsc::unbounded_channel);
     /// c1.close();
     /// c2.close();
     /// # }
@@ -135,7 +132,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = <Loop<Send<String, Continue>>>::channel(mpsc::unbounded_channel);
+    /// let (c1, c2) = <Session! { loop { send String } }>::channel(mpsc::unbounded_channel);
     /// c1.close();
     /// c2.close();
     /// # }
@@ -167,7 +164,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Recv<String, Done>>::channel(|| mpsc::channel(1));
+    /// let (c1, c2) = <Session! { recv String }>::channel(|| mpsc::channel(1));
     /// c2.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c1) = c1.recv().await?;
@@ -205,7 +202,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Send<String, Done>>::channel(|| mpsc::channel(1));
+    /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
     /// c1.send("Hello, world!".to_string()).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
@@ -251,7 +248,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64, Done>, Recv<String, Done>)>;
+    /// type GiveOrTake = Session! {
+    ///     choose {
+    ///         _0 => send i64,
+    ///         _1 => recv String,
+    ///     }
+    /// };
     ///
     /// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     ///
@@ -303,7 +305,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Choices::AsList: Select<N> + HasLength + EachHasDual + EachScoped,
         <Choices::AsList as EachHasDual>::Duals: List,
         <Choices::AsList as Select<N>>::Selected: Session,
-        N: Unary + LessThan<_128>,
+        N: Unary + LessThan<crate::unary::types::_128>,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -331,15 +333,20 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type GiveOrTake = Choose<(Send<i64, Done>, Recv<String, Done>)>;
+    /// type GiveOrTake = Session! {
+    ///     choose {
+    ///         _0 => send i64,
+    ///         _1 => recv String,
+    ///     }
+    /// };
     ///
     /// let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case(Z) {
+    ///     match c2.offer().await?.case(_0) {
     ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case(Z) {
+    ///         Err(rest) => match rest.case(_0) {
     ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
     ///             Err(rest) => rest.empty_case(),
     ///         }
@@ -365,7 +372,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # type GiveOrTake = Choose<(Send<i64, Done>, Recv<String, Done>)>;
+    /// # type GiveOrTake = Session! {
+    /// #     choose {
+    /// #         _0 => send i64,
+    /// #         _1 => recv String,
+    /// #     }
+    /// # };
     /// #
     /// # let (c1, c2) = GiveOrTake::channel(|| mpsc::channel(1));
     /// #
@@ -393,7 +405,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Choices: Tuple + 'static,
         Choices::AsList: HasLength + EachScoped + EachHasDual,
         <Choices::AsList as EachHasDual>::Duals: List,
-        _0: LessThan<<Choices::AsList as HasLength>::Length>,
+        crate::unary::types::_0: LessThan<<Choices::AsList as HasLength>::Length>,
     {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
         let variant = rx.as_mut().unwrap().recv().await?.into();
@@ -405,6 +417,86 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
             drop_rx,
             protocols: PhantomData,
         })
+    }
+    /// Execute the session type `P` as a subroutine in a closure.
+    ///
+    /// This operation takes as input an asynchronous closure that runs a channel for the session
+    /// type `P` to completion and returns either an error `Err` or some result value `T`. The
+    /// result of this (provided that no errors occurred during `P`) is a channel ready to execute
+    /// the session type `Q`.
+    ///
+    /// # Errors
+    ///
+    /// The closure must *finish* the session `P` on the channel given to it and *drop* the finished
+    /// channel before the future returns. If the channel is dropped before completing `P` or is not
+    /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
+    /// channel for `Q`. The best way to ensure this error does not occur is to call
+    /// [`close`](Chan::close) on the channel before returning from the future, because this
+    /// statically checks that the session is complete and drops the channel.
+    ///
+    /// Additionally, this function returns an `Err` if the closure returns an `Err`.
+    ///
+    /// # Examples
+    ///
+    /// This can be used to cleanly modularize a session-typed program by splitting it up into
+    /// independent subroutines:
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic::backend::mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Session! {
+    ///     call { send String };
+    ///     send String;
+    /// }>::channel(mpsc::unbounded_channel);
+    ///
+    /// let ((), c1_result) = c1.call(|c| async move {
+    ///     let c = c.send("Hello!".to_string()).await?;
+    ///     // Because we're done with this subroutine, we can "close" the channel here, but it
+    ///     // will remain open to the calling context so it can run the rest of the session:
+    ///     c.close();
+    ///     Ok::<_, mpsc::Error>(())
+    /// }).await?;
+    /// let c1 = c1_result?;
+    ///
+    /// let c1 = c1.send("World!".to_string()).await?;
+    /// c1.close();
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// More generally, this construct permits the expression of context-free session types, by
+    /// allowing recursion in the first parameter to [`Call`]. For a demonstration of this, see the
+    /// [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples). For more
+    /// background on context-free session types, see the paper [*Context-Free Session Type
+    /// Inference*](https://doi.org/10.1145/3229062) by Luca Padovani. When comparing with that
+    /// paper, note that the [`call`](Chan::call) operation is roughly equivalent to the paper's
+    /// `@=` operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
+    pub async fn call<T, E, P, Q, F, Fut>(
+        self,
+        first: F,
+    ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
+    where
+        S: Session<Action = Call<P, Q>>,
+        P: Session,
+        Q: Session,
+        F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+    {
+        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
+        let (result, maybe_chan) = P::over(tx.unwrap(), rx.unwrap(), first).await?;
+        Ok((
+            result,
+            maybe_chan.map(|(tx, rx)| Chan {
+                tx: Some(tx),
+                rx: Some(rx),
+                drop_tx,
+                drop_rx,
+                session: PhantomData,
+            }),
+        ))
     }
 
     /// Split a channel into transmit-only and receive-only ends and manipulate them, potentially
@@ -434,7 +526,12 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// type SendAndRecv = Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>;
+    /// type SendAndRecv = Session! {
+    ///     split {
+    ///         -> send Vec<usize>,
+    ///         <- recv String,
+    ///     }
+    /// };
     ///
     /// let (c1, c2) = SendAndRecv::channel(|| mpsc::channel(1));
     ///
@@ -555,84 +652,6 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         ))
     }
 
-    /// Execute the session type `P` as a subroutine in a closure.
-    ///
-    /// This operation takes as input an asynchronous closure that runs a channel for the session
-    /// type `P` to completion and returns either an error `Err` or some result value `T`. The
-    /// result of this (provided that no errors occurred during `P`) is a channel ready to execute
-    /// the session type `Q`.
-    ///
-    /// # Errors
-    ///
-    /// The closure must *finish* the session `P` on the channel given to it and *drop* the finished
-    /// channel before the future returns. If the channel is dropped before completing `P` or is not
-    /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
-    /// channel for `Q`. The best way to ensure this error does not occur is to call
-    /// [`close`](Chan::close) on the channel before returning from the future, because this
-    /// statically checks that the session is complete and drops the channel.
-    ///
-    /// Additionally, this function returns an `Err` if the closure returns an `Err`.
-    ///
-    /// # Examples
-    ///
-    /// This can be used to cleanly modularize a session-typed program by splitting it up into
-    /// independent subroutines:
-    ///
-    /// ```
-    /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Call<Send<String, Done>, Send<String, Done>>>::channel(mpsc::unbounded_channel);
-    ///
-    /// let ((), c1_result) = c1.call(|c| async move {
-    ///     let c = c.send("Hello!".to_string()).await?;
-    ///     // Because we're done with this subroutine, we can "close" the channel here, but it
-    ///     // will remain open to the calling context so it can run the rest of the session:
-    ///     c.close();
-    ///     Ok::<_, mpsc::Error>(())
-    /// }).await?;
-    /// let c1 = c1_result?;
-    ///
-    /// let c1 = c1.send("World!".to_string()).await?;
-    /// c1.close();
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// More generally, this construct permits the expression of context-free session types, by
-    /// allowing recursion in the first parameter to [`Call`]. For a demonstration of this, see the
-    /// [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples). For more
-    /// background on context-free session types, see the paper [*Context-Free Session Type
-    /// Inference*](https://doi.org/10.1145/3229062) by Luca Padovani. When comparing with that
-    /// paper, note that the [`call`](Chan::call) operation is roughly equivalent to the paper's
-    /// `@=` operator, and the [`Call`] type is equivalent to the paper's `;` type operator.
-    pub async fn call<T, E, P, Q, F, Fut>(
-        self,
-        first: F,
-    ) -> Result<(T, Result<Chan<Q, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
-    where
-        S: Session<Action = Call<P, Q>>,
-        P: Session,
-        Q: Session,
-        F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
-        Fut: Future<Output = Result<T, E>>,
-    {
-        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let (result, maybe_chan) = P::over(tx.unwrap(), rx.unwrap(), first).await?;
-        Ok((
-            result,
-            maybe_chan.map(|(tx, rx)| Chan {
-                tx: Some(tx),
-                rx: Some(rx),
-                drop_tx,
-                drop_rx,
-                session: PhantomData,
-            }),
-        ))
-    }
-
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
     /// potentially before the end of the session.
     ///
@@ -647,7 +666,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// use dialectic::prelude::*;
     /// use dialectic::backend::mpsc;
     ///
-    /// let (c1, c2) = <Send<String, Done>>::channel(mpsc::unbounded_channel);
+    /// let (c1, c2) = <Session! { send String }>::channel(mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.into_inner();
     /// let (tx2, rx2) = c2.into_inner();
     /// ```
