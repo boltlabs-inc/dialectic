@@ -9,8 +9,8 @@ fn hello_invocation() {
                 recv String;
             ";
 
-    let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-    let s = format!("{}", ast.to_session().unwrap());
+    let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+    let s = ast.to_session().unwrap().to_string();
     assert_eq!(s, "Send<String, Recv<String, Done>>");
 }
 
@@ -21,8 +21,8 @@ fn hello_invocation_double_block() {
                 recv String;
             }";
 
-    let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-    let s = format!("{}", ast.to_session().unwrap());
+    let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+    let s = ast.to_session().unwrap().to_string();
     assert_eq!(s, "Send<String, Recv<String, Done>>");
 }
 
@@ -33,8 +33,8 @@ fn basic_split() {
                 <- recv String,
             }";
 
-    let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-    let s = format!("{}", ast.to_session().unwrap());
+    let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+    let s = ast.to_session().unwrap().to_string();
     assert_eq!(s, "Split<Send<String, Done>, Recv<String, Done>, Done>");
 }
 
@@ -48,8 +48,8 @@ fn continued_split() {
             send bool;
         }";
 
-    let ast = syn::parse_str::<Invocation>(to_parse).unwrap().syntax;
-    let s = format!("{}", ast.to_session().unwrap());
+    let ast = syn::parse_str::<Invocation>(to_parse).unwrap();
+    let s = ast.to_session().unwrap().to_string();
     assert_eq!(
         s,
         "Split<Send<String, Done>, Recv<String, Done>, Send<bool, Done>>"

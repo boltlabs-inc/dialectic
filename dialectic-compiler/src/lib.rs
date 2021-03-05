@@ -46,7 +46,7 @@ Most other passes will make use these assumptions.
 
 The scope resolution algorithm looks something like this:
 
-```rust,ignore
+```ignore
 fn resolve_scopes(implicit_scope, node) {
     if the node is a Recv, Send, Type, Break, Continue, Call, Split, or Error {
         // The implicit continuation of the callee of a Call node or arm of a Split node is always
@@ -119,7 +119,7 @@ The dead core reporting pass itself is responsible for running the flow analysis
 
 The dead code reporting algorithm looks something like this:
 
-```rust,ignore
+```ignore
 fn report_dead_code(node) {
     // We want to follow every child node except for the node's continuation. If we did follow the
     // continuation, we would end up reporting every unreachable node instead of just the
@@ -163,7 +163,7 @@ For most nodes, generating the corresponding target code is trivial - `Send`, `R
 
 The codegen algorithm looks something like this:
 
-```rust,ignore
+```ignore
 fn generate_target(loop_env, maybe_node) {
     if maybe_node is None {
         // If the node is empty, that's the "done" continuation.

@@ -4,11 +4,11 @@ macro_rules! expect_parse {
         use dialectic_compiler::Invocation;
 
         let syntax = stringify!($($syntax)*);
-        let ast = syn::parse_str::<Invocation>(syntax)
+        let s = syn::parse_str::<Invocation>(syntax)
             .unwrap()
-            .syntax;
+            .to_session()
+            .to_string();
 
-        let s = format!("{}", ast.to_session().unwrap());
         assert_eq!(s, $output);
     }};
 }
@@ -24,7 +24,6 @@ macro_rules! expect_errors {
         let syntax = stringify!($($syntax)*);
         let err_set = syn::parse_str::<Invocation>(syntax)
             .unwrap()
-            .syntax
             .to_session()
             .unwrap_err()
             .into_iter()

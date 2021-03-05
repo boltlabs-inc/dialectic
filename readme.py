@@ -19,6 +19,11 @@ with open("dialectic-compiler/README.md", "w") as readme:
         for line in lib:
             if line.startswith("/*!"):
                 line = line[3:]
+
+            if line.startswith("```ignore"):
+                line = line.replace("```ignore", "```rust")
+
             if line.endswith("<!-- snip -->\n"):
                 break
+
             readme.write(line)
