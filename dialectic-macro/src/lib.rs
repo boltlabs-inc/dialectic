@@ -234,7 +234,7 @@ type_eq!(
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let result = parse_macro_input!(input as dialectic_compiler::Invocation).to_session();
+    let result = parse_macro_input!(input as dialectic_compiler::Invocation).compile();
 
     match result {
         Ok(compiled) => compiled.to_token_stream().into(),

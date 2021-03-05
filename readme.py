@@ -20,8 +20,8 @@ with open("dialectic-compiler/README.md", "w") as readme:
             if line.startswith("/*!"):
                 line = line[3:]
 
-            if line.startswith("```ignore"):
-                line = line.replace("```ignore", "```rust")
+            if line.startswith("```text"):
+                line = line.replace("```text", "```rust")
 
             if line.endswith("<!-- snip -->\n"):
                 break

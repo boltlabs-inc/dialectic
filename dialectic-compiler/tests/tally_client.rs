@@ -22,7 +22,7 @@ fn tally_client_expr_call_ast() {
     )
     .into();
 
-    let s = format!("{}", syntax::to_session(&client_ast).unwrap());
+    let s = format!("{}", syntax::compile(&client_ast).unwrap());
     assert_eq!(
         s,
         "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -42,7 +42,7 @@ fn tally_client_expr_call_parse_string() {
         }";
 
     let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-    let s = format!("{}", syntax::to_session(&ast).unwrap());
+    let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
         "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -62,7 +62,7 @@ fn tally_client_invocation_call_parse_string() {
             }";
 
     let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-    let s = format!("{}", syntax::to_session(&ast).unwrap());
+    let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
         "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
@@ -82,7 +82,7 @@ fn tally_client_invocation_direct_subst_parse_string() {
             }";
 
     let ast = syn::parse_str::<Spanned<Syntax>>(to_parse).unwrap();
-    let s = format!("{}", syntax::to_session(&ast).unwrap());
+    let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
         "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue>>::Combined>)>>"
@@ -112,7 +112,7 @@ fn tally_client_direct_subst_nested_loop_break() {
     let lhs: Type = syn::parse2(
         syn::parse_str::<Invocation>(to_parse)
             .unwrap()
-            .to_session()
+            .compile()
             .unwrap()
             .into_token_stream(),
     )

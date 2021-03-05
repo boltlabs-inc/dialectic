@@ -296,7 +296,8 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // called when a `Break` occurs targeting the loop in question, so it is only passable
             // if it is `BreakableTo` from some node inside it.
             Ir::Loop(body) => Dnf::only_if(vec![Constraint::BreakableTo {
-                breaks_from: body.expect("loop bodies should always be `Some`"),
+                breaks_from: body
+                    .expect("loop bodies should always be `Some` after scope resolution"),
                 breaks_to: node,
             }]),
         }
@@ -313,7 +314,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
                 Some(cont) => Dnf::only_if(vec![Constraint::Haltable(cont)]),
                 None => Dnf::trivially_true(),
             },
-            // Nodes are always haltable if they are passable and their continuation halts. Instead
+            // If a node is passable and its continuation halts, then it is always haltable. Instead
             // of spitting out constraints on the child nodes of these cases, we rely on their
             // definition of passability. Note that if the continuation is `None`, then the node
             // halts only if it is passable, so in that case a `Haltable` constraint on it is not
@@ -368,7 +369,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
                 }));
                 Dnf::only_if(conj)
             }
-            // `Choose` and `Offer` break only if an arm breaks.
+            // `Choose` and `Offer` break only if any arm breaks.
             Ir::Choose(choices) | Ir::Offer(choices) => Dnf(choices
                 .iter()
                 .filter_map(Option::as_ref)
@@ -384,12 +385,15 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // targeting the loop in question. 2.) it is passable, and once it is passed, its
             // continuation may break to the target.
             Ir::Loop(body) => {
+                // Option 1.: the loop's body is `BreakableTo` the loop in question.
                 let mut disj = vec![vec![Constraint::BreakableTo {
                     breaks_from: body
                         .expect("loop bodies should be nonempty after scope resolution"),
                     breaks_to,
                 }]];
 
+                // If there is a continuation, then option 2.: the loop's continuation is
+                // `BreakableTo` the loop in question.
                 if let Some(cont) = node.next {
                     disj.push(vec![
                         Constraint::Passable(breaks_from),

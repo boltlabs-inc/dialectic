@@ -143,7 +143,6 @@ where
     F: Fn(TcpChan<P>) -> Fut + Sync + 'static,
     Fut: Future<Output = Result<T, Box<dyn Error>>> + std::marker::Send,
     P: Session,
-    P::Dual: Session,
     T: Debug,
 {
     let listener = TcpListener::bind((address, port)).await?;

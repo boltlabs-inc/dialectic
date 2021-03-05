@@ -25,6 +25,7 @@ mod kw {
     syn::custom_keyword!(offer);
     syn::custom_keyword!(split);
 
+    /// Return `true` if the next token is one of our keywords.
     pub fn peek_any(input: ParseStream) -> bool {
         input.peek(recv)
             || input.peek(send)
@@ -35,18 +36,42 @@ mod kw {
     }
 }
 
+impl Parse for Invocation {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut nodes = Vec::new();
+        while !input.is_empty() {
+            let terminator_required = requires_terminator(&input);
+            nodes.push(input.parse::<Spanned<Syntax>>()?);
+
+            if !input.is_empty() && (terminator_required || input.peek(Token![;])) {
+                input.parse::<Token![;]>()?;
+            }
+        }
+
+        let ast = Spanned {
+            inner: Syntax::Block(nodes),
+            span: Span::call_site(),
+        };
+        Ok(Invocation { syntax: ast })
+    }
+}
+
 /// The direction of a split arm, either `->` or `<-`.
 #[derive(Clone, Copy, PartialEq)]
 enum Direction {
+    /// The transmit direction `->`.
     Transmit,
+    /// The receive direction `<-`.
     Receive,
 }
 
 /// A split arm, consisting of a [`Direction`] and a ([`Spanned`]) [`Syntax`] for the body of the
 /// arm: `<- ...` or `-> ...`. This parser also parses a terminator, if necessary or present.
 struct SplitArm {
+    /// Which direction the split arm operates in.
     dir: Direction,
-    arm: Spanned<Syntax>,
+    /// The body of the arm.
+    body: Spanned<Syntax>,
 }
 
 impl Parse for SplitArm {
@@ -66,7 +91,7 @@ impl Parse for SplitArm {
         if !input.is_empty() && (terminator_required || input.peek(Token![,])) {
             input.parse::<Token![,]>()?;
         }
-        Ok(SplitArm { dir, arm })
+        Ok(SplitArm { dir, body: arm })
     }
 }
 
@@ -74,8 +99,10 @@ impl Parse for SplitArm {
 /// refers to: `_N => ...`. This parser also parses a terminator, if necessary or if it is simply
 /// present.
 struct ChoiceArm {
+    /// The index of the arm, i.e. `_0`, `_1`, ... `_127`.
     index: Spanned<usize>,
-    arm: Spanned<Syntax>,
+    /// The body of the arm.
+    body: Spanned<Syntax>,
 }
 
 impl Parse for ChoiceArm {
@@ -98,7 +125,7 @@ impl Parse for ChoiceArm {
                 inner: index,
                 span: index_span,
             },
-            arm,
+            body: arm,
         })
     }
 }
@@ -106,6 +133,8 @@ impl Parse for ChoiceArm {
 /// A block of statements: `{ ... }`.
 struct Block(Spanned<Syntax>);
 
+/// Returns `true` if the next token in the `ParseStream` starts an expression that would require a
+/// terminator afterwards.
 fn requires_terminator(input: ParseStream) -> bool {
     // It's easier to check if a terminator isn't required because checking to see whether a
     // terminator *is* required means checking to see if we're looking at a directly injected type,
@@ -220,7 +249,7 @@ impl Parse for Spanned<Syntax> {
                     ));
                 }
 
-                arm_asts.push(choice_arm.arm);
+                arm_asts.push(choice_arm.body);
             }
 
             Ok(Spanned {
@@ -251,7 +280,7 @@ impl Parse for Spanned<Syntax> {
                     ));
                 }
 
-                arm_asts.push(choice_arm.arm);
+                arm_asts.push(choice_arm.body);
             }
 
             Ok(Spanned {
@@ -282,8 +311,8 @@ impl Parse for Spanned<Syntax> {
 
             Ok(Spanned {
                 inner: Syntax::Split {
-                    tx_only: Box::new(split_arms[0].arm.clone()),
-                    rx_only: Box::new(split_arms[1].arm.clone()),
+                    tx_only: Box::new(split_arms[0].body.clone()),
+                    rx_only: Box::new(split_arms[1].body.clone()),
                 },
                 span: split_span,
             })
@@ -360,25 +389,5 @@ impl Parse for Spanned<Syntax> {
                 span,
             })
         }
-    }
-}
-
-impl Parse for Invocation {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut nodes = Vec::new();
-        while !input.is_empty() {
-            let terminator_required = requires_terminator(&input);
-            nodes.push(input.parse::<Spanned<Syntax>>()?);
-
-            if !input.is_empty() && (terminator_required || input.peek(Token![;])) {
-                input.parse::<Token![;]>()?;
-            }
-        }
-
-        let ast = Spanned {
-            inner: Syntax::Block(nodes),
-            span: Span::call_site(),
-        };
-        Ok(Invocation { syntax: ast })
     }
 }

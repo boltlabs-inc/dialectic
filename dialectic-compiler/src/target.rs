@@ -34,11 +34,14 @@ pub enum Target {
     /// Session type: `Continue<_N>`.
     Continue(usize),
     /// Session type: `Split<P, Q, R>`.
-    Split(
-        Rc<Spanned<Target>>,
-        Rc<Spanned<Target>>,
-        Rc<Spanned<Target>>,
-    ),
+    Split {
+        /// The transmit-only half.
+        tx_only: Rc<Spanned<Target>>,
+        /// The receive-only half.
+        rx_only: Rc<Spanned<Target>>,
+        /// The continuation.
+        cont: Rc<Spanned<Target>>,
+    },
     /// Session type: `Call<P, Q>`.
     Call(Rc<Spanned<Target>>, Rc<Spanned<Target>>),
     /// Session type: `<P as Then<Q>>::Combined`.
@@ -55,7 +58,11 @@ impl fmt::Display for Target {
             Recv(t, s) => write!(f, "Recv<{}, {}>", t.to_token_stream(), s)?,
             Send(t, s) => write!(f, "Send<{}, {}>", t.to_token_stream(), s)?,
             Loop(s) => write!(f, "Loop<{}>", s)?,
-            Split(s, p, q) => write!(f, "Split<{}, {}, {}>", s, p, q)?,
+            Split {
+                tx_only: s,
+                rx_only: p,
+                cont: q,
+            } => write!(f, "Split<{}, {}, {}>", s, p, q)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Then(s, p) => write!(f, "<{} as Then<{}>>::Combined", s, p)?,
             Choose(cs) => {
@@ -109,32 +116,53 @@ impl ToTokens for Spanned<Target> {
 
         // We assign the associated span of the target to any type tokens generated, in an attempt
         // to get at least some type errors/issues to show up in the right place.
-        let sp = self.span;
-        let c = Ident::new(&**CRATE_NAME, sp);
+        let span = self.span;
+        let dialectic_crate = Ident::new(&**CRATE_NAME, span);
 
         match &self.inner {
-            Done => quote_spanned! {sp=> #c::types::Done }.to_tokens(tokens),
-            Recv(t, s) => quote_spanned! {sp=> #c::types::Recv<#t, #s> }.to_tokens(tokens),
-            Send(t, s) => quote_spanned! {sp=> #c::types::Send<#t, #s> }.to_tokens(tokens),
-            Loop(s) => quote_spanned! {sp=> #c::types::Loop<#s> }.to_tokens(tokens),
-            Split(s, p, q) => quote_spanned!(sp=> #c::types::Split<#s, #p, #q>).to_tokens(tokens),
-            Call(s, p) => quote_spanned! {sp=> #c::types::Call<#s, #p> }.to_tokens(tokens),
-            Then(s, p) => {
-                quote_spanned!(sp=> <#s as #c::types::Then<#p>>::Combined).to_tokens(tokens)
+            Done => quote_spanned! {span=> #dialectic_crate::types::Done }.to_tokens(tokens),
+            Recv(t, s) => {
+                quote_spanned!(span=> #dialectic_crate::types::Recv<#t, #s>).to_tokens(tokens)
             }
-            Choose(cs) => quote_spanned! {sp=> #c::types::Choose<(#(#cs,)*)> }.to_tokens(tokens),
-            Offer(cs) => quote_spanned! {sp=> #c::types::Offer<(#(#cs,)*)> }.to_tokens(tokens),
+            Send(t, s) => {
+                quote_spanned!(span=> #dialectic_crate::types::Send<#t, #s>).to_tokens(tokens)
+            }
+            Loop(s) => quote_spanned!(span=> #dialectic_crate::types::Loop<#s>).to_tokens(tokens),
+            Split {
+                tx_only: s,
+                rx_only: p,
+                cont: q,
+            } => {
+                quote_spanned!(span=> #dialectic_crate::types::Split<#s, #p, #q>).to_tokens(tokens)
+            }
+            Call(s, p) => {
+                quote_spanned!(span=> #dialectic_crate::types::Call<#s, #p>).to_tokens(tokens)
+            }
+            Then(s, p) => {
+                quote_spanned!(span=> <#s as #dialectic_crate::types::Then<#p>>::Combined)
+                    .to_tokens(tokens)
+            }
+            Choose(cs) => {
+                quote_spanned!(span=> #dialectic_crate::types::Choose<(#(#cs,)*)>).to_tokens(tokens)
+            }
+            Offer(cs) => {
+                quote_spanned!(span=> #dialectic_crate::types::Offer<(#(#cs,)*)>).to_tokens(tokens)
+            }
             Continue(n) => {
                 if *n > 0 {
-                    (quote_spanned! {sp=> #c::types::Continue< }).to_tokens(tokens);
-                    (0..*n).for_each(|_| (quote_spanned! {sp=> #c::unary::S< }).to_tokens(tokens));
-                    (quote_spanned! {sp=> #c::unary::Z }).to_tokens(tokens);
-                    (0..=*n).for_each(|_| (quote_spanned! {sp=> > }).to_tokens(tokens));
+                    quote_spanned!(span=> #dialectic_crate::types::Continue<).to_tokens(tokens);
+                    for _ in 0..*n {
+                        quote_spanned!(span=> #dialectic_crate::unary::S< ).to_tokens(tokens);
+                    }
+                    quote_spanned!(span=> #dialectic_crate::unary::Z ).to_tokens(tokens);
+                    for _ in 0..=*n {
+                        quote_spanned!(span=> > ).to_tokens(tokens)
+                    }
                 } else {
-                    (quote_spanned! {sp=> #c::types::Continue }).to_tokens(tokens);
+                    quote_spanned!(span=> #dialectic_crate::types::Continue).to_tokens(tokens);
                 }
             }
-            Type(s) => quote_spanned! {sp=> #s }.to_tokens(tokens),
+            Type(s) => quote_spanned!(span=> #s).to_tokens(tokens),
         }
     }
 }
