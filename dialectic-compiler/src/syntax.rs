@@ -38,8 +38,13 @@ pub enum Syntax {
     Choose(Vec<Spanned<Syntax>>),
     /// Syntax: `offer { _0 => ..., ... }`.
     Offer(Vec<Spanned<Syntax>>),
-    /// Syntax: `split { <- ..., -> ... }`.
-    Split(Box<Spanned<Syntax>>, Box<Spanned<Syntax>>),
+    /// Syntax: `split { -> ..., <- ... }`.
+    Split {
+        /// The transmit-only half.
+        tx_only: Box<Spanned<Syntax>>,
+        /// The receive-only half.
+        rx_only: Box<Spanned<Syntax>>,
+    },
     /// Syntax: `loop { ... }` or `'label loop { ... }`.
     Loop(Option<String>, Box<Spanned<Syntax>>),
     /// Syntax: `break` or `break 'label`.
@@ -153,10 +158,10 @@ impl Spanned<Syntax> {
                 let callee_node = callee.to_cfg(cfg, env).0;
                 Ir::Call(callee_node)
             }
-            Split(tx, rx) => {
-                let tx_node = tx.to_cfg(cfg, env).0;
-                let rx_node = rx.to_cfg(cfg, env).0;
-                Ir::Split(tx_node, rx_node)
+            Split { tx_only, rx_only } => {
+                let tx_only = tx_only.to_cfg(cfg, env).0;
+                let rx_only = rx_only.to_cfg(cfg, env).0;
+                Ir::Split { tx_only, rx_only }
             }
             Choose(choices) => {
                 let choice_nodes = choices
@@ -289,9 +294,9 @@ impl Spanned<Syntax> {
 
                 acc
             }
-            Split(tx, rx) => {
-                let tx = tx.to_token_stream_with(add_optional);
-                let rx = rx.to_token_stream_with(add_optional);
+            Split { tx_only, rx_only } => {
+                let tx = tx_only.to_token_stream_with(add_optional);
+                let rx = rx_only.to_token_stream_with(add_optional);
                 quote_spanned! {sp=> split { -> #tx, <- #rx, } }
             }
             Choose(choices) => {
@@ -342,7 +347,7 @@ impl Spanned<Syntax> {
                         // rather than required.
                         let ends_with_block = matches!(
                             &stmt.inner,
-                            Block(_) | Split(_, _) | Offer(_) | Choose(_) | Loop(_, _),
+                            Block(_) | Split { .. } | Offer(_) | Choose(_) | Loop(_, _),
                         );
 
                         if !(is_call_of_block || ends_with_block) || add_optional() {
@@ -428,7 +433,10 @@ mod tests {
                 },
                 "choose" => Choose(Arbitrary::arbitrary(g)),
                 "offer" => Offer(Arbitrary::arbitrary(g)),
-                "split" => Split(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g)),
+                "split" => Split {
+                    tx_only: Arbitrary::arbitrary(g),
+                    rx_only: Arbitrary::arbitrary(g),
+                },
                 "loop" => Loop(
                     <Option<Label>>::arbitrary(g).map(|l| l.0),
                     Box::new(Spanned::from(Block(Arbitrary::arbitrary(g)))),
@@ -451,11 +459,13 @@ mod tests {
             let v = match &self.inner {
                 Recv(_) | Send(_) | Type(_) | Break(None) | Continue(None) => vec![],
                 Call(callee) => callee.shrink().map(Call).collect(),
-                Split(tx, rx) => tx
+                Split { tx_only, rx_only } => tx_only
                     .shrink()
                     .flat_map(|tx_shrunk| {
-                        rx.shrink()
-                            .map(move |rx_shrunk| Split(tx_shrunk.clone(), rx_shrunk))
+                        rx_only.shrink().map(move |rx_shrunk| Split {
+                            tx_only: tx_shrunk.clone(),
+                            rx_only: rx_shrunk,
+                        })
                     })
                     .collect(),
                 Choose(choices) => choices.shrink().map(Choose).collect(),

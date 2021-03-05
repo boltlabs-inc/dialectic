@@ -38,8 +38,8 @@ mod kw {
 /// The direction of a split arm, either `->` or `<-`.
 #[derive(Clone, Copy, PartialEq)]
 enum Direction {
-    Outbound,
-    Inbound,
+    Transmit,
+    Receive,
 }
 
 /// A split arm, consisting of a [`Direction`] and a ([`Spanned`]) [`Syntax`] for the body of the
@@ -54,10 +54,10 @@ impl Parse for SplitArm {
         let lookahead = input.lookahead1();
         let dir = if lookahead.peek(Token![->]) {
             let _ = input.parse::<Token![->]>()?;
-            Direction::Outbound
+            Direction::Transmit
         } else if lookahead.peek(Token![<-]) {
             let _ = input.parse::<Token![<-]>()?;
-            Direction::Inbound
+            Direction::Receive
         } else {
             return Err(lookahead.error());
         };
@@ -272,19 +272,19 @@ impl Parse for Spanned<Syntax> {
 
             if split_arms.len() != 2 || split_arms[0].dir == split_arms[1].dir {
                 return Err(input.error(
-                    "split constructs must have exactly two arms, one outbound and one inbound",
+                    "split constructs must have exactly two arms, one Transmit and one inbound",
                 ));
             }
 
-            if split_arms[0].dir == Direction::Inbound {
+            if split_arms[0].dir == Direction::Receive {
                 split_arms.swap(0, 1);
             }
 
             Ok(Spanned {
-                inner: Syntax::Split(
-                    Box::new(split_arms[0].arm.clone()),
-                    Box::new(split_arms[1].arm.clone()),
-                ),
+                inner: Syntax::Split {
+                    tx_only: Box::new(split_arms[0].arm.clone()),
+                    rx_only: Box::new(split_arms[1].arm.clone()),
+                },
                 span: split_span,
             })
         } else if lookahead.peek(Token![loop]) || lookahead.peek(Lifetime) {

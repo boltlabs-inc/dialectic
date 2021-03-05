@@ -51,9 +51,14 @@ pub enum Ir {
     /// Like `Choose`, `Offer` nodes have a list of choices, and after scope resolution have no
     /// continuation.
     Offer(Vec<Option<Index>>),
-    /// `Split` nodes have a transmit-only half and a receive-only half, in that order. The nodes'
-    /// semantics are similar to `Call`
-    Split(Option<Index>, Option<Index>),
+    /// `Split` nodes have a transmit-only half and a receive-only half. The nodes' semantics are
+    /// similar to `Call`.
+    Split {
+        /// The transmit-only half.
+        tx_only: Option<Index>,
+        /// The receive-only half.
+        rx_only: Option<Index>,
+    },
     /// Early on, loops *may* have a body; however, after scope resolution, all loops should have
     /// their bodies be `Some`. So post scope resolution, this field may be unwrapped.
     Loop(Option<Index>),
@@ -226,7 +231,7 @@ impl Cfg {
                     // this is why we pass the `None` implicit continuation to `follow`
                     follow(None, *child);
                 }
-                Ir::Split(tx_only, rx_only) => {
+                Ir::Split { tx_only, rx_only } => {
                     // `split` expressions evaluate until done; there is no implicit continuation
                     // this is why we pass the `None` implicit continuation to `follow`
                     follow(None, *tx_only);
@@ -311,8 +316,8 @@ impl Cfg {
                         stack.extend(node.next);
                     }
                 }
-                Ir::Split(tx, rx) => {
-                    stack.extend(tx.iter().chain(rx));
+                Ir::Split { tx_only, rx_only } => {
+                    stack.extend(tx_only.iter().chain(rx_only));
 
                     if flow.is_passable(node_index) {
                         stack.extend(node.next);
@@ -362,7 +367,9 @@ impl Cfg {
 
             match &node.expr {
                 Ir::Loop(child) | Ir::Call(child) => stack.extend(*child),
-                Ir::Split(tx, rx) => stack.extend(tx.iter().chain(rx.iter())),
+                Ir::Split { tx_only, rx_only } => {
+                    stack.extend(tx_only.iter().chain(rx_only.iter()))
+                }
                 Ir::Choose(choices) | Ir::Offer(choices) => {
                     stack.extend(choices.iter().filter_map(Option::as_ref))
                 }
@@ -471,7 +478,7 @@ impl Cfg {
 
                     Target::Call(Rc::new(callee), Rc::new(cont))
                 }
-                Ir::Split(tx_only, rx_only) => {
+                Ir::Split { tx_only, rx_only } => {
                     let cont = generate_inner(cfg, errors, loop_env, node.next);
                     let (tx_only, rx_only) = (*tx_only, *rx_only);
                     let tx_target = generate_inner(cfg, errors, loop_env, tx_only);
