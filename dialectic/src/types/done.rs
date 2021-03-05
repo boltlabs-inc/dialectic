@@ -41,6 +41,7 @@ mod tests {
     #[test]
     fn done_in_seq() {
         use crate::prelude::*;
+        use crate::types::*;
 
         type S = Session! {
             loop {

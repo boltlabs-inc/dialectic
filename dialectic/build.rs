@@ -20,7 +20,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sessions = deep.chain(medium.chain(wide));
 
     // File header
-    writeln!(f, "#[allow(unused_imports)] use crate::prelude::*;")?;
+    writeln!(f, "#[deny(unused_imports)]")?; // test failure if we don't cover every constructor
+    writeln!(
+        f,
+        "use crate::types::{{Send, Recv, Choose, Offer, Call, Split, Loop, Continue, Done}};"
+    )?;
+    writeln!(f, "use crate::Session;")?;
+    writeln!(f, "#[allow(unused_imports)] use crate::unary::types::*;")?;
     writeln!(f, "use static_assertions::assert_impl_all;")?;
     writeln!(f)?;
 

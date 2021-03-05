@@ -1,4 +1,5 @@
 use dialectic::prelude::*;
+use dialectic::types::*;
 use static_assertions::assert_type_eq_all;
 
 struct Foo;

@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::types::Done;
 /// use dialectic::backend::mpsc;
 ///
 /// let _: (mpsc::Chan<Done>, mpsc::Chan<Done>) =
@@ -29,6 +30,7 @@ pub type Chan<P> = crate::Chan<P, Sender<'static>, Receiver<'static>>;
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::types::Done;
 /// use dialectic::backend::mpsc;
 ///
 /// let _: (mpsc::UnboundedChan<Done>, mpsc::UnboundedChan<Done>) =

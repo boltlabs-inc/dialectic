@@ -16,7 +16,7 @@ use std::marker;
 /// use dialectic::prelude::*;
 /// use dialectic::backend::mpsc;
 ///
-/// let (c1, c2) = <Send<String, Done>>::channel(mpsc::unbounded_channel);
+/// let (c1, c2) = <Session! { send String }>::channel(mpsc::unbounded_channel);
 /// // do something with these channels...
 /// ```
 ///
@@ -25,14 +25,14 @@ use std::marker;
 /// It is only possible to create a session-typed channel when the session type is valid. The
 /// following examples fail, for the reasons described:
 ///
-/// 1. The session type `Send<&'a str, Done>` for a non-static `'a` is not `'static`, but all
+/// 1. The session type `send &'a str` for a non-static `'a` is not `'static`, but all
 ///    session types must be `'static`:
 ///
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
 ///    # use dialectic::backend::mpsc;
 ///    fn something<'a>(_: &'a str) {
-///        let (c1, c2) = <Send<&'a str, Done>>::channel(mpsc::unbounded_channel);
+///        let (c1, c2) = <Session! { send &'a str }>::channel(mpsc::unbounded_channel);
 ///    }
 ///    ```
 ///
@@ -42,17 +42,22 @@ use std::marker;
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
 ///    # use dialectic::backend::mpsc;
+///    use dialectic::types::{Loop, Continue};
+///    use dialectic::unary::types::*;
 ///    let (c1, c2) = <Loop<Continue<_1>>>::channel(mpsc::unbounded_channel);
 ///    ```
 ///
-/// 3. The session type `Loop<Continue>` is not `Actionable` because it is an "unproductive"
+///    Note that you cannot write out an ill-scoped session type using the
+///    [`Session!`](crate::Session@macro) macro, because it will throw an error if you try.
+///
+/// 3. The session type `loop {}` is not `Actionable` because it is an "unproductive"
 ///    infinite loop, where no matter how many times you loop, there will never be an available
 ///    action to perform on the channel:
 ///
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
 ///    # use dialectic::backend::mpsc;
-///    let (c1, c2) = <Loop<Continue>>::channel(mpsc::unbounded_channel);
+///    let (c1, c2) = <Session! { loop {} }>::channel(mpsc::unbounded_channel);
 ///    ```
 pub trait Session
 where
@@ -91,7 +96,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = Done::channel(mpsc::unbounded_channel);
+    /// let (c1, c2) = <Session! { /* ... */ }>::channel(mpsc::unbounded_channel);
     /// # }
     /// ```
     fn channel<Tx, Rx>(
@@ -117,7 +122,7 @@ where
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let (c1, c2) = Done::bichannel(
+    /// let (c1, c2) = <Session! { /* ... */ }>::bichannel(
     ///     mpsc::unbounded_channel,
     ///     || mpsc::channel(1),
     /// );
@@ -149,7 +154,7 @@ where
     /// # #[tokio::main]
     /// # async fn main() {
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let c = Done::wrap(tx, rx);
+    /// let c = <Session! { /* ... */ }>::wrap(tx, rx);
     /// c.close();
     /// # }
     /// ```
@@ -179,7 +184,7 @@ where
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let (output, ends) = Done::over(tx, rx, |chan| async move {
+    /// let (output, ends) = <Session! { /* ... */ }>::over(tx, rx, |chan| async move {
     ///     chan.close();
     ///     Ok::<_, mpsc::Error>("Hello!".to_string())
     /// }).await?;
@@ -198,11 +203,11 @@ where
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use SessionIncomplete::BothHalves;
-    /// use IncompleteHalf::Unfinished;
+    /// use dialectic::SessionIncomplete::BothHalves;
+    /// use dialectic::IncompleteHalf::Unfinished;
     ///
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let (_, ends) = <Send<String, Done>>::over(tx, rx, |chan| async move {
+    /// let (_, ends) = <Session! { send String }>::over(tx, rx, |chan| async move {
     ///     Ok::<_, mpsc::Error>(())
     /// }).await?;
     ///
@@ -221,15 +226,15 @@ where
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use std::sync::{Arc, Mutex};
     ///
-    /// use SessionIncomplete::BothHalves;
-    /// use IncompleteHalf::Unclosed;
+    /// use dialectic::SessionIncomplete::BothHalves;
+    /// use dialectic::IncompleteHalf::Unclosed;
     ///
     /// // We'll put the `Chan` here so it outlives the closure. **Don't do this!**
     /// let hold_on_to_chan = Arc::new(Mutex::new(None));
     /// let hold = hold_on_to_chan.clone();
     ///
     /// let (tx, rx) = mpsc::unbounded_channel();
-    /// let (_, ends) = <Send<String, Done>>::over(tx, rx, |chan| async move {
+    /// let (_, ends) = <Session! { send String }>::over(tx, rx, |chan| async move {
     ///     *hold.lock().unwrap() = Some(chan);
     ///     Ok::<_, mpsc::Error>(())
     /// }).await?;

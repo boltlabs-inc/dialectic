@@ -105,6 +105,7 @@ pub use dialectic_macro::{offer, Session};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;
 
+#[allow(unused_imports)] // If no backends are feature-enabled, don't warn
 use backend::*;
 #[allow(unused_imports)] // For documentation linking
 use prelude::*;
@@ -128,19 +129,11 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::session::Session;
     #[doc(no_inline)]
-    pub use crate::tuple::{List, Tuple};
-    #[doc(no_inline)]
-    pub use crate::types::{Call, Choose, Continue, Done, Loop, Offer, Recv, Send, Split};
-    #[doc(no_inline)]
     pub use crate::unary::constants::*;
     #[doc(no_inline)]
-    pub use crate::unary::types::*;
+    pub use crate::Chan;
     #[doc(no_inline)]
-    pub use crate::unary::{LessThan, Unary, S, Z};
+    pub use call_by::{Mut, Ref, Val};
     #[doc(no_inline)]
-    pub use crate::{offer, Branches, Chan, IncompleteHalf, SessionIncomplete, Unavailable};
-    #[doc(no_inline)]
-    pub use call_by::{CallBy, CallingConvention, Mut, Ref, Val};
-    #[doc(no_inline)]
-    pub use dialectic_macro::Session;
+    pub use dialectic_macro::{offer, Session};
 }

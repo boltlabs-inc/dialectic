@@ -8,7 +8,7 @@ pub mod types;
 /// # Examples
 ///
 /// ```
-/// use dialectic::prelude::Z;
+/// use dialectic::unary::Z;
 ///
 /// let zero: Z = Z;
 /// ```
@@ -20,7 +20,7 @@ pub struct Z;
 /// # Examples
 ///
 /// ```
-/// use dialectic::prelude::{S, Z};
+/// use dialectic::unary::{S, Z};
 ///
 /// let one: S<Z> = S(Z);
 /// ```
@@ -34,6 +34,7 @@ pub struct S<N>(pub N);
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::unary::{types::*, Unary};
 ///
 /// assert_eq!(_0::VALUE, 0);
 /// assert_eq!(_1::VALUE, 1);
@@ -62,6 +63,7 @@ impl<N: Unary> Unary for S<N> {
 ///
 /// ```
 /// use dialectic::prelude::*;
+/// use dialectic::unary::{types::*, LessThan};
 ///
 /// fn ok() where _1: LessThan<_2> {}
 /// ```
@@ -70,6 +72,7 @@ impl<N: Unary> Unary for S<N> {
 ///
 /// ```compile_fail
 /// # use dialectic::prelude::*;
+/// # use dialectic::unary::{types::*, LessThan};
 /// #
 /// fn bad() where _2: LessThan<_1> {}
 /// ```
@@ -79,6 +82,7 @@ impl<N: Unary> Unary for S<N> {
 ///
 /// ```compile_fail
 /// # use dialectic::prelude::*;
+/// # use dialectic::unary::types::*;
 /// #
 /// fn bad() where _100: LessThan<_100> {}
 /// ```
@@ -98,7 +102,8 @@ impl<N: Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::unary::*;
+/// use dialectic::unary::Compare;
+/// use dialectic::unary::types::*;
 /// use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(<(_0, _1) as Compare<u8, u16, u32>>::Result, u8);
@@ -137,6 +142,7 @@ impl<N: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> f
 /// ```
 /// use dialectic::prelude::*;
 /// use dialectic::unary::*;
+/// use dialectic::unary::types::*;
 /// use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(<(_1, _1) as Add>::Result, _2);
