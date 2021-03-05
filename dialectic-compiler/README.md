@@ -1,7 +1,7 @@
 # Dialectic session type macro compiler
 
 
-Contains functionality for compiling the language of Dialectic's `Session!` macro into an actual Rust type. This is done via transforming the syntax gradually across three representations:
+Contains functionality for compiling the language of Dialectic's `Session!` macro into an actual Rust type. This crate is considered an internal implementation detail and none of its API is subject to semantic versioning rules. The compilation process is done via transforming the syntax gradually across three representations:
 
 - [`syntax::Syntax`] - the "surface-level" abstract syntax tree. This is what gets parsed from the tokenstream provided by the proc macro interface.
 - [`cfg::Cfg`] - a control flow graph representation, which is gradually transformed by semantics-preserving passes until it takes on a form more suitable for emitting to the target.
@@ -13,7 +13,7 @@ After parsing, the `Syntax` AST only really undergoes one transformation, when i
 
 ## Conversion to CFG - [`Syntax::to_cfg`]
 
-During this conversion, we resolve labels in the AST and ensure that all `break` and `continue` constructs refer to valid nodes and emit errors for malformed loop nodes and such.
+During this conversion, we resolve labels in the AST and ensure that all `break` and `continue` constructs refer to valid nodes and emit errors for malformed loop nodes and such. Also, please note this method is often referred to as `Syntax::to_cfg` but the method is *actually* implemented on `Spanned<Syntax>`.
 
 ### Errors
 
@@ -48,7 +48,7 @@ Most other passes will make use these assumptions.
 
 The scope resolution algorithm looks something like this:
 
-```text
+```rust
 fn resolve_scopes(implicit_scope, node) {
     if the node is a Recv, Send, Type, Break, Continue, Call, Split, or Error {
         // The implicit continuation of the callee of a Call node or arm of a Split node is always
@@ -121,7 +121,7 @@ The dead core reporting pass itself is responsible for running the flow analysis
 
 The dead code reporting algorithm looks something like this:
 
-```text
+```rust
 fn report_dead_code(node) {
     // We want to follow every child node except for the node's continuation. If we did follow the
     // continuation, we would end up reporting every unreachable node instead of just the
@@ -165,7 +165,7 @@ For most nodes, generating the corresponding target code is trivial - `Send`, `R
 
 The codegen algorithm looks something like this:
 
-```text
+```rust
 fn generate_target(loop_env, maybe_node) {
     if maybe_node is None {
         // If the node is empty, that's the "done" continuation.
