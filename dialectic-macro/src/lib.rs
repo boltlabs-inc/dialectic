@@ -43,8 +43,8 @@ In the below examples, all code blocks import:
 use static_assertions::assert_type_eq_all as type_eq;
 use dialectic::prelude::*;
 
-// Normally you don't need to import these, because they are only useful when writing session types
-// directly, as opposed to when using the `Session!` macro:
+// Normally you don't need to import these, because they are only useful
+// when writing session types directly, not when using the `Session!` macro:
 use dialectic::types::*;
 use dialectic::unary::types::*;
 ```

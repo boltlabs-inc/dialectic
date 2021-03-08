@@ -4,27 +4,14 @@
 
 The first step to communicating is figuring out what you mean to say.
 
-This crate provides a concise [type-level language for expressing session types](crate::types).
-The session type attached to a wrapped communications channel indicates precisely which actions
-are available for each end of the channel.
+This crate provides a concise domain specific language for expressing session types: the
+[`Session!`](crate::Session@macro) macro. The session type attached to a wrapped communications
+channel indicates precisely which actions are available for each end of the channel. Internally,
+Dialectic uses a set of [ordinary Rust types](crate::types) to represent session types, but it's
+much easier to understand a protocol (especially a larger one) described in terms of the
+[`Session!](crate::Session@macro) macro.
 
 Let's write our first session type:
-
-```
-use dialectic::prelude::*;
-
-type JustSendOneString = Send<String, Done>;
-```
-
-This type specifies a very simple protocol: "send a string, then finish." The first argument to
-`Send` is the type sent, and the second is the rest of the protocol, which in this case is the
-empty protocol [`Done`].
-
-While the types needed to express simple session types like the above are easy enough to read,
-they can become quite difficult to parse for more complex sessions. For this reason, Dialectic
-has the [`Session!`](crate::Session@macro) macro, which defines a simple domain specific language
-for specifying session types. We'll use both the `Session!` macro and the raw session types in
-this tutorial, to help the reader understand the relationship between the two.
 
 ```
 # use dialectic::prelude::*;
@@ -33,17 +20,11 @@ type JustSendOneString = Session! {
 };
 ```
 
+This type specifies a very simple protocol: "send a string, then finish."
+
 Every session type has a [`Dual`](crate::Session::Dual), which describes what the other end of
-the channel must do to follow the channel's protocol; if one end [`Send`]s, the other end must
-[`Recv`]:
-
-```
-# use dialectic::prelude::*;
-# use static_assertions::assert_type_eq_all;
-assert_type_eq_all!(<Send<String, Done> as Session>::Dual, Recv<String, Done>);
-```
-
-And now, expressing the same thing in terms of the `Session!` macro:
+the channel must do to follow the channel's protocol; if one end `send`s, the other end must
+`recv`:
 
 ```
 # use dialectic::prelude::*;
@@ -66,7 +47,6 @@ is built on [`tokio::sync::mpsc`]. However, the mechanism for wrapping underlyin
 extensible, meaning you can choose your own transport if you want.
 
 ```
-# use dialectic::prelude::*;
 use dialectic::backend::mpsc;
 ```
 
@@ -79,7 +59,7 @@ underlying channel type.
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 ```
 
@@ -89,7 +69,7 @@ to the given session type, and `c2`'s type corresponds to its dual:
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 let _: Chan<Session! { send String }, mpsc::Sender, mpsc::Receiver> = c1;
 let _: Chan<Session! { recv String }, mpsc::Sender, mpsc::Receiver> = c2;
@@ -103,7 +83,7 @@ runtime, provided the underlying transport channel is of a compatible type.
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -139,7 +119,6 @@ to a new channel.
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 type ParityOfLength = Session! {
@@ -202,14 +181,19 @@ channel from above:
 type JustSendOneString = Session! { send String };
 ```
 
-Trying to do any of the below things results in a compile-time type error (edited for brevity).
+Trying to do any of the below things results in a compile-time type error (edited below for
+brevity). Note that the errors below are in terms of the underlying [session types](crate::types)
+to which the [`Session!`](crate::Session@macro) macro compiles its input. The types in these error
+messages can be quite long, as they contain the full session type describing the channel. Debugging
+such errors, you usually don't have to understand the whole verbose session type, though. You just
+need to see which part doesn't match. Like so:
 
 If we try to send on the end of the channel that's meant to receive...
 
 ```compile_fail
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -235,7 +219,7 @@ If we try to receive the wrong type of thing...
 ```compile_fail
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -260,7 +244,7 @@ of messages. If we try to send twice in a row...
 ```compile_fail
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
@@ -285,28 +269,13 @@ error[E0271]: type mismatch resolving `<Done as Session>::Action == Send<_, _>`
 
 # Branching out
 
-Most interesting protocols don't just consist of linear sequences of [`Send`]s and [`Recv`]s.
+Most interesting protocols don't just consist of linear sequences of `send`s and `recv`s.
 Sometimes, one party offers the other a choice of different ways to proceed, and the other
 chooses which path to take.
 
-In Dialectic, this possibility is represented by the [`Offer`] and [`Choose`] types. Each is
-parameterized by a *tuple* of session types representing, respectively, the choices offered by
-one end of the channel, or the choices available to choose from.
-
-`Offer` is dual to `Choose` if the choices offered are dual to the choices available to choose
-from:
-
-```
-# use dialectic::prelude::*;
-# use static_assertions::assert_type_eq_all;
-type P = Offer<(Send<String, Done>, Recv<i64, Done>)>;
-type Q = Choose<(Recv<String, Done>, Send<i64, Done>)>;
-
-assert_type_eq_all!( <P as Session>::Dual, Q);
-```
-
-To express these types in the [`Session!`](crate::Session@macro) macro, we can use the `offer`
-and `choose` keywords:
+In Dialectic, this possibility is represented by the [`Session!`](crate::Session@macro) macro's
+`offer` and `choose` keywords. Each is parameterized by an ordered list of session types, each
+corresponding to one possible next session.
 
 ```
 # use dialectic::prelude::*;
@@ -328,19 +297,19 @@ type Q = Session! {
 assert_type_eq_all!( <P as Session>::Dual, Q);
 ```
 
-Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the [`Send`] and
-[`Recv`] session types, the [`choose`](Chan::choose) method and [`offer!`](crate::offer) macro
-enact the [`Choose`] and [`Offer`] session types.
+Just as the [`send`](Chan::send) and [`recv`](Chan::recv) methods enact the `send` and
+`recv` session types, the [`choose`](Chan::choose) method and [`offer!`](crate::offer) macro
+enact the `choose` and `offer` session types.
 
 Suppose we want to offer a choice between two protocols: either sending a single integer
-(`Send<i64, Done>`) or receiving a string (`Recv<String, Done>`). Correspondingly, the other end
+(`send i64`) or receiving a string (`recv String`). Correspondingly, the other end
 of the channel must indicate a choice of which protocol to follow, and we need to handle the
 result of either selection by enacting the protocol chosen.
 
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type JustSendOneString = Send<String, Done>;
+# type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -398,17 +367,11 @@ and the corresponding constants [`_0`](crate::unary::constants::_0),
 While some protocols can be described as a finite sequence of operations, many contain the
 possibility of loops. Consider things like retrying after an invalid response, sending an
 unbounded stream of messages, or providing a persistent connection for multiple queries. All
-these can be modeled with session types by introducing *recursion*.
+these can be modeled with session types by introducing *iteration*.
 
 Suppose we want to send a stream of as many integers as desired, then receive back their sum. We
-could describe this protocol using the [`Loop`] and [`Continue`] types:
-
-```
-# use dialectic::prelude::*;
-type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
-```
-
-In terms of the [`Session!`](crate::Session@macro) macro, this would be:
+could describe this protocol using the `loop` and `break` keywords in the
+[`Session!`](crate::Session@macro) macro:
 
 ```
 # use dialectic::prelude::*;
@@ -425,9 +388,7 @@ type QuerySum = Session! {
 };
 ```
 
-**Notice:** When working with session types directly, we have to *explicitly* use [`Continue`]
-to reiterate the [`Loop`]: even inside a [`Loop`], [`Done`] means that the session is over.
-However, in the [`Session!`](crate::Session@macro) macro, `loop`s repeat themselves by default,
+**Notice:** in the [`Session!`](crate::Session@macro) macro, `loop`s repeat themselves by default,
 unless explicitly broken by a `break` statement (just like in Rust!).
 
 By taking the dual of each part of the session type, we know the other end of this channel
@@ -436,7 +397,17 @@ will need to implement:
 ```
 # use dialectic::prelude::*;
 # use static_assertions::assert_type_eq_all;
-# type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
+# type QuerySum = Session! {
+#     loop {
+#         choose {
+#             _0 => send i64,
+#             _1 => {
+#                 recv i64;
+#                 break;
+#             }
+#         }
+#     }
+# };
 type ComputeSum = Session! {
     loop {
         offer {
@@ -453,16 +424,35 @@ assert_type_eq_all!(<QuerySum as Session>::Dual, ComputeSum);
 ```
 
 We can implement this protocol by following the session types. When the session type of a
-[`Chan`] hits a [`Continue`] point, it jumps back to the type of the [`Loop`] to which that
-[`Continue`] refers. In this case, for example, immediately after the querying task sends an
-integer, the resultant channel will have the session type `Choose<(Send<i64, Continue>,
-Recv<i64, Done>)>` once more.
+[`Chan`] hits the end of a `loop`, it jumps back to the beginning of that loop. In this case,
+for example, immediately after the querying task sends an integer, the resultant channel will have
+the session type `QuerySum` again.
 
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-# type QuerySum = Loop<Choose<(Send<i64, Continue>, Recv<i64, Done>)>>;
-# type ComputeSum = Loop<Offer<(Recv<i64, Continue>, Send<i64, Done>)>>;
+# type QuerySum = Session! {
+#     loop {
+#         choose {
+#             _0 => send i64,
+#             _1 => {
+#                 recv i64;
+#                 break;
+#             }
+#         }
+#     }
+# };
+# type ComputeSum = Session! {
+#     loop {
+#         offer {
+#             _0 => recv i64,
+#             _1 => {
+#                 send i64;
+#                 break;
+#             }
+#         }
+#     }
+# };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #
@@ -505,14 +495,8 @@ is in scope for the next iteration.
 
 ## Nested loops
 
-If the protocol contains nested loops, you can specify which nested loop to continue with  using
-the optional parameter of `Continue`. By default, `Continue` jumps to the innermost loop;
-however, `Continue<_1>` jumps to the second-innermost, `Continue<_2>` the third-innermost, etc.
-The types [`_0`](type@_0), [`_1`](type@_1), [`_2`](type@_2), etc. are imported by default in the
-[`dialectic::prelude::*`](crate::prelude) namespace.
-
-In the [`Session!`](crate::Session@macro) macro, loops may optionally be *labelled*, using
-identical syntax to Rust. Rather than referring to loops by index, we can `break` or `continue`
+If the protocol contains nested loops, you can specify which nested loop to continue with using
+identical syntax to Rust: *loop labels*. Labeling a loop enables us to `break` or `continue` to
 a loop using its label:
 
 ```
@@ -535,45 +519,31 @@ type LabelExample = Session! {
         recv i64;
     }
 };
-
-assert_type_eq_all!(
-    LabelExample,
-    Loop<Send<i64, Loop<Recv<bool, Offer<(Done, Continue<_1>, Recv<i64, Continue<_1>>, Continue, Send<String, Send<bool, Continue>>)>>>>>,
-);
 ```
-
-## Automatic looping
-
-You may have noticed how in the example above, [`choose`](Chan::choose) can be called on `c1`
-even though the outermost part of `c1`'s session type `QuerySum` would seem not to begin with
-[`Choose`]. This is true in general: if the session type of a [`Chan`] is a [`Loop`] whose
-internal session type would make a given operation valid, that operation is valid on the
-[`Chan`]. In the instance above, calling [`choose`](Chan::choose) on a [`Chan`] with session
-type `Loop<Choose<...>>` works, no matter how many `Loop`s enclose the `Choose`.
-
-This behavior is enabled by the [`Session`] trait, which in addition to defining the
-[`Dual`](crate::Session::Dual) of each session type, defines what the next "real"
-[`Action`](crate::Session::Action) on a session type is. For most session types, the "real
-action" is that session type itself. However, for [`Loop`], the next real action is whatever
-follows entering the loop(s), with the loop body unrolled by one iteration.
 
 # Sequencing and Modularity
 
-The penultimate session type provided by Dialectic is the [`Call`] type, which permits a modular
+The penultimate session type provided by Dialectic is the `call` type, which permits a modular
 way of constructing session types and their implementations. At first, you will likely not need
-to use [`Call`]; however, as you build larger programs, it makes it a lot easier to split them up
+to use `call`; however, as you build larger programs, it makes it a lot easier to split them up
 into smaller, independent specifications and components.
 
-So, what does it do? A session type `Call<P, Q>` means "run the session `P`, then once `P` is `Done`, run the session `Q`". You can think of it like the `;` in Rust, which concatenates separate statements. In smaller protocols, you don't need to use [`Call`] to sequence operations, because all the session type primitives (with the exception of [`Split`]) take arguments indicating "what to do next": we don't need to write `Call<Send<String, Done>, Recv<String, Done>>`, because `Send<String, Recv<String, Done>>` works just as well.
+So, what does it do? A session type `call P` means "run the session `P`, then once `P` is `Done`,
+continue with whatever is next". In smaller protocols, you likely don't need to use `call` to
+sequence operations; instead, the idiomatic thing to do is to use `;` to separate sequential parts
+of a session.
 
-[`Call`] becomes useful however when you already have a subroutine that implements *part of* a
-session, and you'd like to use it in a larger context. Imagine, for example, that you had
-already written the following:
+However, `call` becomes useful when you already have a subroutine that implements *part of* a
+session, and you'd like to use it in a larger context without altering it. Imagine, for example,
+that you had already written the following:
 
 ```
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
-type Query = Session! { send String; recv String };
+type Query = Session! {
+    send String;
+    recv String;
+};
 
 async fn query(
     question: String,
@@ -587,12 +557,12 @@ async fn query(
 ```
 
 Then, at some later point in time, you might realize you need to implement a protocol that makes
-several calls to `Query` in a loop. Unfortunately, the type of `Query` ends with [`Done`], and
-its implementation `query` (correctly) closes the [`Chan`] at the end. Without
+several calls to `Query` in a loop. Unfortunately, the function `query` as written doesn't return
+a channel as output; instead, it (correctly) closes the channel after finishing the session. Without
 [`call`](Chan::call), you would have to modify both the type `Query` and the function `query`,
 just to let them be called from a larger context.
 
-Instead of re-writing both the specification and the implementation, we can use [`Call`] to
+Instead of re-writing both the specification and the implementation, we can use `call` to
 integrate `query` as a subroutine in a larger protocol, without changing its type or definition.
 All we need to do is use the [`call`](Chan::call) method to call it as a subroutine on the
 channel.
@@ -601,7 +571,10 @@ channel.
 # use dialectic::prelude::*;
 # use dialectic::backend::mpsc;
 # use static_assertions::assert_type_eq_all;
-# type Query = Send<String, Recv<String, Done>>;
+# type Query = Session! {
+#     send String;
+#     recv String;
+# };
 #
 # async fn query(
 #     question: String,
@@ -622,12 +595,6 @@ type MultiQuery = Session! {
     }
 };
 
-// (here's how MultiQuery compiles to a session type)
-assert_type_eq_all!(
-    MultiQuery,
-    Loop<Choose<(Done, Call<Query, Continue>)>>,
-);
-
 async fn query_all(
     mut questions: Vec<String>,
     mut chan: mpsc::Chan<MultiQuery>
@@ -646,14 +613,15 @@ async fn query_all(
 ```
 
 Furthermore, [`call`](Chan::call) can be used to implement **context free session types**, where
-the sub-protocol in the first half `P` of `Call<P, Q>` uses [`Continue`] to recur back outside
-the [`Call`] itself. This allows you to define recursive protocols that can be shaped like any
-arbitrary tree. For more details, see the documentation for [`call`](Chan::call) and the [`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples/stack.rs).
+the sub-protocol `P` uses `continue` to recur back outside the `call` itself. This allows you to
+define recursive protocols that can be shaped like any arbitrary tree. For more details, see the
+documentation for [`call`](Chan::call) and the
+[`stack` example](https://github.com/boltlabs-inc/dialectic/tree/main/examples/stack.rs).
 
 ## Errors in subroutines (what not to do)
 
-In order for the [`call`](Chan::call) method to preserve the validity of the session type `Call<P,
-Q>`, we need to make sure that the subroutine executing `P` **finishes** the session `P` by
+In order for the [`call`](Chan::call) method to preserve the validity of the session type
+`call P; Q`, we need to make sure that the subroutine executing `P` **finishes** the session `P` by
 driving the channel to the `Done` session type. If we didn't check this, it would be possible to
 drop the channel early in the subroutine, thus allowing steps to be skipped in the protocol. The
 [`call`](Chan::call) method solves this problem by returning a pair of the subroutine's return
@@ -661,6 +629,8 @@ value and a [`Result`] which is a [`Chan`] for `Q` if `P` was completed successf
 [`SessionIncomplete`] error if not. It's almost always a programmer error if you get a
 [`SessionIncomplete`] error, so it's usually the right idea to [`unwrap`](Result::unwrap) it and
 proceed without further fanfare.
+
+[`SessionIncomplete`]: crate::SessionIncomplete
 
 💡 **A useful pattern:** If you make sure to *always* call [`close`](Chan::close) on the channel
 before the subroutine's future returns, you can be guaranteed that such errors are impossible,
@@ -672,12 +642,12 @@ Traditional presentations of session types do not allow the channel to be used c
 send and receive at the same time. Some protocols, however, can be made more efficient by
 executing certain portions of them in parallel.
 
-Dialectic incorporates this option into its type system with the [`Split`] type. A channel with
-a session type of `Split<P, Q, R>` can be [`split`](Chan::split) into a send-only end with the
+Dialectic incorporates this option into its type system with the `split` keyword. A channel with
+a session type of `split { -> P, <- Q }` can be [`split`](Chan::split) into a send-only end with the
 session type `P` and a receive-only end with the session type `Q`, which can then be used
 concurrently. Just as in [`call`](Chan::call), once the given closure finishes using the `P` and
-`Q` channels until their sessions are both [`Done`], [`split`](Chan::split) returns a channel for
-the session type `R`, which can be used for both sending and receiving.
+`Q` channels until their sessions are both done, [`split`](Chan::split) returns a channel for
+whatever session type followed the `split`, which can again be used for both sending and receiving.
 
 In the example below, the two ends of a channel **concurrently swap** a
 `Vec<usize>` and a `String`. If this example were run over a network and these values were
@@ -685,24 +655,17 @@ large, this could represent a significant reduction in runtime.
 
 ```
 # use dialectic::prelude::*;
-# use static_assertions::assert_type_eq_all;
 type SwapVecString = Session! {
     split {
         -> send Vec<usize>,
         <- recv String,
     }
 };
-
-assert_type_eq_all!(
-    SwapVecString,
-    Split<Send<Vec<usize>, Done>, Recv<String, Done>, Done>,
-);
 ```
 
-The dual of `Split<P, Q, R>` is `Split<Q::Dual, P::Dual, R::Dual>`. Notice that `P` and `Q`
-switch places! This is because the left-hand `P` is always the send-only session, and the
-right-hand `Q` is always the receive-only session. This is easier to keep track of using the
-[`Session!`](crate::Session@macro) macro:
+The dual of `split { -> P, <- R }` is `split { -> R::Dual, <- P::Dual }`. Notice that `P` and `Q`
+switch places! This is because the `->` side of the `split` is always the send-only session, and the
+`<-` side is always the receive-only session:
 
 ```
 # use dialectic::prelude::*;
@@ -788,11 +751,11 @@ c2.split(|tx, rx| async move {
 # }
 ```
 
-When using [`Split`], keep in mind that it is subject to some limitations in addition to the
-caveats of [`Call`], of which it is a close relative:
+When using `split`, keep in mind that it is subject to some limitations in addition to the
+caveats of `call`, of which it is a close relative:
 
-- It's a type error to [`Send`] or [`Choose`] on the receive-only end.
-- It's a type error to [`Recv`] or [`Offer`] on the transmit-only end.
+- It's a type error to [`send`](Chan::send) or [`choose`](Chan::choose) on the receive-only end.
+- It's a type error to [`recv`](Chan::recv) or [`offer`](crate::offer) on the transmit-only end.
 - It's a runtime [`SessionIncomplete`] error if you don't drop both the `tx` and `rx` ends
   before the future completes. This is subject to the same behavior as in [`call`](Chan::call),
   described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).

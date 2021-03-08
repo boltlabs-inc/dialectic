@@ -48,32 +48,35 @@ where protocols might be violated and connections might be dropped.
 
 # Quick reference
 
-The [`prelude`] module exports all the relevant constructs for writing programs with Dialectic.
-Most programs using Dialectic should `use dialectic::prelude::*;`.
+The **[`prelude`]** module exports most of the relevant constructs for writing programs with
+Dialectic. Most programs using Dialectic should `use dialectic::prelude::*;`.
 
 The **[tutorial]** covers all the constructs necessary to write session-typed programs with
 Dialectic. A quick summary:
 
-- To make a pair of dual [`Chan`]s for a session type `P`: [`let (c1, c2) = P::channel(||
-  {...})`](Session::channel) with some closure that builds a unidirectional underlying channel.
-- To wrap an existing sender `tx` and receiver `rx` in a single [`Chan`] for `P`: [`let c =
-  P::wrap(tx, rx)`](Session::wrap).
+- To specify a session type, use the [`Session!`](crate::Session@macro) macro, which defines a
+  domain-specific language for session types. It compiles to session types defined in the
+  [`types`](crate::types) module, which most users will never need to use directly.
+- To construct a session-typed [`Chan`], use the methods on the [`Session`](crate::Session@trait)
+  trait, such as [`Session::channel`] or [`Session::wrap`], depending on whether you need to create
+  both sides of a channel or just one side, respectively.
 - Backend transports suitable for being wrapped in a [`Chan`] are provided in [`backend`], along
   with the [`Transmit`] and [`Receive`] traits necessary to implement your own.
 
 Once you've got a channel, here's what you can do:
 
-| Session Type (`S`) | Channel Operation(s) (on a channel `c: Chan<S, _, _>`) | Dual Type (`S::Dual`) |
-| :----------- | :------------------- | :-------- |
-| [`Send<T, P>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
-| [`Recv<T, P>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
-| [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Duals>`](Offer) |
-| [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Duals>`](Choose) |
-| [`Split<P, Q, R>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `R`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual, R::Dual>`](Split) |
-| [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
-| [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the `N`th-innermost [`Loop`] | [`Continue<N>`](Continue) |
-| [`Call<P, Q>`](Call) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.call(&#124;c&#124; async move { ... }).await?;</code>](Chan::call) | [`Call<P::Dual, Q::Dual>`](Call) |
-| [`Done`] | Closes the channel, dropping its receive/transmit ends: [`c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
+| [`Session!`](crate::Session@macro) Macro Invocation | Session Type (`S`) | Channel Operation(s)<br>(on a channel `c: Chan<S, _, _>`) | Dual Type (`S::Dual`) |
+| :--------------------| :----------- | :------------------- | :-------- |
+| [`send T; ...`](macro@crate::Session#the-send-and-recv-keywords) | [`Send<T, P>`](Send) | Given some `t: T`, returns a new `c`:<br>[`let c = c.send(t).await?;`](Chan::send) | [`Recv<T, P::Dual>`](Recv) |
+| [`recv T; ...`](macro@crate::Session#the-send-and-recv-keywords) | [`Recv<T, P>`](Recv) | Returns some `t: T` and a new `c`:<br>[`let (t, c) = c.recv().await?;`](Chan::recv) | [`Send<T, P::Dual>`](Send) |
+| [`choose { _0 => ..., _1 => ..., ... }; ...`](macro@crate::Session#the-offer-and-choose-keywords) | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Duals>`](Offer) |
+| [`offer { _0 => ..., _1 => ..., ... }; ...`](macro@crate::Session#the-offer-and-choose-keywords) | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Duals>`](Choose) |
+| [`loop { ... }; ...`<br>or<br>`'label: loop { ... }; ...`](macro@crate::Session#the-loop-break-and-continue-keywords) | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
+| [`continue;`<br>or<br>`continue 'label;`](macro@crate::Session#the-loop-break-and-continue-keywords) | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the referred-to loop | [`Continue<N>`](Continue) |
+| [`break;`<br>or<br>`break 'label;`](macro@crate::Session#the-loop-break-and-continue-keywords) | Whatever follows the `loop` | Whatever operations are available after the end of the `loop` statement | The dual of whatever follows the `loop` |
+| [`call { ... }; ...`<br>or<br>`call S; ...`](macro@crate::Session#the-call-keyword) | [`Call<P, Q>`](Call) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.call(&#124;c&#124; async move { ... }).await?;</code>](Chan::call) | [`Call<P::Dual, Q::Dual>`](Call) |
+| [`split { -> ..., <- ... }; ...`](macro@crate::Session#the-split-keyword) | [`Split<P, Q, R>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `R`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual, R::Dual>`](Split) |
+| (empty macro invocation) | [`Done`] | Closes the channel, dropping its receive/transmit ends: [`c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
 */
 
 #![recursion_limit = "256"]
@@ -83,6 +86,7 @@ Once you've got a channel, here's what you can do:
 #![warn(unused_qualifications, unused_results)]
 #![warn(future_incompatible)]
 #![warn(unused)]
+// Documentation configuration
 #![forbid(broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -109,6 +113,8 @@ pub use session::Session;
 use backend::*;
 #[allow(unused_imports)] // For documentation linking
 use prelude::*;
+#[allow(unused_imports)] // For documentation linking
+use types::*;
 
 /// This is a dummy module for the offer/Session proc macros to refer to from within dialectic to
 /// ensure that the same path can resolve to the same types in different scopes (the scope of being

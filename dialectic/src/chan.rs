@@ -315,7 +315,9 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     }
 
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
-    /// by sending a number which protocol to proceed with.
+    /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
+    /// all the possible channel types which could be returned, which must be eliminated using
+    /// [`case`](Branches::case).
     ///
     ///💡 **Where possible, prefer the [`offer!`](crate::offer) macro**. This has the benefit of
     /// ensuring at compile time that no case is left unhandled; it's also more succinct.
@@ -797,8 +799,9 @@ where
 /// To find out which protocol was selected by the other party, use [`Branches::case`] (the analogue
 /// to a `match` statement on [`Branches`]).
 ///
-/// 💡 When possible, prefer the [`offer!`] macro over using [`Branches`] and
-/// [`case`](Branches::case), as it guarantees exhaustiveness and is more concise.
+/// **💡 When possible, prefer the [`offer!`] macro over using [`Branches`] and
+/// [`case`](Branches::case).** It guarantees exhaustiveness, and is more concise, readable, and
+/// asymptotically efficient.
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
