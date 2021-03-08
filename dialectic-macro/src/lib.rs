@@ -1,12 +1,12 @@
 #![forbid(broken_intra_doc_links)]
 
 extern crate proc_macro;
-use lazy_static::lazy_static;
-use proc_macro2::{Span, TokenStream};
-use quote::{quote, ToTokens, TokenStreamExt};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens, TokenStreamExt};
+use std::env;
 use syn::{
-    braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident, Pat,
-    Token,
+    braced, parse::Parse, parse::ParseStream, parse_macro_input, parse_quote, spanned::Spanned,
+    Arm, Ident, Pat, Path, Token,
 };
 
 /**
@@ -246,6 +246,26 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     }
 }
 
+// /// Special version of the `Session!` macro which always outputs `crate` as the root of its paths,
+// /// for use internally with dialectic.
+// #[proc_macro]
+// #[allow(non_snake_case)]
+// #[doc(hidden)]
+// pub fn SessionInternal(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+//     let result = parse_macro_input!(input as dialectic_compiler::Invocation).compile();
+
+//     match result {
+//         Ok(compiled) => compiled
+//             .to_token_stream_with_crate_name()
+//             .into(),
+//         Err(error) => {
+//             let compile_errors = error.to_compile_error();
+//             let quoted = quote! { [(); { #compile_errors 0 }] };
+//             quoted.into()
+//         }
+//     }
+// }
+
 /// The `offer!` macro offers a set of different protocols, allowing the other side of the channel
 /// to choose with which one to proceed.
 ///
@@ -338,14 +358,35 @@ impl Parse for OfferInvocation {
 
 impl ToTokens for OfferOutput {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        use proc_macro_crate::FoundCrate;
+
         let OfferOutput { chan, branches } = self;
 
-        // Figure out the name of the `dialectic` crate
-        lazy_static! {
-            static ref CRATE_NAME: String = proc_macro_crate::crate_name("dialectic")
-                .unwrap_or_else(|_| "dialectic".to_owned());
-        }
-        let dialectic_crate = Ident::new(&**CRATE_NAME, Span::call_site());
+        // We need to find the right path where we can reference types in our proc macro. This is a
+        // little tricky. There are three cases to consider.
+        let dialectic_crate: Path = match proc_macro_crate::crate_name("dialectic") {
+            // The first case is that we are in dialectic and compiling dialectic itself, OR we are
+            // compiling a dialectic doctest. In this case, we want to use `crate::dialectic`, which
+            // will grab the symbol "dialectic" in the crate root. In the case of a doctest, this
+            // will result in the extern crate dialectic; in the case of dialectic itself, it will
+            // result in a private dummy module called "dialectic", which exists to support macro
+            // calls like these and re-exports dialectic::types.
+            Ok(FoundCrate::Itself)
+                if env::var("CARGO_CRATE_NAME").as_deref() == Ok("dialectic") =>
+            {
+                parse_quote!(crate::dialectic)
+            }
+            // The second case is that we are in an integration test of dialectic. This one's
+            // straightforward.
+            Ok(FoundCrate::Itself) | Err(_) => parse_quote!(::dialectic),
+            // And lastly, the third case: we are in a user's crate. We found the crate with the
+            // name `dialectic` and will use that identifier as our crate name, in a similar manner
+            // to the second case, prefixed with `::` to ensure it is a "global" path.
+            Ok(FoundCrate::Name(name)) => {
+                let name_ident = format_ident!("{}", name);
+                parse_quote!(::#name_ident)
+            }
+        };
 
         // Convert a `usize` into the tokens that represent it in unary
         let unary = |n: usize| -> TokenStream {
