@@ -4,7 +4,7 @@ use std::{
     any::TypeId,
     convert::TryInto,
     marker::{self, PhantomData},
-    mem::{self, ManuallyDrop},
+    mem,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -83,20 +83,20 @@ where
 {
     fn drop(&mut self) {
         let done = TypeId::of::<<S as Session>::Action>() == TypeId::of::<Done>();
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        let drop_tx = self.drop_tx.clone();
-        let drop_rx = self.drop_rx.clone();
-        *drop_tx.lock().unwrap() = if done {
-            Ok(tx)
-        } else {
-            Err(IncompleteHalf::Unfinished(tx))
-        };
-        *drop_rx.lock().unwrap() = if done {
-            Ok(rx)
-        } else {
-            Err(IncompleteHalf::Unfinished(rx))
-        };
+        if let Some(tx) = self.tx.take() {
+            *self.drop_tx.lock().unwrap() = if done {
+                Ok(tx)
+            } else {
+                Err(IncompleteHalf::Unfinished(tx))
+            };
+        }
+        if let Some(rx) = self.rx.take() {
+            *self.drop_rx.lock().unwrap() = if done {
+                Ok(rx)
+            } else {
+                Err(IncompleteHalf::Unfinished(rx))
+            };
+        }
     }
 }
 
@@ -669,10 +669,6 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.clone();
         let drop_rx = self.drop_rx.clone();
-        // We have to manually drop because the drop glue assumes `tx` and `rx` are present -- also,
-        // it's more efficient because there's no reason to run the drop glue every time we execute
-        // a cast (which this function is called in)!
-        let _ = ManuallyDrop::new(self);
         (tx, rx, drop_tx, drop_rx)
     }
 
@@ -811,22 +807,12 @@ where
     Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
     fn drop(&mut self) {
-        // A `Branches` is never an end-state for a channel, so we always say it wasn't done
-        let done = false;
-        let tx = self.tx.take().unwrap();
-        let rx = self.rx.take().unwrap();
-        let drop_tx = self.drop_tx.clone();
-        let drop_rx = self.drop_rx.clone();
-        *drop_tx.lock().unwrap() = if done {
-            Ok(tx)
-        } else {
-            Err(IncompleteHalf::Unfinished(tx))
-        };
-        *drop_rx.lock().unwrap() = if done {
-            Ok(rx)
-        } else {
-            Err(IncompleteHalf::Unfinished(rx))
-        };
+        if let Some(tx) = self.tx.take() {
+            *self.drop_tx.lock().unwrap() = Err(IncompleteHalf::Unfinished(tx));
+        }
+        if let Some(rx) = self.rx.take() {
+            *self.drop_rx.lock().unwrap() = Err(IncompleteHalf::Unfinished(rx));
+        }
     }
 }
 
@@ -839,7 +825,6 @@ where
 {
     /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
     /// so, return the corresponding channel; otherwise, return all the other possibilities.
-    #[must_use = "all possible choices must be handled (add cases to match the type of this `Offer<...>`)"]
     pub fn case<N: Unary>(
         mut self,
         _branch: N,
@@ -857,8 +842,6 @@ where
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.clone();
         let drop_rx = self.drop_rx.clone();
-        // We have to manually drop because the drop glue assumes tx and rx are present
-        let _ = ManuallyDrop::new(self);
         let branch: u8 = N::VALUE
             .try_into()
             .expect("Branch discriminant exceeded u8::MAX in `case`");
