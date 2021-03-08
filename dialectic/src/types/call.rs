@@ -3,7 +3,7 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
-/// Call the session `P` as a subroutine using [`call`](Chan::call), then do the session `Q`.
+/// Call the session `P` as a subroutine using [`call`](crate::Chan::call), then do the session `Q`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Call<P, Q>(pub P, pub Q);
 

@@ -5,9 +5,9 @@ use super::*;
 
 /// Split the connection into send-only and receive-only halves using [`split`](crate::Chan::split).
 ///
-/// The type `Split<P, Q, R>` means: do the [`Transmit`]-only session `P` concurrently with the
-/// [`Receive`]-only session `Q`, running them both to [`Done`], and when they've completed, do the
-/// session `R`.
+/// The type `Split<P, Q, R>` means: do the [`Transmit`](crate::backend::Transmit)-only session `P`
+/// concurrently with the [`Receive`](crate::backend::Receive)-only session `Q`, running them both
+/// to [`Done`], and when they've completed, do the session `R`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Split<P, Q, R>(pub P, pub Q, pub R);
 
