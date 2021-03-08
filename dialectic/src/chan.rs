@@ -844,7 +844,7 @@ where
         let drop_rx = self.drop_rx.clone();
         let branch: u8 = N::VALUE
             .try_into()
-            .expect("Branch discriminant exceeded u8::MAX in `case`");
+            .expect("branch discriminant exceeded u8::MAX in `case`");
         if variant == branch {
             Ok(Chan {
                 tx,
@@ -878,7 +878,7 @@ where
     pub fn choice(&self) -> Choice<<Choices::AsList as HasLength>::Length> {
         self.variant
             .try_into()
-            .expect("Internal variant for `Branches` exceeds number of choices")
+            .expect("internal variant for `Branches` exceeds number of choices")
     }
 }
 
