@@ -2,11 +2,10 @@
 
 extern crate proc_macro;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens, TokenStreamExt};
-use std::env;
+use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
-    braced, parse::Parse, parse::ParseStream, parse_macro_input, parse_quote, spanned::Spanned,
-    Arm, Ident, Pat, Path, Token,
+    braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident, Pat,
+    Token,
 };
 
 /**
@@ -338,35 +337,10 @@ impl Parse for OfferInvocation {
 
 impl ToTokens for OfferOutput {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        use proc_macro_crate::FoundCrate;
-
         let OfferOutput { chan, branches } = self;
 
-        // We need to find the right path where we can reference types in our proc macro. This is a
-        // little tricky. There are three cases to consider.
-        let dialectic_crate: Path = match proc_macro_crate::crate_name("dialectic") {
-            // The first case is that we are in dialectic and compiling dialectic itself, OR we are
-            // compiling a dialectic doctest. In this case, we want to use `crate::dialectic`, which
-            // will grab the symbol "dialectic" in the crate root. In the case of a doctest, this
-            // will result in the extern crate dialectic; in the case of dialectic itself, it will
-            // result in a private dummy module called "dialectic", which exists to support macro
-            // calls like these and re-exports dialectic::types.
-            Ok(FoundCrate::Itself)
-                if env::var("CARGO_CRATE_NAME").as_deref() == Ok("dialectic") =>
-            {
-                parse_quote!(crate::dialectic)
-            }
-            // The second case is that we are in an integration test of dialectic. This one's
-            // straightforward.
-            Ok(FoundCrate::Itself) | Err(_) => parse_quote!(::dialectic),
-            // And lastly, the third case: we are in a user's crate. We found the crate with the
-            // name `dialectic` and will use that identifier as our crate name, in a similar manner
-            // to the second case, prefixed with `::` to ensure it is a "global" path.
-            Ok(FoundCrate::Name(name)) => {
-                let name_ident = format_ident!("{}", name);
-                parse_quote!(::#name_ident)
-            }
-        };
+        // Find the path necessary to refer to types in the dialectic crate.
+        let dialectic_crate = dialectic_compiler::dialectic_path();
 
         // Convert a `usize` into the tokens that represent it in unary
         let unary = |n: usize| -> TokenStream {
