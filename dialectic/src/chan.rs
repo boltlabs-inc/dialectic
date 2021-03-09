@@ -67,6 +67,7 @@ use futures::Future;
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
+#[repr(C)]
 pub struct Chan<S: Session, Tx: std::marker::Send + 'static, Rx: std::marker::Send + 'static> {
     tx: Option<Tx>,
     rx: Option<Rx>,
@@ -673,18 +674,16 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     }
 
     /// Cast a channel to arbitrary new session types and environment. Use with care!
-    fn unchecked_cast<Q>(self) -> Chan<Q, Tx, Rx>
+    fn unchecked_cast<Q>(mut self) -> Chan<Q, Tx, Rx>
     where
         Q: Session,
     {
-        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
-        Chan {
-            tx,
-            rx,
-            drop_tx,
-            drop_rx,
-            session: PhantomData,
-        }
+        // Cast a pointer to `self` to the new desired (phantom) session type
+        let new: *mut Chan<Q, _, _> = (&mut self as *mut Chan<_, _, _>).cast();
+        // Forget `self` to prevent a double-free error
+        mem::forget(self);
+        // Read the contents of `new` to get the new channel
+        unsafe { new.read() }
     }
 
     /// Create a new channel with an arbitrary environment and session type. This is equivalent to
