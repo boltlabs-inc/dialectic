@@ -2,9 +2,9 @@
 
 use {
     proc_macro2::TokenStream,
-    quote::{format_ident, quote_spanned, ToTokens},
-    std::{env, fmt, rc::Rc},
-    syn::{parse_quote, Path, Type},
+    quote::{quote_spanned, ToTokens},
+    std::{fmt, rc::Rc},
+    syn::{Path, Type},
 };
 
 use crate::Spanned;
@@ -190,34 +190,6 @@ impl Spanned<Target> {
 
 impl ToTokens for Spanned<Target> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        use proc_macro_crate::FoundCrate;
-
-        // We need to find the right path where we can reference types in our proc macro. This is a
-        // little tricky. There are three cases to consider.
-        let dialectic_crate: Path = match proc_macro_crate::crate_name("dialectic") {
-            // The first case is that we are in dialectic and compiling dialectic itself, OR we are
-            // compiling a dialectic doctest. In this case, we want to use `crate::dialectic`, which
-            // will grab the symbol "dialectic" in the crate root. In the case of a doctest, this
-            // will result in the extern crate dialectic; in the case of dialectic itself, it will
-            // result in a private dummy module called "dialectic", which exists to support macro
-            // calls like these and re-exports dialectic::types.
-            Ok(FoundCrate::Itself)
-                if env::var("CARGO_CRATE_NAME").as_deref() == Ok("dialectic") =>
-            {
-                parse_quote!(crate::dialectic)
-            }
-            // The second case is that we are in an integration test of dialectic. This one's
-            // straightforward.
-            Ok(FoundCrate::Itself) | Err(_) => parse_quote!(::dialectic),
-            // And lastly, the third case: we are in a user's crate. We found the crate with the
-            // name `dialectic` and will use that identifier as our crate name, in a similar manner
-            // to the second case, prefixed with `::` to ensure it is a "global" path.
-            Ok(FoundCrate::Name(name)) => {
-                let name_ident = format_ident!("{}", name);
-                parse_quote!(::#name_ident)
-            }
-        };
-
-        self.to_tokens_with_crate_name(&dialectic_crate, tokens);
+        self.to_tokens_with_crate_name(&crate::dialectic_path(), tokens);
     }
 }
