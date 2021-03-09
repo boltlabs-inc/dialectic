@@ -246,26 +246,6 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     }
 }
 
-// /// Special version of the `Session!` macro which always outputs `crate` as the root of its paths,
-// /// for use internally with dialectic.
-// #[proc_macro]
-// #[allow(non_snake_case)]
-// #[doc(hidden)]
-// pub fn SessionInternal(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-//     let result = parse_macro_input!(input as dialectic_compiler::Invocation).compile();
-
-//     match result {
-//         Ok(compiled) => compiled
-//             .to_token_stream_with_crate_name()
-//             .into(),
-//         Err(error) => {
-//             let compile_errors = error.to_compile_error();
-//             let quoted = quote! { [(); { #compile_errors 0 }] };
-//             quoted.into()
-//         }
-//     }
-// }
-
 /// The `offer!` macro offers a set of different protocols, allowing the other side of the channel
 /// to choose with which one to proceed.
 ///
