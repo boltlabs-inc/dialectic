@@ -3,7 +3,8 @@
 //! This backend is useful primarily only for benchmarking, as it does the absolute minimum amount
 //! of work, so that it is easier to isolate performance issues in Dialectic itself. You cannot
 //! implement most protocols using this backend, as it is limited to transporting the unit type `()`
-//! and cannot [`choose`](Chan::choose) or [`offer!`](crate::offer) more than a single choice.
+//! and cannot [`choose`](crate::Chan::choose) or [`offer!`](crate::offer) more than a single
+//! choice.
 
 use crate::backend::*;
 use crate::unary::{Unary, S, Z};
