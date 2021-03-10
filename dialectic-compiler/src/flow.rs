@@ -327,9 +327,10 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // `Choose`/`Offer` are haltable only if any of their choices are haltable.
             Ir::Choose(choices) | Ir::Offer(choices) => Dnf(choices
                 .iter()
-                .filter_map(Option::as_ref)
-                .chain(node.next.as_ref())
-                .map(|&c| vec![Constraint::Haltable(c)])
+                // If any of the choices are `Done`, we want to emit an empty `Vec` instead,
+                // denoting that this constraint is trivially satisfiable.
+                .map(|&c| c.map(Constraint::Haltable).into_iter().collect())
+                .chain(node.next.map(|c| vec![Constraint::Haltable(c)]))
                 .collect()),
             // A `Continue` only halts if whatever it jumps to halts.
             Ir::Continue(of_loop) => Dnf::only_if(vec![Constraint::Haltable(*of_loop)]),

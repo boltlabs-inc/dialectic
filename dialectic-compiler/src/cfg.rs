@@ -245,8 +245,14 @@ impl Cfg {
                     let new_implicit_cont = next.take().or(implicit_cont);
 
                     // Follow each arm of the `choose`/`offer` using the new implicit continuation
-                    for &choice in choices.iter().filter_map(Option::as_ref) {
-                        follow(new_implicit_cont, Some(choice));
+                    for choice in choices.iter_mut() {
+                        // If the choice is `Done`, we need to reassign it to the new implicit
+                        // continuation. Otherwise, we follow it.
+                        if choice.is_some() {
+                            follow(new_implicit_cont, *choice);
+                        } else {
+                            *choice = new_implicit_cont;
+                        }
                     }
                 }
                 Ir::Loop(body) => {

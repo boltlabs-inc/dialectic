@@ -109,6 +109,15 @@ use backend::*;
 #[allow(unused_imports)] // For documentation linking
 use prelude::*;
 
+/// This is a dummy module for the offer/Session proc macros to refer to from within dialectic to
+/// ensure that the same path can resolve to the same types in different scopes (the scope of being
+/// inside the dialectic crate somewhere and the scope of being inside a doctest being compiled
+/// within dialectic, which *looks* like the dialectic crate itself to any proc macro but actually
+/// isn't and has the dialectic crate as an extern crate in scope.)
+pub(crate) mod dialectic {
+    pub use crate::*;
+}
+
 /// The prelude module for quickly getting started with Dialectic.
 ///
 /// This module is designed to be imported as `use dialectic::prelude::*;`, which brings into scope

@@ -1,11 +1,10 @@
 //! The target language of the `Session!` macro, produced by the compiler.
 
 use {
-    lazy_static::lazy_static,
     proc_macro2::TokenStream,
     quote::{quote_spanned, ToTokens},
     std::{fmt, rc::Rc},
-    syn::{Ident, Type},
+    syn::{Path, Type},
 };
 
 use crate::Spanned;
@@ -105,47 +104,69 @@ impl fmt::Display for Target {
     }
 }
 
-impl ToTokens for Spanned<Target> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        use Target::*;
+impl Spanned<Target> {
+    /// Convert this `Spanned<Target>` into a `TokenStream` using a provided crate name when
+    /// referencing types from dialectic.
+    pub fn to_token_stream_with_crate_name(&self, dialectic_crate: &Path) -> TokenStream {
+        let mut tokens = TokenStream::new();
+        self.to_tokens_with_crate_name(dialectic_crate, &mut tokens);
+        tokens
+    }
 
-        lazy_static! {
-            static ref CRATE_NAME: String = proc_macro_crate::crate_name("dialectic")
-                .unwrap_or_else(|_| "dialectic".to_owned());
-        }
+    /// Convert this `Spanned<Target>` into tokens and append them to the provided `TokenStream`
+    /// using a provided crate name when referencing types from dialectic.
+    pub fn to_tokens_with_crate_name(&self, dialectic_crate: &Path, tokens: &mut TokenStream) {
+        use Target::*;
 
         // We assign the associated span of the target to any type tokens generated, in an attempt
         // to get at least some type errors/issues to show up in the right place.
         let span = self.span;
-        let dialectic_crate = Ident::new(&**CRATE_NAME, span);
 
         match &self.inner {
             Done => quote_spanned! {span=> #dialectic_crate::types::Done }.to_tokens(tokens),
             Recv(t, s) => {
-                quote_spanned!(span=> #dialectic_crate::types::Recv<#t, #s>).to_tokens(tokens)
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                quote_spanned!(span=> #dialectic_crate::types::Recv<#t, #s>).to_tokens(tokens);
             }
             Send(t, s) => {
-                quote_spanned!(span=> #dialectic_crate::types::Send<#t, #s>).to_tokens(tokens)
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                quote_spanned!(span=> #dialectic_crate::types::Send<#t, #s>).to_tokens(tokens);
             }
-            Loop(s) => quote_spanned!(span=> #dialectic_crate::types::Loop<#s>).to_tokens(tokens),
+            Loop(s) => {
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                quote_spanned!(span=> #dialectic_crate::types::Loop<#s>).to_tokens(tokens);
+            }
             Split {
                 tx_only: s,
                 rx_only: p,
                 cont: q,
             } => {
-                quote_spanned!(span=> #dialectic_crate::types::Split<#s, #p, #q>).to_tokens(tokens)
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                let p = p.to_token_stream_with_crate_name(dialectic_crate);
+                let q = q.to_token_stream_with_crate_name(dialectic_crate);
+                quote_spanned!(span=> #dialectic_crate::types::Split<#s, #p, #q>).to_tokens(tokens);
             }
             Call(s, p) => {
-                quote_spanned!(span=> #dialectic_crate::types::Call<#s, #p>).to_tokens(tokens)
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                let p = p.to_token_stream_with_crate_name(dialectic_crate);
+                quote_spanned!(span=> #dialectic_crate::types::Call<#s, #p>).to_tokens(tokens);
             }
             Then(s, p) => {
+                let s = s.to_token_stream_with_crate_name(dialectic_crate);
+                let p = p.to_token_stream_with_crate_name(dialectic_crate);
                 quote_spanned!(span=> <#s as #dialectic_crate::types::Then<#p>>::Combined)
-                    .to_tokens(tokens)
+                    .to_tokens(tokens);
             }
             Choose(cs) => {
+                let cs = cs
+                    .iter()
+                    .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
                 quote_spanned!(span=> #dialectic_crate::types::Choose<(#(#cs,)*)>).to_tokens(tokens)
             }
             Offer(cs) => {
+                let cs = cs
+                    .iter()
+                    .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
                 quote_spanned!(span=> #dialectic_crate::types::Offer<(#(#cs,)*)>).to_tokens(tokens)
             }
             Continue(n) => {
@@ -164,5 +185,11 @@ impl ToTokens for Spanned<Target> {
             }
             Type(s) => quote_spanned!(span=> #s).to_tokens(tokens),
         }
+    }
+}
+
+impl ToTokens for Spanned<Target> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.to_tokens_with_crate_name(&crate::dialectic_path(), tokens);
     }
 }

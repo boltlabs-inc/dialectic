@@ -1,8 +1,7 @@
 #![forbid(broken_intra_doc_links)]
 
 extern crate proc_macro;
-use lazy_static::lazy_static;
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident, Pat,
@@ -340,12 +339,8 @@ impl ToTokens for OfferOutput {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let OfferOutput { chan, branches } = self;
 
-        // Figure out the name of the `dialectic` crate
-        lazy_static! {
-            static ref CRATE_NAME: String = proc_macro_crate::crate_name("dialectic")
-                .unwrap_or_else(|_| "dialectic".to_owned());
-        }
-        let dialectic_crate = Ident::new(&**CRATE_NAME, Span::call_site());
+        // Find the path necessary to refer to types in the dialectic crate.
+        let dialectic_crate = dialectic_compiler::dialectic_path();
 
         // Convert a `usize` into the tokens that represent it in unary
         let unary = |n: usize| -> TokenStream {
