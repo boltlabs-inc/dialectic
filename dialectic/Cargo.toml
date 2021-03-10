@@ -58,6 +58,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 name = "mpsc"
 harness = false
 
+[[bench]]
+name = "micro"
+harness = false
+
 [[example]]
 name = "common"
 required-features = ["bincode"]
