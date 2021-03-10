@@ -119,15 +119,15 @@ fn tally_client_direct_subst_nested_loop_break() {
     .unwrap();
 
     let rhs: Type = syn::parse_str(
-            "dialectic::types::Loop<
-                dialectic::types::Choose<(
-                    dialectic::types::Done,
-                    dialectic::types::Send<
+            "::dialectic::types::Loop<
+                ::dialectic::types::Choose<(
+                    ::dialectic::types::Done,
+                    ::dialectic::types::Send<
                         Operation,
-                        dialectic::types::Loop<
-                            dialectic::types::Choose<(
-                                dialectic::types::Send<i64, dialectic::types::Continue>,
-                                dialectic::types::Recv<i64, dialectic::types::Continue<dialectic::unary::S<dialectic::unary::Z>>>,
+                        ::dialectic::types::Loop<
+                            ::dialectic::types::Choose<(
+                                ::dialectic::types::Send<i64, ::dialectic::types::Continue>,
+                                ::dialectic::types::Recv<i64, ::dialectic::types::Continue<::dialectic::unary::S<::dialectic::unary::Z>>>,
                             )>
                         >
                     >,
