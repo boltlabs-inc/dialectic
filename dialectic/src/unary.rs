@@ -1,7 +1,24 @@
 //! The unary numbers, represented by zero [`Z`] and successor [`S`].
 
-pub mod constants;
-pub mod types;
+pub mod constants {
+    //! Predefined value-level constants for small type-level numbers. Each of these corresponds
+    //! to a type synonym in [`crate::unary::types`].
+    //!
+    //! Due to a limitation in Rust, at present the maximum number which can be listed here is 128.
+
+    #![allow(missing_docs)]
+    dialectic_macro::generate_unary_constants!(129);
+}
+
+pub mod types {
+    //! Predefined type-level constants for small type-level numbers. Each of these types is
+    //! inhabited by a corresponding value constant in [`crate::unary::constants`].
+    //!
+    //! Due to a limitation in Rust, at present the maximum number which can be listed here is 128.
+
+    #![allow(missing_docs)]
+    dialectic_macro::generate_unary_types!(129);
+}
 
 /// The number zero.
 ///
