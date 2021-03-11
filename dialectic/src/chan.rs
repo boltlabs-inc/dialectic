@@ -305,7 +305,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Choices::AsList: Select<N> + HasLength + EachHasDual + EachScoped,
         <Choices::AsList as EachHasDual>::Duals: List,
         <Choices::AsList as Select<N>>::Selected: Session,
-        N: Unary + LessThan<crate::unary::types::_128>,
+        N: Unary + LessThan<_128>,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -407,7 +407,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Choices: Tuple + 'static,
         Choices::AsList: HasLength + EachScoped + EachHasDual,
         <Choices::AsList as EachHasDual>::Duals: List,
-        crate::unary::types::_0: LessThan<<Choices::AsList as HasLength>::Length>,
+        _0: LessThan<<Choices::AsList as HasLength>::Length>,
     {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
         let variant = rx.as_mut().unwrap().recv().await?.into();
