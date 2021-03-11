@@ -137,6 +137,8 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::unary::constants::*;
     #[doc(no_inline)]
+    pub use crate::unary::types::*;
+    #[doc(no_inline)]
     pub use crate::Chan;
     #[doc(no_inline)]
     pub use call_by::{Mut, Ref, Val};
