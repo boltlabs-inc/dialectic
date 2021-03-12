@@ -19,15 +19,13 @@ use std::{future::Future, pin::Pin};
 mod choice;
 pub use choice::*;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
-#[cfg(feature = "mpsc")]
-pub mod mpsc;
+// #[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
+// #[cfg(feature = "mpsc")]
+// pub mod mpsc;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-#[cfg(feature = "serde")]
-pub mod serde;
-
-pub mod null;
+// #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
+// #[cfg(feature = "serde")]
+// pub mod serde;
 
 /// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a message
 /// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.

@@ -1,4 +1,4 @@
-//! A "null" backend implementation which can only send and receive the unit type `()`.
+//! A "null" backend implementation for the [`dialectic`] crate which can only send and receive the unit type `()`.
 //!
 //! This backend is useful primarily only for benchmarking, as it does the absolute minimum amount
 //! of work, so that it is easier to isolate performance issues in Dialectic itself. You cannot
@@ -6,8 +6,10 @@
 //! and cannot [`choose`](crate::Chan::choose) or [`offer!`](crate::offer) more than a single
 //! choice.
 
-use crate::backend::*;
-use crate::unary::{Unary, S, Z};
+#![allow(clippy::type_complexity)]
+
+use dialectic::backend::*;
+use dialectic::unary::{Unary, S, Z};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
 /// Shorthand for a [`Chan`](crate::Chan) using a [`null`](crate::backend::null) [`Sender`] and
@@ -23,7 +25,7 @@ use std::{convert::TryInto, future::Future, pin::Pin};
 /// let _: (null::Chan<Done>, null::Chan<Done>) =
 ///     Done::channel(null::channel);
 /// ```
-pub type Chan<P> = crate::Chan<P, Sender, Receiver>;
+pub type Chan<P> = dialectic::Chan<P, Sender, Receiver>;
 
 /// A receiver only capable of receiving the unit type `()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
