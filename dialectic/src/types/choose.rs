@@ -3,6 +3,8 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
+use crate::tuple::{List, Tuple};
+
 /// Actively [`choose`](crate::Chan::choose) between any of the protocols in the tuple
 /// `Choices`.
 ///

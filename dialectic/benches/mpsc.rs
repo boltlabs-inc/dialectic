@@ -1,12 +1,13 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dialectic::backend::mpsc;
 use dialectic::prelude::*;
+use dialectic::Unavailable;
 use std::{any::Any, sync::Arc, time::Duration};
 use std::{marker, time::Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::channel;
 
-type Server = Loop<Send<bool, Continue>>;
+type Server = Session! { loop { send bool } };
 type Client = <Server as Session>::Dual;
 
 async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::Receiver<'static>>) {

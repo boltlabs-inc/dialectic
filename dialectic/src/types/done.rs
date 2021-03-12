@@ -1,8 +1,8 @@
 use super::sealed::IsSession;
 use super::*;
 
-/// A finished session. The only thing to do with a [`Chan`] when it is `Done` is to drop it or,
-/// preferably, [`close`](Chan::close) it.
+/// A finished session. The only thing to do with a [`Chan`](crate::Chan) when it is `Done` is to
+/// drop it or, preferably, [`close`](crate::Chan::close) it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Done;
 
@@ -41,6 +41,7 @@ mod tests {
     #[test]
     fn done_in_seq() {
         use crate::prelude::*;
+        use crate::types::*;
 
         type S = Session! {
             loop {

@@ -42,6 +42,11 @@ In the below examples, all code blocks import:
 ```
 use static_assertions::assert_type_eq_all as type_eq;
 use dialectic::prelude::*;
+
+// Normally you don't need to import these, because they are only useful
+// when writing session types directly, not when using the `Session!` macro:
+use dialectic::types::*;
+use dialectic::unary::types::*;
 ```
 
 ## The `send` and `recv` keywords
@@ -52,6 +57,7 @@ also: the [`Send`] type and [`send`] method, and the [`Recv`] type and [`recv`] 
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
 #
 type_eq!(
     Session! { send bool },
@@ -76,6 +82,7 @@ and the [`offer!`] macro.
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
 #
 type_eq!(
     Session! { offer { _0 => {}, _1 => {} } },
@@ -100,6 +107,8 @@ To exit a loop, you must use `break`.
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
+# use dialectic::unary::types::*;
 #
 type_eq!(
     Session! { loop { break } },
@@ -144,6 +153,7 @@ The `call` keyword either precedes a named session type, or a block. It correspo
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
 #
 type P = Session! { send i64 };
 type Q = Session! { call P };
@@ -176,6 +186,7 @@ method.
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
 #
 type P = Session! {
     split {
@@ -196,6 +207,7 @@ statement, or even used as generic parameters.
 ```
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
+# use dialectic::types::*;
 #
 type Parity = Session! { send i64; recv bool };
 type Twice<T> = Session! { T; T };

@@ -3,6 +3,8 @@ use std::any::Any;
 use super::sealed::IsSession;
 use super::*;
 
+use crate::tuple::{List, Tuple};
+
 /// Passively [`offer!`](crate::offer) a choice between any of the protocols in the tuple `Choices`.
 ///
 /// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest

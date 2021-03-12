@@ -4,7 +4,6 @@
 //! not need to be referred to directly from code that uses this library. All of them are sealed, so
 //! that they can only ever apply to the session types defined in this crate.
 
-use crate::prelude::*;
 use crate::unary::{LessThan, Unary, S, Z};
 
 // Each construct in the session types language lives in its own module, along with the
@@ -228,7 +227,7 @@ where
 /// ```
 /// use static_assertions::{assert_impl_all, assert_not_impl_any};
 /// use dialectic::types::*;
-/// use dialectic::prelude::*;
+/// use dialectic::unary::types::*;
 ///
 /// type L = (_0, (_1, (_2, ())));
 ///

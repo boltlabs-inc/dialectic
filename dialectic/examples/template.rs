@@ -12,7 +12,9 @@ async fn main() {
 }
 
 /// The session from the client's perspective.
-type Client = Done; // <--- Fill this in...
+type Client = Session! {
+    // Fill this in...
+};
 
 /// The implementation of the client.
 async fn client(
