@@ -3,6 +3,10 @@ name = "dialectic-compiler"
 version = "0.1.0"
 authors = ["Shea Leffler <shea@errno.com>", "Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
+license = "MIT"
+description = "Session type macro compiler for the Dialectic crate"
+repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [features]
 default = []
