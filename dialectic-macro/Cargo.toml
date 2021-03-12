@@ -8,7 +8,7 @@ edition = "2018"
 proc-macro = true
 
 [dependencies]
-dialectic-compiler = { path = "../dialectic-compiler" }
+dialectic-compiler = { version = "0.1", path = "../dialectic-compiler" }
 syn = { version = "1.0", features = ["full", "parsing"] }
 proc-macro2 = "1.0"
 quote = "1.0"
@@ -16,4 +16,4 @@ quote = "1.0"
 [dev-dependencies]
 dialectic = { path = "../dialectic" }
 static_assertions = "1.1"
-tokio = "1.2.0"
+tokio = "1.2"
