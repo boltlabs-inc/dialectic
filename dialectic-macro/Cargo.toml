@@ -19,5 +19,6 @@ quote = "1.0"
 
 [dev-dependencies]
 dialectic = { path = "../dialectic" }
+dialectic-tokio-mpsc = { path = "../dialectic-tokio-mpsc" }
 static_assertions = "1.1"
 tokio = "1.2"

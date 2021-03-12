@@ -12,22 +12,16 @@ categories = ["asynchronous", "concurrency"]
 readme = "../README.md"
 
 [features]
-default = ["mpsc", "serde"]
-mpsc = ["tokio/sync"]
-serde = ["tokio/io-util", "tokio-util/codec", "serde-crate"]
-bincode = ["serde", "bincode-crate", "bytes"]
-json = ["serde", "serde_json"]
+default = ["serde"]
+serde = ["serde-crate"]
 
 [dependencies]
 thiserror = "1"
 call-by = "0.1"
 tokio = { version = "1", optional = true }
 tokio-util = { version = "0.6", optional = true }
-bincode-crate = { package = "bincode", version = "1.3", optional = true }
-serde_json = { version = "1", optional = true }
 serde-crate = { package = "serde", version = "1", features = ["derive"], optional = true }
 futures = { version = "0.3", default-features = false }
-bytes = { version = "1", optional = true }
 derivative = "2.1"
 pin-project = "1"
 static_assertions = "1.1"
@@ -44,6 +38,9 @@ bytes = "1"
 colored = "2"
 structopt = "0.3"
 criterion = { version = "0.3", features = ["async_tokio"] }
+dialectic-null = { path = "../dialectic-null" }
+dialectic-tokio-mpsc = { path = "../dialectic-tokio-mpsc" }
+dialectic-tokio-serde = { path = "../dialectic-tokio-serde", features = ["bincode", "json"] }
 
 [package.metadata.docs.rs]
 all-features = true
@@ -59,21 +56,16 @@ harness = false
 
 [[example]]
 name = "common"
-required-features = ["bincode"]
 crate-type = ["staticlib"]
 
 [[example]]
 name = "hello"
-required-features = ["bincode"]
 
 [[example]]
 name = "stack"
-required-features = ["bincode"]
 
 [[example]]
 name = "tally"
-required-features = ["bincode"]
 
 [[example]]
 name = "template"
-required-features = ["bincode"]

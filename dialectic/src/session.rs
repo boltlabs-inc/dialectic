@@ -14,7 +14,7 @@ use std::marker;
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::backend::mpsc;
+/// use dialectic_tokio_mpsc as mpsc;
 ///
 /// let (c1, c2) = <Session! { send String }>::channel(mpsc::unbounded_channel);
 /// // do something with these channels...
@@ -30,7 +30,7 @@ use std::marker;
 ///
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
-///    # use dialectic::backend::mpsc;
+///    # use dialectic_tokio_mpsc as mpsc;
 ///    fn something<'a>(_: &'a str) {
 ///        let (c1, c2) = <Session! { send &'a str }>::channel(mpsc::unbounded_channel);
 ///    }
@@ -41,7 +41,7 @@ use std::marker;
 ///
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
-///    # use dialectic::backend::mpsc;
+///    # use dialectic_tokio_mpsc as mpsc;
 ///    use dialectic::types::{Loop, Continue};
 ///    use dialectic::unary::types::*;
 ///    let (c1, c2) = <Loop<Continue<_1>>>::channel(mpsc::unbounded_channel);
@@ -56,7 +56,7 @@ use std::marker;
 ///
 ///    ```compile_fail
 ///    # use dialectic::prelude::*;
-///    # use dialectic::backend::mpsc;
+///    # use dialectic_tokio_mpsc as mpsc;
 ///    let (c1, c2) = <Session! { loop {} }>::channel(mpsc::unbounded_channel);
 ///    ```
 pub trait Session
@@ -92,7 +92,7 @@ where
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -118,7 +118,7 @@ where
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -149,7 +149,7 @@ where
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -179,7 +179,7 @@ where
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -199,7 +199,7 @@ where
     ///
     /// ```
     /// # use dialectic::prelude::*;
-    /// # use dialectic::backend::mpsc;
+    /// # use dialectic_tokio_mpsc as mpsc;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -220,7 +220,7 @@ where
     ///
     /// ```
     /// # use dialectic::prelude::*;
-    /// # use dialectic::backend::mpsc;
+    /// # use dialectic_tokio_mpsc as mpsc;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {

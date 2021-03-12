@@ -3,24 +3,31 @@
 //! This backend is useful primarily only for benchmarking, as it does the absolute minimum amount
 //! of work, so that it is easier to isolate performance issues in Dialectic itself. You cannot
 //! implement most protocols using this backend, as it is limited to transporting the unit type `()`
-//! and cannot [`choose`](crate::Chan::choose) or [`offer!`](crate::offer) more than a single
-//! choice.
+//! and cannot [`choose`](dialectic::Chan::choose) or [`offer!`](dialectic::offer) more than a
+//! single choice.
 
 #![allow(clippy::type_complexity)]
+#![warn(missing_docs)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+// Documentation configuration
+#![forbid(broken_intra_doc_links)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use dialectic::backend::*;
 use dialectic::unary::{Unary, S, Z};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
-/// Shorthand for a [`Chan`](crate::Chan) using a [`null`](crate::backend::null) [`Sender`] and
-/// [`Receiver`].
+/// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
 ///
 /// # Examples
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::backend::null;
 /// use dialectic::types::Done;
+/// use dialectic_null as null;
 ///
 /// let _: (null::Chan<Done>, null::Chan<Done>) =
 ///     Done::channel(null::channel);
@@ -44,13 +51,13 @@ pub struct Sender {
 /// # Examples
 ///
 /// ```
-/// let (tx, rx) = dialectic::backend::null::channel();
+/// let (tx, rx) = dialectic_null::channel();
 /// ```
 pub fn channel() -> (Sender, Receiver) {
     (Sender::default(), Receiver::default())
 }
 
-/// An error thrown while receiving from or sending to a [`null`](crate::backend::null) channel.
+/// An error thrown while receiving from or sending to a null channel.
 ///
 /// No such errors are possible, so this type cannot be constructed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

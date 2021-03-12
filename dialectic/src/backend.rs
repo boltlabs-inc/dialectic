@@ -19,14 +19,6 @@ use std::{future::Future, pin::Pin};
 mod choice;
 pub use choice::*;
 
-// #[cfg_attr(docsrs, doc(cfg(feature = "mpsc")))]
-// #[cfg(feature = "mpsc")]
-// pub mod mpsc;
-
-// #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-// #[cfg(feature = "serde")]
-// pub mod serde;
-
 /// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a message
 /// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
 ///
@@ -37,7 +29,11 @@ pub use choice::*;
 /// # Examples
 ///
 /// For an example of implementing [`Transmit`], check out the source for the implementation of
-/// [`Transmit`] for [`mpsc::Sender`].
+/// [`Transmit`] for the [`dialectic_tokio_mpsc::Sender`] type in the [`dialectic_tokio_mpsc`]
+/// crate.
+///
+/// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+/// [`dialectic_tokio_mpsc::Sender`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
 pub trait Transmit<T, Convention: CallingConvention> {
     /// The type of possible errors when sending.
     type Error;
@@ -55,14 +51,18 @@ pub trait Transmit<T, Convention: CallingConvention> {
 
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
 ///
-/// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must
-/// implement `Receive<Choice<N>>`, in addition to whatever other types they support. For more
-/// information, see [`Choice`](crate::Choice).
+/// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
+/// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information,
+/// see [`Choice`](crate::Choice).
 ///
 /// # Examples
 ///
 /// For an example of implementing [`Receive`], check out the source for the implementation of
-/// [`Receive`] for [`mpsc::Receiver`].
+/// [`Receive`] for the [`dialectic_tokio_mpsc::Receiver`] type in the [`dialectic_tokio_mpsc`]
+/// crate.
+///
+/// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+/// [`dialectic_tokio_mpsc::Receiver`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Receiver.html
 pub trait Receive<T> {
     /// The type of possible errors when receiving.
     type Error;
