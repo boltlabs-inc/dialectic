@@ -2,8 +2,9 @@ use criterion::{
     async_executor::AsyncExecutor, criterion_group, criterion_main, measurement::WallTime, Bencher,
     BenchmarkGroup, Criterion,
 };
-use dialectic::backend::{mpsc, null};
 use dialectic::prelude::*;
+use dialectic_null as null;
+use dialectic_tokio_mpsc as mpsc;
 use futures::Future;
 use std::{convert::TryInto, fmt::Debug, marker, sync::Arc, time::Instant};
 use tokio::runtime::Runtime;

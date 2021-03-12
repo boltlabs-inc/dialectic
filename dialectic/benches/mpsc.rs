@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dialectic::backend::mpsc;
+use dialectic_tokio_mpsc as mpsc;
 use dialectic::prelude::*;
 use dialectic::Unavailable;
 use std::{any::Any, sync::Arc, time::Duration};

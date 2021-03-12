@@ -1,7 +1,5 @@
-use dialectic::{
-    backend::serde::{codec::LengthDelimitedCodec, format::Bincode},
-    prelude::*,
-};
+use dialectic::prelude::*;
+use dialectic_tokio_serde::{codec::LengthDelimitedCodec, format::Bincode};
 
 use colored::*;
 pub use serde_crate::{Deserialize, Serialize};
@@ -45,7 +43,7 @@ where
 }
 
 /// A session-typed channel over TCP using length-delimited bincode encoding for serialization.
-pub type TcpChan<S> = dialectic::backend::serde::SymmetricalChan<
+pub type TcpChan<S> = dialectic_tokio_serde::SymmetricalChan<
     S,
     Bincode,
     LengthDelimitedCodec,
@@ -61,7 +59,7 @@ where
 {
     let (rx, tx) = socket.into_split();
     let (tx, rx) =
-        dialectic::backend::serde::format::length_delimited_bincode(tx, rx, 4, max_length);
+        dialectic_tokio_serde::format::length_delimited_bincode(tx, rx, 4, max_length);
     P::wrap(tx, rx)
 }
 

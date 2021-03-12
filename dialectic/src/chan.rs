@@ -30,7 +30,7 @@ use futures::Future;
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::backend::mpsc;
+/// use dialectic_tokio_mpsc as mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,7 +50,7 @@ use futures::Future;
 ///
 /// ```
 /// # use dialectic::prelude::*;
-/// # use dialectic::backend::mpsc;
+/// # use dialectic_tokio_mpsc as mpsc;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -113,7 +113,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -128,7 +128,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```compile_fail
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -160,7 +160,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -198,7 +198,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -244,7 +244,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -279,7 +279,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```compile_fail
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -330,7 +330,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -369,7 +369,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// # use dialectic::prelude::*;
-    /// # use dialectic::backend::mpsc;
+    /// # use dialectic_tokio_mpsc as mpsc;
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -443,7 +443,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -522,7 +522,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -664,7 +664,7 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     ///
     /// ```
     /// use dialectic::prelude::*;
-    /// use dialectic::backend::mpsc;
+    /// use dialectic_tokio_mpsc as mpsc;
     ///
     /// let (c1, c2) = <Session! { send String }>::channel(mpsc::unbounded_channel);
     /// let (tx1, rx1) = c1.into_inner();

@@ -274,7 +274,7 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::backend::mpsc;
+/// use dialectic_tokio_mpsc as mpsc;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {

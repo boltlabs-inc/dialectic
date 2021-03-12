@@ -42,12 +42,12 @@ assert_type_eq_all!(
 Given a valid session type, we can wrap an underlying communications channel with it. Here,
 let's make two ends of a channel for playing out our `JustSendOneString` protocol.
 
-In this case, we're using the [`mpsc`](crate::backend::mpsc) backend Dialectic provides, which
+In this case, we're using the [`dialectic_tokio_mpsc`] backend crate for Dialectic, which
 is built on [`tokio::sync::mpsc`]. However, the mechanism for wrapping underlying channels is
 extensible, meaning you can choose your own transport if you want.
 
 ```
-use dialectic::backend::mpsc;
+use dialectic_tokio_mpsc as mpsc;
 ```
 
 The static method [`channel`](crate::Session::channel) is automatically defined for all valid
@@ -58,7 +58,7 @@ underlying channel type.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 ```
@@ -68,7 +68,7 @@ to the given session type, and `c2`'s type corresponds to its dual:
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # let (c1, c2) = JustSendOneString::channel(|| mpsc::channel(1));
 let _: Chan<Session! { send String }, mpsc::Sender, mpsc::Receiver> = c1;
@@ -82,7 +82,7 @@ runtime, provided the underlying transport channel is of a compatible type.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -118,7 +118,7 @@ to a new channel.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 type ParityOfLength = Session! {
@@ -192,7 +192,7 @@ If we try to send on the end of the channel that's meant to receive...
 
 ```compile_fail
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -218,7 +218,7 @@ If we try to receive the wrong type of thing...
 
 ```compile_fail
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -243,7 +243,7 @@ of messages. If we try to send twice in a row...
 
 ```compile_fail
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -308,7 +308,7 @@ result of either selection by enacting the protocol chosen.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type JustSendOneString = Session! { send String };
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -430,7 +430,7 @@ the session type `QuerySum` again.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # type QuerySum = Session! {
 #     loop {
 #         choose {
@@ -539,7 +539,7 @@ that you had already written the following:
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 type Query = Session! {
     send String;
     recv String;
@@ -569,7 +569,7 @@ channel.
 
 ```
 # use dialectic::prelude::*;
-# use dialectic::backend::mpsc;
+# use dialectic_tokio_mpsc as mpsc;
 # use static_assertions::assert_type_eq_all;
 # type Query = Session! {
 #     send String;
@@ -691,7 +691,7 @@ Now, let's use a channel of this session type to enact a concurrent swap of a `S
 
 ```
 use dialectic::prelude::*;
-use dialectic::backend::mpsc;
+use dialectic_tokio_mpsc as mpsc;
 
 # #[tokio::main]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -723,8 +723,7 @@ let t1 = tokio::spawn(async move {
     }).await
 });
 
-// Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*,
-// the task above:
+// Simultaneously *receive* a `Vec<usize>` *from*, and *send* a `String` *to*, the task above:
 c2.split(|tx, rx| async move {
     // In one thread we send the `String`...
     let send_string = tokio::spawn(async move {
@@ -768,12 +767,14 @@ You might now want to...
 
 - Check out the documentation for **[`Chan`]**, if you haven't already?
 - Learn how to instantiate (or implement) a **[`backend`](crate::backend)** other than the
-  **[`mpsc`](crate::backend::mpsc)** backend we used in the tutorial above?
+  **[`mpsc`]** backend we used in the tutorial above?
 - Jump back to the top of **[reference documentation](crate#quick-reference)**?
 
 Thanks for following along, and enjoy!
 
 [`Session`]: trait@crate::Session
+[`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+[`mpsc`]: https://docs.rs/dialectic-tokio-mpsc
 */
 
 // Import the whole crate so the docs above can link appropriately.

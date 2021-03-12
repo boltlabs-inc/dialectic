@@ -1,6 +1,16 @@
 //! A backend implementation using [`tokio::sync::mpsc`] channels carrying boxed values `Box<dyn Any
 //! + Send>`, which are downcast to their true type (inferred from the session type) on the other
-//! end of the channel.
+//!   end of the channel.
+
+#![allow(clippy::type_complexity)]
+#![warn(missing_docs)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+// Documentation configuration
+#![forbid(broken_intra_doc_links)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use dialectic::backend::*;
 use std::{any::Any, future::Future, pin::Pin};
@@ -8,30 +18,29 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 pub use tokio::sync::mpsc::error::SendError;
 
-/// Shorthand for a [`Chan`](crate::Chan) using a bounded [`mpsc`](crate::backend::mpsc) [`Sender`]
-/// and [`Receiver`].
+/// Shorthand for a [`Chan`](dialectic::Chan) using a bounded [`Sender`] and [`Receiver`].
 ///
 /// # Examples
 ///
 /// ```
 /// use dialectic::prelude::*;
 /// use dialectic::types::Done;
-/// use dialectic::backend::mpsc;
+/// use dialectic_tokio_mpsc as mpsc;
 ///
 /// let _: (mpsc::Chan<Done>, mpsc::Chan<Done>) =
 ///     Done::channel(|| mpsc::channel(1));
 /// ```
 pub type Chan<P> = dialectic::Chan<P, Sender, Receiver>;
 
-/// Shorthand for a [`Chan`](crate::Chan) using an unbounded [`mpsc`](crate::backend::mpsc)
-/// [`UnboundedSender`] and [`UnboundedReceiver`].
+/// Shorthand for a [`Chan`](dialectic::Chan) using an unbounded [`UnboundedSender`] and
+/// [`UnboundedReceiver`].
 ///
 /// # Examples
 ///
 /// ```
 /// use dialectic::prelude::*;
 /// use dialectic::types::Done;
-/// use dialectic::backend::mpsc;
+/// use dialectic_tokio_mpsc as mpsc;
 ///
 /// let _: (mpsc::UnboundedChan<Done>, mpsc::UnboundedChan<Done>) =
 ///     Done::channel(mpsc::unbounded_channel);
@@ -53,13 +62,13 @@ pub struct UnboundedSender(pub mpsc::UnboundedSender<Box<dyn Any + Send>>);
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// This is a wrapper around a `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::channel`].
 ///
 /// # Examples
 ///
 /// ```
-/// let (tx, rx) = dialectic::backend::mpsc::channel(1);
+/// let (tx, rx) = dialectic_tokio_mpsc::channel(1);
 /// ```
 pub fn channel(buffer: usize) -> (Sender, Receiver) {
     let (tx, rx) = mpsc::channel(buffer);
@@ -68,13 +77,13 @@ pub fn channel(buffer: usize) -> (Sender, Receiver) {
 
 /// Create an unbounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is shorthand for `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// This is a wrapper around a `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::unbounded_channel`].
 ///
 /// # Examples
 ///
 /// ```
-/// let (tx, rx) = dialectic::backend::mpsc::unbounded_channel();
+/// let (tx, rx) = dialectic_tokio_mpsc::unbounded_channel();
 /// ```
 pub fn unbounded_channel() -> (UnboundedSender, UnboundedReceiver) {
     let (tx, rx) = mpsc::unbounded_channel();

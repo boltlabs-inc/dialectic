@@ -17,9 +17,19 @@
 //! Like some foods and drinks, some serialization formats and framing codecs pair well together.
 //! Helper functions for those common cases can be found in the [`format`](self::format) module.
 
+#![allow(clippy::type_complexity)]
+#![warn(missing_docs)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+// Documentation configuration
+#![forbid(broken_intra_doc_links)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 use std::{future::Future, pin::Pin};
 
-use crate::{
+use dialectic::{
     backend::{Choice, Receive, Ref, Transmit, Val},
     unary::Unary,
     Chan,

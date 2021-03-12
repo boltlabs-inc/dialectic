@@ -5,4 +5,5 @@ members = [
     "dialectic-macro",
     "dialectic-null",
     "dialectic-tokio-mpsc",
+    "dialectic-tokio-serde",
 ]
