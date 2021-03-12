@@ -35,4 +35,4 @@ impl<T, Ts: HasLength> HasLength for (T, Ts) {
     type Length = S<Ts::Length>;
 }
 
-dialectic_macro::impl_tuples!(128);
+dialectic_macro::impl_tuples!(256);

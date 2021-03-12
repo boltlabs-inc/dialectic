@@ -456,12 +456,12 @@ pub fn impl_tuples(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .base10_parse::<usize>()
         .unwrap();
 
-    let idents = (0..arity_limit)
+    let idents = (0..=arity_limit)
         .map(|i| format_ident!("T{}", i))
         .collect::<Vec<_>>();
     let mut impls = TokenStream::new();
 
-    for i in 0..arity_limit {
+    for i in 0..=arity_limit {
         let ident_slice = &idents[..i];
 
         let typarams = if ident_slice.is_empty() {
@@ -500,7 +500,7 @@ pub fn generate_unary_types(input: proc_macro::TokenStream) -> proc_macro::Token
         .base10_parse::<usize>()
         .unwrap();
 
-    let type_idents = (0..arity_limit).map(|i| format_ident!("_{}", i));
+    let type_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
     let type_values = type_idents.fold(vec![], |mut acc, ident| {
         let value = match acc.last() {
             Some((pred_ident, _)) => quote!(S<#pred_ident>),
@@ -535,7 +535,7 @@ pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::T
         .base10_parse::<usize>()
         .unwrap();
 
-    let constant_idents = (0..arity_limit).map(|i| format_ident!("_{}", i));
+    let constant_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
     let constant_values = constant_idents.fold(vec![], |mut acc, ident| {
         let value = match acc.last() {
             Some((pred_ident, _)) => quote!(S(#pred_ident)),
