@@ -302,10 +302,9 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         S: Session<Action = Choose<Choices>>,
         Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
         Choices: Tuple,
-        Choices::AsList: Select<N> + HasLength + EachHasDual + EachScoped,
-        <Choices::AsList as EachHasDual>::Duals: List,
+        Choices::AsList: Select<N> + HasLength,
         <Choices::AsList as Select<N>>::Selected: Session,
-        N: Unary + LessThan<_128>,
+        N: Unary,
     {
         let choice = (N::VALUE as u8)
             .try_into()
@@ -406,7 +405,6 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
         Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
         Choices: Tuple + 'static,
         Choices::AsList: HasLength + EachScoped + EachHasDual,
-        <Choices::AsList as EachHasDual>::Duals: List,
         _0: LessThan<<Choices::AsList as HasLength>::Length>,
     {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();

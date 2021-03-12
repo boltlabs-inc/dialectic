@@ -1,7 +1,18 @@
 //! The unary numbers, represented by zero [`Z`] and successor [`S`].
 
-pub mod constants;
-pub mod types;
+pub mod constants {
+    //! Predefined value-level constants for small type-level numbers. Each of these corresponds
+    //! to a type synonym in [`crate::unary::types`].
+    #![allow(missing_docs)]
+    dialectic_macro::generate_unary_constants!(256);
+}
+
+pub mod types {
+    //! Predefined type-level constants for small type-level numbers. Each of these types is
+    //! inhabited by a corresponding value constant in [`crate::unary::constants`].
+    #![allow(missing_docs)]
+    dialectic_macro::generate_unary_types!(256);
+}
 
 /// The number zero.
 ///
@@ -33,6 +44,7 @@ pub struct S<N>(pub N);
 /// # Examples
 ///
 /// ```
+/// # #![recursion_limit = "256"]
 /// use dialectic::prelude::*;
 /// use dialectic::unary::{types::*, Unary};
 ///
@@ -40,7 +52,7 @@ pub struct S<N>(pub N);
 /// assert_eq!(_1::VALUE, 1);
 /// assert_eq!(_2::VALUE, 2);
 /// // ...
-/// assert_eq!(_127::VALUE, 127);
+/// assert_eq!(_256::VALUE, 256);
 /// ```
 pub trait Unary: sealed::Unary + Sized + Sync + Send + 'static {
     /// The runtime value of this type-level number, as a `usize`.

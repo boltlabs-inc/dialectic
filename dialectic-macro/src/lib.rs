@@ -2,10 +2,10 @@
 
 extern crate proc_macro;
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{format_ident, quote, ToTokens, TokenStreamExt};
 use syn::{
-    braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident, Pat,
-    Token,
+    braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident,
+    LitInt, Pat, Token,
 };
 
 /**
@@ -458,4 +458,120 @@ impl OfferInvocation {
             }
         }
     }
+}
+
+/// **Internal implementation detail:** This proc macro generates implementations of `Tuple` and
+/// `AsList` for tuples up to the arity passed in as the argument.
+#[proc_macro]
+pub fn impl_tuples(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let idents = (0..=arity_limit)
+        .map(|i| format_ident!("T{}", i))
+        .collect::<Vec<_>>();
+    let mut impls = TokenStream::new();
+
+    for i in 0..=arity_limit {
+        let ident_slice = &idents[..i];
+
+        let typarams = if ident_slice.is_empty() {
+            quote!()
+        } else {
+            quote!(<#(#ident_slice,)*>)
+        };
+
+        let as_tuple = quote!((#(#ident_slice,)*));
+        let as_list = ident_slice
+            .iter()
+            .rev()
+            .fold(quote!(()), |acc, ident| quote!((#ident, #acc)));
+
+        let current_impl = quote! {
+            impl #typarams Tuple for #as_tuple {
+                type AsList = #as_list;
+            }
+
+            impl #typarams List for #as_list {
+                type AsTuple = #as_tuple;
+            }
+        };
+
+        current_impl.to_tokens(&mut impls);
+    }
+
+    impls.into()
+}
+
+/// **Internal implementation detail:** This proc macro generates type synonyms for the
+/// dialectic::unary::types module. It will generate up to the maximum number specified as the
+/// argument.
+#[proc_macro]
+pub fn generate_unary_types(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let type_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
+    let type_values = type_idents.fold(vec![], |mut acc, ident| {
+        let value = match acc.last() {
+            Some((pred_ident, _)) => quote!(S<#pred_ident>),
+            None => quote!(Z),
+        };
+
+        acc.push((ident, value));
+
+        acc
+    });
+
+    let types = type_values.iter().map(|(ident, value)| {
+        quote!(
+            pub type #ident = #value;
+        )
+    });
+
+    let contents = quote! {
+        use crate::unary::{S, Z};
+
+        #(#types)*
+    };
+
+    contents.into()
+}
+
+/// **Internal implementation detail:** This proc macro generates unary type constants for the
+/// dialectic::unary::constants module. It will generate up to the maximum number specified as the
+/// argument.
+#[proc_macro]
+pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let constant_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
+    let constant_values = constant_idents.fold(vec![], |mut acc, ident| {
+        let value = match acc.last() {
+            Some((pred_ident, _)) => quote!(S(#pred_ident)),
+            None => quote!(Z),
+        };
+
+        acc.push((ident, value));
+
+        acc
+    });
+
+    let constants = constant_values.iter().map(|(ident, value)| {
+        quote!(
+            pub const #ident: #ident = #value;
+        )
+    });
+
+    let contents = quote! {
+        use crate::unary::{types::*, S, Z};
+
+        #(#constants)*
+    };
+
+    contents.into()
 }
