@@ -3,4 +3,6 @@ members = [
     "dialectic",
     "dialectic-compiler",
     "dialectic-macro",
+    "dialectic-null",
+    "dialectic-tokio-mpsc",
 ]

@@ -1,0 +1,15 @@
+[package]
+name = "dialectic-tokio-mpsc"
+version = "0.1.0"
+authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
+edition = "2018"    
+license = "MIT"
+description = "tokio + std::mpsc backend for interprocess communication with dialectic"
+repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
+
+[dependencies]
+dialectic = { path = "../dialectic" }
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+
