@@ -3,6 +3,10 @@ name = "dialectic-macro"
 version = "0.1.0"
 authors = ["Shea Leffler <shea@errno.com>", "Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
+license = "MIT"
+description = "Procedural macros used by and exported from the Dialectic crate"
+repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [lib]
 proc-macro = true
