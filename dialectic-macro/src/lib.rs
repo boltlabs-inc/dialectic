@@ -460,8 +460,8 @@ impl OfferInvocation {
     }
 }
 
-/// This proc macro generates implementations of `Tuple` and `AsList` for tuples up to the arity
-/// passed in as the argument.
+/// **Internal implementation detail:** This proc macro generates implementations of `Tuple` and
+/// `AsList` for tuples up to the arity passed in as the argument.
 #[proc_macro]
 pub fn impl_tuples(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let arity_limit = parse_macro_input!(input as LitInt)
@@ -504,8 +504,9 @@ pub fn impl_tuples(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     impls.into()
 }
 
-/// This proc macro generates type synonyms for the dialectic::unary::types module. It will generate
-/// up to the maximum number specified as the argument.
+/// **Internal implementation detail:** This proc macro generates type synonyms for the
+/// dialectic::unary::types module. It will generate up to the maximum number specified as the
+/// argument.
 #[proc_macro]
 pub fn generate_unary_types(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let arity_limit = parse_macro_input!(input as LitInt)
@@ -539,8 +540,9 @@ pub fn generate_unary_types(input: proc_macro::TokenStream) -> proc_macro::Token
     contents.into()
 }
 
-/// This proc macro generates unary type constants for the dialectic::unary::constants module. It
-/// will generate up to the maximum number specified as the argument.
+/// **Internal implementation detail:** This proc macro generates unary type constants for the
+/// dialectic::unary::constants module. It will generate up to the maximum number specified as the
+/// argument.
 #[proc_macro]
 pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let arity_limit = parse_macro_input!(input as LitInt)
