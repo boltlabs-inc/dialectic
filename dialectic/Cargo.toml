@@ -25,7 +25,7 @@ futures = { version = "0.3", default-features = false }
 derivative = "2.1"
 pin-project = "1"
 static_assertions = "1.1"
-dialectic-macro = { path = "../dialectic-macro" }
+dialectic-macro = { version = "0.1", path = "../dialectic-macro" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

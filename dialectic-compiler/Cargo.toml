@@ -3,17 +3,21 @@ name = "dialectic-compiler"
 version = "0.1.0"
 authors = ["Shea Leffler <shea@errno.com>", "Kenny Foner <kwf@boltlabs.io>"]
 edition = "2018"
+license = "MIT"
+description = "Session type macro compiler for the Dialectic crate"
+repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [features]
 default = []
 
 [dependencies]
-thunderdome = "0.4.0"
-syn = { version = "1.0.60", features = ["full", "extra-traits"] }
-proc-macro2 = "1.0.24"
-quote = "1.0.9"
-proc-macro-crate = "1.0.0"
-thiserror = "1.0.23"
+thunderdome = "0.4"
+syn = { version = "1.0", features = ["full", "extra-traits"] }
+proc-macro2 = "1.0"
+quote = "1.0"
+proc-macro-crate = "1.0"
+thiserror = "1.0"
 quickcheck = { version = "1.0.3", optional = true }
 
 [[test]]
