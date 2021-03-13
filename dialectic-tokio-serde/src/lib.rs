@@ -29,12 +29,12 @@
 
 use std::{future::Future, pin::Pin};
 
+use call_by::CallBy;
 use dialectic::{
     backend::{Choice, Receive, Ref, Transmit, Val},
     unary::Unary,
     Chan,
 };
-use call_by::CallBy;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde_crate::{Deserialize, Serialize};
