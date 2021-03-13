@@ -48,16 +48,20 @@ pub type Chan<P> = dialectic::Chan<P, Sender, Receiver>;
 pub type UnboundedChan<P> = dialectic::Chan<P, UnboundedSender, UnboundedReceiver>;
 
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
+#[derive(Debug)]
 pub struct Receiver(pub mpsc::Receiver<Box<dyn Any + Send>>);
 
 /// A bounded sender for dynamically typed values. See [`tokio::sync::mpsc::Sender`].
+#[derive(Debug, Clone)]
 pub struct Sender(pub mpsc::Sender<Box<dyn Any + Send>>);
 
 /// An unbounded receiver for dynamically typed values. See
 /// [`tokio::sync::mpsc::UnboundedReceiver`].
+#[derive(Debug)]
 pub struct UnboundedReceiver(pub mpsc::UnboundedReceiver<Box<dyn Any + Send>>);
 
 /// An unbounded sender for dynamically typed values. See [`tokio::sync::mpsc::UnboundedSender`].
+#[derive(Debug, Clone)]
 pub struct UnboundedSender(pub mpsc::UnboundedSender<Box<dyn Any + Send>>);
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.

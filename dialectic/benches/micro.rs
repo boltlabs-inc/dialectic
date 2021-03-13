@@ -195,13 +195,13 @@ fn bench_tokio_mpsc(c: &mut Criterion) {
                 Send | Choose | Call | Split => {}
                 Recv => {
                     for _ in 0..iters {
-                        tx1.send(Box::new(())).unwrap();
+                        tx1.0.send(Box::new(())).unwrap();
                     }
                 }
                 Offer => {
                     for _ in 0..iters {
                         let zero_choice: Choice<_1> = 0u8.try_into().unwrap();
-                        tx1.send(Box::new(zero_choice)).unwrap();
+                        tx1.0.send(Box::new(zero_choice)).unwrap();
                     }
                 }
             };

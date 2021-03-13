@@ -1,16 +1,15 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dialectic_tokio_mpsc as mpsc;
 use dialectic::prelude::*;
 use dialectic::Unavailable;
-use std::{any::Any, sync::Arc, time::Duration};
-use std::{marker, time::Instant};
+use dialectic_tokio_mpsc as mpsc;
+use std::time::Instant;
+use std::{sync::Arc, time::Duration};
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::channel;
 
 type Server = Session! { loop { send bool } };
 type Client = <Server as Session>::Dual;
 
-async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::Receiver<'static>>) {
+async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::Receiver>) {
     while {
         let (b, c) = chan.recv().await.unwrap();
         chan = c;
@@ -18,25 +17,22 @@ async fn dialectic_client(mut chan: Chan<Client, Unavailable, mpsc::Receiver<'st
     } {}
 }
 
-async fn plain_client(mut rx: mpsc::Receiver<'static>) {
-    while *rx.recv().await.unwrap().downcast().unwrap() {}
+async fn plain_client(mut rx: mpsc::Receiver) {
+    while *rx.0.recv().await.unwrap().downcast().unwrap() {}
 }
 
-async fn dialectic_server(
-    iterations: usize,
-    mut chan: Chan<Server, mpsc::Sender<'static>, Unavailable>,
-) {
+async fn dialectic_server(iterations: usize, mut chan: Chan<Server, mpsc::Sender, Unavailable>) {
     for _ in 0..iterations {
         chan = chan.send(true).await.unwrap();
     }
     let _ = chan.send(false).await.unwrap();
 }
 
-async fn plain_server(iterations: usize, tx: mpsc::Sender<'static>) {
+async fn plain_server(iterations: usize, tx: mpsc::Sender) {
     for _ in 0..iterations {
-        tx.send(Box::new(true)).await.unwrap();
+        tx.0.send(Box::new(true)).await.unwrap();
     }
-    tx.send(Box::new(false)).await.unwrap();
+    tx.0.send(Box::new(false)).await.unwrap();
 }
 
 fn bench_send_recv(c: &mut Criterion) {
@@ -52,7 +48,7 @@ fn bench_send_recv(c: &mut Criterion) {
             let mut total_duration = Duration::from_secs(0);
             for _ in 0..iters {
                 // Pre-populate the channel with things to receive
-                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let (tx, rx) = mpsc::channel(s + 1);
                 rt.block_on(plain_server(s, tx.clone()));
                 let client = Client::wrap(Unavailable::default(), rx);
                 let start = Instant::now();
@@ -68,7 +64,7 @@ fn bench_send_recv(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut total_duration = Duration::from_secs(0);
             for _ in 0..iters {
-                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let (tx, rx) = mpsc::channel(s + 1);
                 let server = Server::wrap(tx, Unavailable::default());
                 let start = Instant::now();
                 rt.block_on(dialectic_server(s, server));
@@ -89,7 +85,7 @@ fn bench_send_recv(c: &mut Criterion) {
             let mut total_duration = Duration::from_secs(0);
             for _ in 0..iters {
                 // Pre-populate the channel with things to receive
-                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let (tx, rx) = mpsc::channel(s + 1);
                 rt.block_on(plain_server(s, tx.clone()));
                 let start = Instant::now();
                 rt.block_on(plain_client(rx));
@@ -104,7 +100,7 @@ fn bench_send_recv(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut total_duration = Duration::from_secs(0);
             for _ in 0..iters {
-                let (tx, rx) = channel::<Box<dyn Any + marker::Send>>(s + 1);
+                let (tx, rx) = mpsc::channel(s + 1);
                 let start = Instant::now();
                 rt.block_on(plain_server(s, tx));
                 total_duration += start.elapsed();
