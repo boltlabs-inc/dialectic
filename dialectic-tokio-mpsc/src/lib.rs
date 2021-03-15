@@ -66,7 +66,7 @@ pub struct UnboundedSender(pub mpsc::UnboundedSender<Box<dyn Any + Send>>);
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is a wrapper around a `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// This is a wrapper around `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::channel`].
 ///
 /// # Examples
@@ -81,7 +81,7 @@ pub fn channel(buffer: usize) -> (Sender, Receiver) {
 
 /// Create an unbounded mpsc channel for transporting dynamically typed values.
 ///
-/// This is a wrapper around a `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
+/// This is a wrapper around `tokio::sync::mpsc::channel::<Box<dyn Any + Send>>`. See
 /// [`tokio::sync::mpsc::unbounded_channel`].
 ///
 /// # Examples
