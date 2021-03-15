@@ -2,7 +2,7 @@
 name = "dialectic-null"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
-edition = "2018"    
+edition = "2018"
 license = "MIT"
 description = "A no-op backend for the Dialectic crate, intended for benchmarking and testing"
 repository = "https://github.com/boltlabs-inc/dialectic"
@@ -10,3 +10,7 @@ homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [dependencies]
 dialectic = { version = "0.4", path = "../dialectic" }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

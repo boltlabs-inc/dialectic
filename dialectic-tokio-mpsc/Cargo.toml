@@ -2,7 +2,7 @@
 name = "dialectic-tokio-mpsc"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
-edition = "2018"    
+edition = "2018"
 license = "MIT"
 description = "A backend for the Dialectic crate using Tokio's MPSC channels"
 repository = "https://github.com/boltlabs-inc/dialectic"
@@ -12,3 +12,7 @@ homepage = "https://github.com/boltlabs-inc/dialectic"
 dialectic = { version = "0.4", path = "../dialectic" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

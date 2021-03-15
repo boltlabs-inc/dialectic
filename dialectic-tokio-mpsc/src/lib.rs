@@ -1,6 +1,8 @@
-//! A backend implementation using [`tokio::sync::mpsc`] channels carrying boxed values `Box<dyn Any
+//! This crate provides a backend implementation for the [`dialectic`] crate using
+//! [`tokio::sync::mpsc`] channels carrying boxed values `Box<dyn Any
 //! + Send>`, which are downcast to their true type (inferred from the session type) on the other
-//!   end of the channel.
+//!   end of the channel. Select this backend if you're using the Tokio runtime for asynchrony and
+//!   you only need to communicate between tasks in the same process.
 
 #![allow(clippy::type_complexity)]
 #![warn(missing_docs)]
@@ -10,7 +12,6 @@
 #![warn(unused)]
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use dialectic::backend::*;
 use std::{any::Any, future::Future, pin::Pin};
