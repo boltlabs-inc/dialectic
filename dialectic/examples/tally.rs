@@ -165,7 +165,6 @@ async fn server_tally(
 
 /// A tallying operation: either `+` or `*`.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[serde(crate = "serde_crate")] // only necessary in the Dialectic crate because of features
 pub enum Operation {
     Sum,
     Product,
