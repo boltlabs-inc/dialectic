@@ -13,9 +13,6 @@
 //! If your outgoing and incoming streams are encoded or serialized differently, or your
 //! serialization or encoding format is not [`Clone`], use [`Sender::new`] and [`Receiver::new`]
 //! directly to construct each end of the connection.
-//!
-//! Like some foods and drinks, some serialization formats and framing codecs pair well together.
-//! Helper functions for those common cases can be found in the [`format`](self::format) module.
 
 #![allow(clippy::type_complexity)]
 #![warn(missing_docs)]
@@ -37,14 +34,13 @@ use dialectic::{
 };
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use serde_crate::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
 mod error;
 pub use error::*;
-pub mod format;
 
 #[doc(no_inline)]
 pub use tokio_util::codec;

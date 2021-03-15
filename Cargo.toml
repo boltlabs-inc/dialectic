@@ -6,4 +6,6 @@ members = [
     "dialectic-null",
     "dialectic-tokio-mpsc",
     "dialectic-tokio-serde",
+    "dialectic-tokio-serde-bincode",
+    "dialectic-tokio-serde-json",
 ]

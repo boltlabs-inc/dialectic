@@ -1,7 +1,7 @@
-use crate::*;
-use bincode_crate as bincode;
+use dialectic_tokio_serde::*;
 use bytes::Bytes;
-use serde_crate::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 
 /// The [Bincode](bincode) binary serialization format.
@@ -9,7 +9,6 @@ use tokio_util::codec::length_delimited::LengthDelimitedCodec;
 /// To construct with default options, use `Bincode::default()`. To configure custom options, use
 /// the Bincode crate's [bincode::Options] builder, then the [`.into()`](Into::into) method to
 /// construct a [`Bincode`].
-#[cfg_attr(docsrs, doc(cfg(feature = "bincode")))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Bincode<O: bincode::Options = bincode::DefaultOptions>(O);
 
@@ -48,7 +47,6 @@ where
 ///
 /// The `max_length` parameter indicates the maximum length of any message received or sent. An
 /// error is thrown during encoding and decoding if a message would exceed this length.
-#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
 pub fn length_delimited_bincode<W: AsyncWrite, R: AsyncRead>(
     writer: W,
     reader: R,

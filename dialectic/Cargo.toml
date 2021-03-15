@@ -40,7 +40,8 @@ structopt = "0.3"
 criterion = { version = "0.3", features = ["async_tokio"] }
 dialectic-null = { path = "../dialectic-null" }
 dialectic-tokio-mpsc = { path = "../dialectic-tokio-mpsc" }
-dialectic-tokio-serde = { path = "../dialectic-tokio-serde", features = ["bincode", "json"] }
+dialectic-tokio-serde = { path = "../dialectic-tokio-serde" }
+dialectic-tokio-serde-bincode = { path = "../dialectic-tokio-serde-bincode" }
 
 [package.metadata.docs.rs]
 all-features = true
