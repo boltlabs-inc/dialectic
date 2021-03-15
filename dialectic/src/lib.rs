@@ -30,6 +30,14 @@ Together, these make Dialectic ideal for writing networked services that need to
 levels of availability** and **complex protocol correctness properties** in the real world,
 where protocols might be violated and connections might be dropped.
 
+Dialectic supports a number of async runtimes and backends out-of-the-box, if you don't want to or don't need to write your own:
+- The [`dialectic_tokio_mpsc`] crate supports using Dialectic to communicate between threads/tasks using Tokio's [`mpsc`] queues.
+- The [`dialectic_tokio_serde`] crate supports using Dialectic to communicate over any [`AsyncRead`]/[`AsyncWrite`] transport layer encoded using any Tokio [`codec`](tokio_util::codec). A couple of Serde formats are already implemented, but it is easy to implement your own:
+  - [`dialectic_tokio_serde_bincode`] backend using [`bincode`] for serialization
+  - [`dialectic_tokio_serde_json`] backend using [`serde_json`] for serialization
+
+These crates also serve as good references for writing your own backends.
+
 <!-- snip -->
 
 # What now?
@@ -77,6 +85,14 @@ Once you've got a channel, here's what you can do:
 | [`call { ... }; ...`<br>or<br>`call S; ...`](macro@crate::Session#the-call-keyword) | [`Call<P, Q>`](Call) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.call(&#124;c&#124; async move { ... }).await?;</code>](Chan::call) | [`Call<P::Dual, Q::Dual>`](Call) |
 | [`split { -> ..., <- ... }; ...`](macro@crate::Session#the-split-keyword) | [`Split<P, Q, R>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `R`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual, R::Dual>`](Split) |
 | (empty macro invocation) | [`Done`] | Closes the channel, dropping its receive/transmit ends: [`c.close();`](Chan::close) | [`Done`] | [`c.close()`](Chan::close) |
+
+[`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+[`dialectic_tokio_serde`]: https://docs.rs/dialectic-tokio-serde
+[`dialectic_tokio_serde_bincode`]: https://docs.rs/dialectic-tokio-serde-bincode
+[`dialectic_tokio_serde_json`]: https://docs.rs/dialectic-tokio-serde-json
+[`AsyncWrite`]: tokio::io::AsyncWrite
+[`AsyncRead`]: tokio::io::AsyncRead
+[`mpsc`]: tokio::sync::mpsc
 */
 
 #![recursion_limit = "256"]
