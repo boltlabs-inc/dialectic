@@ -38,10 +38,10 @@ bytes = "1"
 colored = "2"
 structopt = "0.3"
 criterion = { version = "0.3", features = ["async_tokio"] }
-dialectic-null = { path = "../dialectic-null" }
-dialectic-tokio-mpsc = { path = "../dialectic-tokio-mpsc" }
-dialectic-tokio-serde = { path = "../dialectic-tokio-serde" }
-dialectic-tokio-serde-bincode = { path = "../dialectic-tokio-serde-bincode" }
+dialectic-null = { version = "0.1", path = "../dialectic-null" }
+dialectic-tokio-mpsc = { version = "0.1", path = "../dialectic-tokio-mpsc" }
+dialectic-tokio-serde = { version = "0.1", path = "../dialectic-tokio-serde" }
+dialectic-tokio-serde-bincode = { version = "0.1", path = "../dialectic-tokio-serde-bincode" }
 
 [package.metadata.docs.rs]
 all-features = true
