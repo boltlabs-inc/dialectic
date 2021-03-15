@@ -8,9 +8,6 @@ description = "Session type macro compiler for the Dialectic crate"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
-[features]
-default = []
-
 [dependencies]
 thunderdome = "0.4"
 syn = { version = "1.0", features = ["full", "extra-traits"] }
