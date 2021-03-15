@@ -14,7 +14,6 @@
 #![warn(unused)]
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use dialectic::backend::*;
 use dialectic::unary::{Unary, S, Z};

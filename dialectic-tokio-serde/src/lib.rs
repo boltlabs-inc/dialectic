@@ -1,6 +1,8 @@
-//! A family of backend implementations using the [`serde`](serde) crate to transport
-//! [`Serialize`] and [`Deserialize`] values by reference across any [`AsyncRead`] and
-//! [`AsyncWrite`] transports.
+//! This crate provides an interface to build a family of backend implementations using the
+//! [`serde`](serde) crate to transport [`Serialize`] and [`Deserialize`] values by reference across
+//! any [`AsyncRead`] and [`AsyncWrite`] transports. In order to use it, you will need to depend on
+//! some other crate which provides the definition of a serialization format; none such are defined
+//! here.
 //!
 //! To use this backend, select:
 //! - a particular serialization format, such as from the [`dialectic_tokio_serde_bincode`] or
@@ -18,7 +20,6 @@
 //! [`dialectic_tokio_serde_bincode`]: https://docs.rs/dialectic-tokio-serde-bincode
 //! [`dialectic_tokio_serde_json`]: https://docs.rs/dialectic-tokio-serde-json
 
-#![allow(clippy::type_complexity)]
 #![warn(missing_docs)]
 #![warn(missing_copy_implementations, missing_debug_implementations)]
 #![warn(unused_qualifications, unused_results)]
@@ -26,7 +27,6 @@
 #![warn(unused)]
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::{future::Future, pin::Pin};
 

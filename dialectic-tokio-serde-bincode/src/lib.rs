@@ -1,5 +1,16 @@
-use dialectic_tokio_serde::*;
+//! This crate provides an implementation of the [`bincode`] serialization format compatible with
+//! the [`dialectic-tokio-serde`] backend for the [`dialectic`] crate. To use it, you will also need
+//! to import the [`dialectic-tokio-serde`] crate.
+#![warn(missing_docs)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+// Documentation configuration
+#![forbid(broken_intra_doc_links)]
+
 use bytes::Bytes;
+use dialectic_tokio_serde::*;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::length_delimited::LengthDelimitedCodec;

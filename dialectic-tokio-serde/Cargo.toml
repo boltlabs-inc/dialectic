@@ -2,7 +2,7 @@
 name = "dialectic-tokio-serde"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
-edition = "2018"    
+edition = "2018"
 license = "MIT"
 description = "A backend builder for the Dialectic crate using Serde serialization over Tokio transport"
 repository = "https://github.com/boltlabs-inc/dialectic"
@@ -16,3 +16,7 @@ serde = { version = "1" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,11 +1,21 @@
+//! This crate provides an implementation of the [`json`](serde_json) serialization format
+//! compatible with the [`dialectic-tokio-serde`] backend for the [`dialectic`] crate. To use it,
+//! you will also need to import the [`dialectic-tokio-serde`] crate.
+#![warn(missing_docs)]
+#![warn(missing_copy_implementations, missing_debug_implementations)]
+#![warn(unused_qualifications, unused_results)]
+#![warn(future_incompatible)]
+#![warn(unused)]
+// Documentation configuration
+#![forbid(broken_intra_doc_links)]
+
 use dialectic_tokio_serde::*;
+use serde::{Deserialize, Serialize};
 use serde_json as json;
 use tokio::io::{AsyncRead, AsyncWrite};
-use serde::{Serialize, Deserialize};
 use tokio_util::codec::LinesCodec;
 
 /// The [JSON](json) serialization format.
-#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
 #[derive(Debug, Clone, Copy)]
 pub struct Json {
     pretty: bool,
@@ -55,7 +65,6 @@ impl<Input: AsRef<str>> Deserializer<Input> for Json {
 ///
 /// The `max_length` parameter indicates the maximum length of any message received or sent. An
 /// error is thrown during encoding and decoding if a message exceeds this length.
-#[cfg_attr(docsrs, doc(cfg(feature = "json")))]
 pub fn json_lines<W: AsyncWrite, R: AsyncRead>(
     writer: W,
     reader: R,
