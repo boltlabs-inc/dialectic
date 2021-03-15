@@ -3,7 +3,8 @@
 //! [`AsyncWrite`] transports.
 //!
 //! To use this backend, select:
-//! - a particular serialization [`format`](self::format),
+//! - a particular serialization format, such as from the [`dialectic_tokio_serde_bincode`] or
+//!   [`dialectic_tokio_serde_json`] crates,
 //! - a particular [`codec`] for encoding and decoding frames, and
 //! - your choice of [`AsyncRead`] and [`AsyncWrite`] reader and writer.
 //!
@@ -13,6 +14,9 @@
 //! If your outgoing and incoming streams are encoded or serialized differently, or your
 //! serialization or encoding format is not [`Clone`], use [`Sender::new`] and [`Receiver::new`]
 //! directly to construct each end of the connection.
+//!
+//! [`dialectic_tokio_serde_bincode`]: https://docs.rs/dialectic-tokio-serde-bincode
+//! [`dialectic_tokio_serde_json`]: https://docs.rs/dialectic-tokio-serde-json
 
 #![allow(clippy::type_complexity)]
 #![warn(missing_docs)]
