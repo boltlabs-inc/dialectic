@@ -12,7 +12,7 @@ categories = ["asynchronous", "concurrency"]
 readme = "../README.md"
 
 [features]
-default = ["serde"]
+default = []
 docs-features = ["tokio"]
 
 [dependencies]
