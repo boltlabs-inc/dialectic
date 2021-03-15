@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"    
 license = "MIT"
-description = "tokio + std::mpsc backend for interprocess communication with dialectic"
+description = "A backend for the Dialectic crate using Tokio's MPSC channels"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
