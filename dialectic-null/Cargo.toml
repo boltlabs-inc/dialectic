@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"    
 license = "MIT"
-description = "a no-op backend for dialectic for benchmarking/testing purposes"
+description = "A no-op backend for the Dialectic crate, intended for benchmarking and testing"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
