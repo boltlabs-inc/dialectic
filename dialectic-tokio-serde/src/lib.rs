@@ -1,4 +1,4 @@
-//! A family of backend implementations using the [`serde`](serde_crate) crate to transport
+//! A family of backend implementations using the [`serde`](serde) crate to transport
 //! [`Serialize`] and [`Deserialize`] values by reference across any [`AsyncRead`] and
 //! [`AsyncWrite`] transports.
 //!
@@ -52,12 +52,12 @@ pub use tokio_util::codec;
 /// The serialization end of a serialization format: an object which can serialize any [`Serialize`]
 /// value.
 ///
-/// This trait *resembles* [`serde::Serializer`](serde_crate::Serializer), but is not identical to
-/// it. Unlike [`serde::Serializer`](serde_crate::Serializer), it defines the
+/// This trait *resembles* [`serde::Serializer`](serde::Serializer), but is not identical to
+/// it. Unlike [`serde::Serializer`](serde::Serializer), it defines the
 /// [`Output`](Serializer::Output) of a serializer, which should be something like `Bytes`,
 /// [`String`], or another output format.
 ///
-/// Most [`serde::Serializer`](serde_crate::Serializer)s can be easily given an instance of
+/// Most [`serde::Serializer`](serde::Serializer)s can be easily given an instance of
 /// [`Serializer`]. When implementing this trait, you should pick the most specific output format
 /// for [`Output`](Serializer::Output). For instance, if you can serialize to a [`String`] or a
 /// [`Vec<u8>`](Vec), pick [`String`], because it implements [`AsRef<[u8]>`](AsRef).
@@ -75,12 +75,12 @@ pub trait Serializer {
 /// The deserialization end of a serialization format: an object which can deserialize to any
 /// non-lifetime-restricted [`Deserialize`] value.
 ///
-/// This trait *resembles* [`serde::Deserializer`](serde_crate::Deserializer), but is not identical
-/// to it. Unlike [`serde::Deserializer`](serde_crate::Deserializer), it is parameterized by the
+/// This trait *resembles* [`serde::Deserializer`](serde::Deserializer), but is not identical
+/// to it. Unlike [`serde::Deserializer`](serde::Deserializer), it is parameterized by the
 /// `Input` to a deserializer, which might be something like `Bytes`, [`String`], or another input
 /// format.
 ///
-/// Most [`serde::Deserializer`](serde_crate::Deserializer)s can be easily given an instance of
+/// Most [`serde::Deserializer`](serde::Deserializer)s can be easily given an instance of
 /// [`Deserializer`]. When implementing this trait, you should usually be as general as possible for
 /// the `Input` parameter. Consider whether you can implement it for all [`AsRef<[u8]>`](AsRef) or
 /// [`AsRef<str>`](AsRef) rather than a single concrete input format.

@@ -131,7 +131,7 @@ impl<N: Unary> From<Choice<N>> for u8 {
 mod serialization {
     use super::*;
 
-    use serde_crate::{
+    use serde::{
         de::{self, Visitor},
         Deserialize, Deserializer, Serialize, Serializer,
     };
