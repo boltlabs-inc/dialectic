@@ -3,7 +3,7 @@ use dialectic_tokio_serde::{codec::LengthDelimitedCodec};
 use dialectic_tokio_serde_bincode::Bincode;
 
 use colored::*;
-pub use serde_crate::{Deserialize, Serialize};
+pub use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt::Debug, future::Future, io, process};
 use structopt::StructOpt;
 use tokio::{
