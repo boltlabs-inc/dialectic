@@ -9,6 +9,6 @@ repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [dependencies]
-dialectic = { path = "../dialectic" }
+dialectic = { version = "0.4", path = "../dialectic" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
