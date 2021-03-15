@@ -1,5 +1,7 @@
-use crate::*;
+use dialectic_tokio_serde::*;
 use serde_json as json;
+use tokio::io::{AsyncRead, AsyncWrite};
+use serde::{Serialize, Deserialize};
 use tokio_util::codec::LinesCodec;
 
 /// The [JSON](json) serialization format.
