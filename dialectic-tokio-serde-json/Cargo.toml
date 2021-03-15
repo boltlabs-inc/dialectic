@@ -3,6 +3,9 @@ name = "dialectic-tokio-serde-json"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"
+description = "A backend for the Dialectic crate using JSON serialization over Tokio transport"
+repository = "https://github.com/boltlabs-inc/dialectic"
+homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
