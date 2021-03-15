@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"    
 license = "MIT"
-description = "tokio + serde backend for dialectic"
+description = "A backend builder for the Dialectic crate using Serde serialization over Tokio transport"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
