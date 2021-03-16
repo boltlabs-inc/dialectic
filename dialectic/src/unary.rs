@@ -1,19 +1,5 @@
 //! The unary numbers, represented by zero [`Z`] and successor [`S`].
 
-pub mod constants {
-    //! Predefined value-level constants for small type-level numbers. Each of these corresponds
-    //! to a type synonym in [`crate::unary::types`].
-    #![allow(missing_docs)]
-    dialectic_macro::generate_unary_constants!(256);
-}
-
-pub mod types {
-    //! Predefined type-level constants for small type-level numbers. Each of these types is
-    //! inhabited by a corresponding value constant in [`crate::unary::constants`].
-    #![allow(missing_docs)]
-    dialectic_macro::generate_unary_types!(256);
-}
-
 /// The number zero.
 ///
 /// # Examples

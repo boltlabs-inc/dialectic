@@ -327,7 +327,7 @@ where
     Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
     Choices: Tuple + 'static,
     Choices::AsList: HasLength + EachScoped + EachHasDual,
-    _0: LessThan<<Choices::AsList as HasLength>::Length>,
+    Z: LessThan<<Choices::AsList as HasLength>::Length>,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing

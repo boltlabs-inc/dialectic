@@ -3,6 +3,7 @@ use criterion::{
     BenchmarkGroup, Criterion,
 };
 use dialectic::prelude::*;
+use dialectic::unary::{S, Z};
 use dialectic_null as null;
 use dialectic_tokio_mpsc as mpsc;
 use futures::Future;
@@ -45,7 +46,7 @@ async fn choose<Tx, Rx>(
     chan: Chan<Session! { loop { choose { _0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { choose { _0 => {} } } }, Tx, Rx>
 where
-    Tx: Transmit<Choice<_1>, Val> + marker::Send,
+    Tx: Transmit<Choice<S<Z>>, Val> + marker::Send,
     Tx::Error: Debug,
     Rx: marker::Send,
 {
@@ -57,7 +58,7 @@ async fn offer<Tx, Rx>(
 ) -> Chan<Session! { loop { offer { _0 => {} } } }, Tx, Rx>
 where
     Tx: marker::Send,
-    Rx: Receive<Choice<_1>> + marker::Send,
+    Rx: Receive<Choice<S<Z>>> + marker::Send,
     Rx::Error: Debug,
 {
     offer!(chan => {
@@ -150,12 +151,12 @@ fn bench_all_on<Tx, Rx, H, A>(
     backend_name: &str,
     channel: fn(Primitive, u64) -> (Tx, Rx, H),
 ) where
-    Tx: Transmit<(), Val> + Transmit<Choice<_1>, Val> + marker::Send + 'static,
+    Tx: Transmit<(), Val> + Transmit<Choice<S<Z>>, Val> + marker::Send + 'static,
     <Tx as Transmit<(), Val>>::Error: Debug,
-    <Tx as Transmit<Choice<_1>, Val>>::Error: Debug,
-    Rx: Receive<()> + Receive<Choice<_1>> + marker::Send + 'static,
+    <Tx as Transmit<Choice<S<Z>>, Val>>::Error: Debug,
+    Rx: Receive<()> + Receive<Choice<S<Z>>> + marker::Send + 'static,
     <Rx as Receive<()>>::Error: Debug,
-    <Rx as Receive<Choice<_1>>>::Error: Debug,
+    <Rx as Receive<Choice<S<Z>>>>::Error: Debug,
     A: AsyncExecutor,
 {
     use Primitive::*;
@@ -200,7 +201,7 @@ fn bench_tokio_mpsc(c: &mut Criterion) {
                 }
                 Offer => {
                     for _ in 0..iters {
-                        let zero_choice: Choice<_1> = 0u8.try_into().unwrap();
+                        let zero_choice: Choice<S<Z>> = 0u8.try_into().unwrap();
                         tx1.0.send(Box::new(zero_choice)).unwrap();
                     }
                 }
