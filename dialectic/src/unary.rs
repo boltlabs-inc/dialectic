@@ -176,6 +176,19 @@ where
     type Result = S<<(N, M) as Add>::Result>;
 }
 
+/// A trait which allows conversion from a wrapper type over a type-level `usize` to a unary
+/// type-level number representation.
+pub trait ToUnary {
+    /// The result of conversion.
+    type AsUnary: Unary;
+}
+
+/// A wrapper for type-level `usize` values to allow implementing traits on them.
+#[allow(missing_debug_implementations)]
+pub struct Number<const N: usize>;
+
+dialectic_macro::generate_to_unary_impls!(256);
+
 mod sealed {
     use super::*;
     pub trait Unary: 'static {}
