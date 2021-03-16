@@ -575,3 +575,27 @@ pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::T
 
     contents.into()
 }
+
+/// **Internal implementation detail:** This proc macro generates trait implementations converting
+/// type-level constants into unary representation. It will generate up to the maximum number
+/// specified as the argument.
+#[proc_macro]
+pub fn generate_to_unary_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let impls = (0..=arity_limit).scan(quote!(Z), |state, i| {
+        let tokens = quote! {
+            impl ToUnary for Number<#i> {
+                type AsUnary = #state;
+            }
+        };
+
+        *state = quote!(S<#state>);
+
+        Some(tokens)
+    });
+
+    quote!(#(#impls)*).into()
+}
