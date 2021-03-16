@@ -40,7 +40,7 @@ async fn client(
         chan = if let Ok(operation) =
             prompt("Operation (+ or *): ", &mut input, &mut output, str::parse).await
         {
-            let chan = chan.choose(_0).await?.send(&operation).await?;
+            let chan = chan.choose::<0>().await?.send(&operation).await?;
             output
                 .write_all("Enter numbers (press ENTER to tally):\n".as_bytes())
                 .await?;
@@ -50,13 +50,13 @@ async fn client(
                 .await?;
             let chan = chan.unwrap();
             if done {
-                break chan.choose(_1).await?;
+                break chan.choose::<1>().await?;
             } else {
                 chan
             }
         } else {
             // End of input, so quit
-            break chan.choose(_1).await?;
+            break chan.choose::<1>().await?;
         }
     }
     .close();
@@ -102,10 +102,10 @@ async fn client_tally(
         .await;
         match &user_input {
             // User wants to add another number to the tally
-            Ok(Some(n)) => chan = chan.choose(_0).await?.send(&n).await?,
+            Ok(Some(n)) => chan = chan.choose::<0>().await?.send(&n).await?,
             // User wants to finish this tally
             Ok(None) | Err(_) => {
-                let (tally, chan) = chan.choose(_1).await?.recv().await?;
+                let (tally, chan) = chan.choose::<1>().await?.recv().await?;
                 output
                     .write_all(format!("= {}\n", tally).as_bytes())
                     .await?;
