@@ -49,7 +49,7 @@ where
     Tx::Error: Debug,
     Rx: marker::Send,
 {
-    chan.choose(_0).await.unwrap()
+    chan.choose::<0>().await.unwrap()
 }
 
 async fn offer<Tx, Rx>(

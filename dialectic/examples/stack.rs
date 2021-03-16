@@ -70,10 +70,10 @@ fn client_rec<'a>(
                 let string = client_prompt(input, output, size).await?;
                 if string.is_empty() {
                     // Break this nested loop (about to go to pop/quit)
-                    break chan.choose(_0).await?.close();
+                    break chan.choose::<0>().await?.close();
                 } else {
                     // Push the string to the stack
-                    let chan = chan.choose(_1).await?.send(&string).await?;
+                    let chan = chan.choose::<1>().await?.send(&string).await?;
                     // Recursively do `Client`
                     let chan = chan
                         .call(|chan| client_rec(size + 1, input, output, chan))
