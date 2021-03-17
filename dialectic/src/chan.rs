@@ -271,8 +271,8 @@ where
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
     ///     offer!(c2 => {
-    ///         _0 => { c2.recv().await?; },
-    ///         _1 => { c2.send("Hello!".to_string()).await?; },
+    ///         0 => { c2.recv().await?; },
+    ///         1 => { c2.send("Hello!".to_string()).await?; },
     ///     });
     ///     Ok::<_, mpsc::Error>(())
     /// });
@@ -408,8 +408,8 @@ where
     /// # // Spawn a thread to offer a choice
     /// # let t1 = tokio::spawn(async move {
     /// offer!(c2 => {
-    ///     _0 => { c2.recv().await?; },
-    ///     _1 => { c2.send("Hello!".to_string()).await?; },
+    ///     0 => { c2.recv().await?; },
+    ///     1 => { c2.send("Hello!".to_string()).await?; },
     /// });
     /// # Ok::<_, mpsc::Error>(())
     /// # });

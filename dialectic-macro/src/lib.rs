@@ -1,4 +1,4 @@
-#![forbid(rustdoc::broken_intra_doc_links)]
+#![forbid(broken_intra_doc_links)]
 
 extern crate proc_macro;
 use proc_macro2::TokenStream;
@@ -290,8 +290,8 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// // Spawn a thread to offer a choice
 /// let t1 = tokio::spawn(async move {
 ///     offer!(c2 => {
-///         _0 => { c2.recv().await?; },
-///         _1 => { c2.send("Hello!".to_string()).await?; },
+///         0 => { c2.recv().await?; },
+///         1 => { c2.send("Hello!".to_string()).await?; },
 ///     })?;
 ///     Ok::<_, mpsc::Error>(())
 /// });
@@ -400,31 +400,33 @@ impl OfferInvocation {
                 errors.push(syn::Error::new(arm.span(), message));
             }
             match &arm.pat {
-                Pat::Ident(pat_ident) => {
-                    if let Some((_, ref guard)) = arm.guard {
-                        let message = "guards are not permitted in patterns for the `offer!` macro";
-                        errors.push(syn::Error::new(guard.span(), message))
-                    }
-                    if let Some(by_ref) = pat_ident.by_ref {
-                        let message = "`ref` annotations are not permitted in patterns for the `offer!` macro";
-                        errors.push(syn::Error::new(by_ref.span(), message))
-                    }
-                    if let Some(mutability) = pat_ident.mutability {
-                        let message = "`mut` annotations are not permitted in patterns for the `offer!` macro";
-                        errors.push(syn::Error::new(mutability.span(), message))
-                    }
-                    if let Some((_, ref subpat)) = pat_ident.subpat {
-                        let message =
-                            "sub-patterns using `@` are not permitted in patterns for the `offer!` macro";
-                        errors.push(syn::Error::new(subpat.span(), message))
-                    }
-                    if pat_ident.ident != format!("_{}", choice) {
-                        let message = format!("expected the identifier `_{}` for this arm of the `offer!` macro (note: arms must be in ascending order)", choice);
-                        errors.push(syn::Error::new(pat_ident.ident.span(), message))
+                Pat::Lit(pat_lit) => {
+                    let lit_int = match &*pat_lit.expr {
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Int(lit_int),
+                            ..
+                        }) => lit_int,
+                        _ => {
+                            let message = "expected a usize literal";
+                            errors.push(syn::Error::new(pat_lit.expr.span(), message));
+                            continue;
+                        }
+                    };
+
+                    match lit_int.base10_parse::<usize>() {
+                        Ok(n) if n == choice => {}
+                        Ok(_) => {
+                            let message = format!("expected the usize literal `{}` for this arm of the `offer!` macro (note: arms must be in ascending order)", choice);
+                            errors.push(syn::Error::new(pat_lit.span(), message));
+                        }
+                        Err(e) => {
+                            let message = format!("could not parse literal: `{}`", e);
+                            errors.push(syn::Error::new(pat_lit.span(), message));
+                        }
                     }
                 }
                 _ => {
-                    let message = format!("expected the identifier `_{}` for this arm (note: arms must be in ascending order)", choice);
+                    let message = format!("expected the usize literal `{}` for this arm (note: arms must be in ascending order)", choice);
                     errors.push(syn::Error::new(arm.pat.span(), message))
                 }
             }

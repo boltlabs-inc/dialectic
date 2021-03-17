@@ -245,7 +245,7 @@ At current, the target AST does not undergo any kind of transform before it is c
 #![warn(unused_qualifications)]
 #![warn(future_incompatible)]
 #![warn(unused)]
-#![forbid(rustdoc::broken_intra_doc_links)]
+#![forbid(broken_intra_doc_links)]
 
 use {
     proc_macro2::Span,

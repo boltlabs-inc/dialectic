@@ -126,12 +126,12 @@ async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
     loop {
         chan = offer!(chan => {
             // Client wants to compute another tally
-            _0 => {
+            0 => {
                 let (op, chan) = chan.recv().await?;
                 chan.call(|chan| server_tally(&op, chan)).await?.1.unwrap()
             },
             // Client wants to quit
-            _1 => break chan.close(),
+            1 => break chan.close(),
         })?;
     }
     Ok(())
@@ -149,13 +149,13 @@ async fn server_tally(
     loop {
         chan = offer!(chan => {
             // Client wants to add another number to the tally
-            _0 => {
+            0 => {
                 let (i, chan) = chan.recv().await?;
                 tally = op.combine(tally, i);
                 chan
             },
             // Client wants to finish this tally
-            _1 => {
+            1 => {
                 chan.send(&tally).await?.close();
                 break Ok(());
             }

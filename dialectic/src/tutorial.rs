@@ -325,8 +325,8 @@ let (c1, c2) = P::channel(|| mpsc::channel(1));
 // Offer a choice
 let t1 = tokio::spawn(async move {
     let c1 = offer!(c1 => {
-        _0 => c1.send(42).await?,  // handle `c2.choose(_0)`
-        _1 => c1.recv().await?.1,  // handle `c2.choose(_1)`
+        0 => c1.send(42).await?,  // handle `c2.choose(_0)`
+        1 => c1.recv().await?.1,  // handle `c2.choose(_1)`
     })?;
 #   c1.close();
     Ok::<_, mpsc::Error>(())
@@ -463,12 +463,12 @@ tokio::spawn(async move {
     let mut sum = 0;
     let c2 = loop {
         c2 = offer!(c2 => {
-            _0 => {
+            0 => {
                 let (n, c2) = c2.recv().await?;
                 sum += n;
                 c2
             },
-            _1 => break c2,
+            1 => break c2,
         })?;
     };
     c2.send(sum).await?.close();
