@@ -80,7 +80,7 @@ Once you've got a channel, here's what you can do:
 | [`choose { _0 => ..., _1 => ..., ... }; ...`](macro@crate::Session#the-offer-and-choose-keywords) | [`Choose<Choices>`](Choose) | Given some `_N` < the length of `Choices`, returns a new `c`:<br>[`let c = c.choose(_N).await?;`](Chan::choose) | [`Offer<Choices::Duals>`](Offer) |
 | [`offer { _0 => ..., _1 => ..., ... }; ...`](macro@crate::Session#the-offer-and-choose-keywords) | [`Offer<Choices>`](Offer) | Given a set of labeled branches `_N => ...` in ascending order, exactly one for each option in the tuple `Choices`, returns a new `c` whose type each branch must match:<br>[`let c = offer!(c => { _0 => ..., _1 => ..., ... });`](offer!) | [`Choose<Choices::Duals>`](Choose) |
 | [`loop { ... }; ...`<br>or<br>`'label: loop { ... }; ...`](macro@crate::Session#the-loop-break-and-continue-keywords) | [`Loop<P>`](Loop) | Whatever operations are available for `P` | [`Loop<P::Dual>`](Loop) |
-| [`continue;`<br>or<br>`continue 'label;`](macro@crate::Session#the-loop-break-and-continue-keywords) | [`Continue<N = Z>`](Continue) | Whatever operations are available for the start of the referred-to loop | [`Continue<N>`](Continue) |
+| [`continue;`<br>or<br>`continue 'label;`](macro@crate::Session#the-loop-break-and-continue-keywords) | [`Continue<const N: usize>`](Continue) | Whatever operations are available for the start of the referred-to loop | [`Continue<N>`](Continue) |
 | [`break;`<br>or<br>`break 'label;`](macro@crate::Session#the-loop-break-and-continue-keywords) | Whatever follows the `loop` | Whatever operations are available after the end of the `loop` statement | The dual of whatever follows the `loop` |
 | [`call { ... }; ...`<br>or<br>`call S; ...`](macro@crate::Session#the-call-keyword) | [`Call<P, Q>`](Call) | Given a closure evaluating the session type `P` to `Done`, returns a result and a channel for the type `Q`:<br>[<code>let (t, c) = c.call(&#124;c&#124; async move { ... }).await?;</code>](Chan::call) | [`Call<P::Dual, Q::Dual>`](Call) |
 | [`split { -> ..., <- ... }; ...`](macro@crate::Session#the-split-keyword) | [`Split<P, Q, R>`](Split) | Given a closure evaluating the session types `P` (send-only) and `Q` (receive-only) each to `Done` (potentially concurrently), returns a result and a channel for `R`:<br>[<code>let (t, c) = c.split(&#124;c&#124; async move { ... }).await?;</code>](Chan::split) | [`Split<Q::Dual, P::Dual, R::Dual>`](Split) |
@@ -103,7 +103,7 @@ Once you've got a channel, here's what you can do:
 #![warn(future_incompatible)]
 #![warn(unused)]
 // Documentation configuration
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]

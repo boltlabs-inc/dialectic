@@ -26,14 +26,13 @@
 #![warn(future_incompatible)]
 #![warn(unused)]
 // Documentation configuration
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 
 use std::{future::Future, pin::Pin};
 
 use call_by::CallBy;
 use dialectic::{
     backend::{Choice, Receive, Ref, Transmit, Val},
-    unary::Unary,
     Chan,
 };
 use futures::sink::SinkExt;
@@ -192,7 +191,7 @@ where
 // for `send`, and since everything is actually sent by reference, there's no reason to provide the
 // extra ability. Instead, we specifically implement send-by-value for `Choice`, because it's
 // required for all backends, and let everything else be send-by-ref only.
-impl<N: Unary + Send + 'static, F, E, W> Transmit<Choice<N>, Val> for Sender<F, E, W>
+impl<F, E, W, const N: usize> Transmit<Choice<N>, Val> for Sender<F, E, W>
 where
     F: Serializer + Unpin + Send,
     F::Output: Send,

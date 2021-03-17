@@ -2,7 +2,7 @@
 //! should use the [`Chan`](super::Chan) type synonym instead.
 use std::{
     any::TypeId,
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     marker::{self, PhantomData},
     mem,
     pin::Pin,
@@ -227,12 +227,15 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session, Choices> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, Length, Choice> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Choose<Choices>>,
-    Tx: Transmit<Choice<<Choices::AsList as HasLength>::Length>, Val>,
     Choices: Tuple,
-    Choices::AsList: HasLength,
+    Choices::AsList: HasLength<Length = Length>,
+    Length: ToChoice<AsChoice = Choice>,
+    Choice: TryFrom<u8, Error = OutOfBoundsChoiceError> + marker::Send + Sync + 'static,
+    S: Session<Action = Choose<Choices>>,
+    Tx: Transmit<Choice, Val> + marker::Send + 'static,
+    Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
     /// other end of the connection, alerting the other party to this choice by sending the number
@@ -275,7 +278,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose(_0).await?.send(42).await?;
+    /// c1.choose::<0>().await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -295,7 +298,7 @@ where
     /// let (c1, c2) = OnlyTwoChoices::channel(|| mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
-    /// c1.choose(_2).await?;
+    /// c1.choose::<2>().await?;
     ///
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
@@ -313,7 +316,8 @@ where
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
     {
-        let choice = (N as u8)
+        let choice = u8::try_from(N)
+            .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
         self.tx.as_mut().unwrap().send(choice).await?;
@@ -321,13 +325,16 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session, Choices> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, Length, Choice> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Offer<Choices>>,
-    Rx: Receive<Choice<<Choices::AsList as HasLength>::Length>>,
     Choices: Tuple + 'static,
-    Choices::AsList: HasLength + EachScoped + EachHasDual,
-    Z: LessThan<<Choices::AsList as HasLength>::Length>,
+    Choices::AsList: HasLength<Length = Length> + EachScoped + EachHasDual,
+    Length: Unary + ToChoice<AsChoice = Choice>,
+    Choice: Into<u8>,
+    Z: LessThan<Length>,
+    S: Session<Action = Offer<Choices>>,
+    Tx: marker::Send + 'static,
+    Rx: Receive<Length::AsChoice> + marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -361,9 +368,9 @@ where
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case(_0) {
+    ///     match c2.offer().await?.case::<0>() {
     ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case(_0) {
+    ///         Err(rest) => match rest.case::<0>() {
     ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
     ///             Err(rest) => rest.empty_case(),
     ///         }
@@ -372,7 +379,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose(_0).await?.send(42).await?;
+    /// c1.choose::<0>().await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -408,7 +415,7 @@ where
     /// # });
     /// #
     /// # // Choose to send an integer
-    /// # c1.choose(_0).await?.send(42).await?;
+    /// # c1.choose::<0>().await?.send(42).await?;
     /// #
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
@@ -847,33 +854,34 @@ where
     }
 }
 
-impl<Tx, Rx, Choices> Branches<Choices, Tx, Rx>
+impl<Tx, Rx, Choices, Length> Branches<Choices, Tx, Rx>
 where
+    Choices: Tuple + 'static,
+    Choices::AsList: EachScoped + EachHasDual + HasLength<Length = Length>,
+    Length: ToChoice,
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
-    Choices: Tuple + 'static,
-    Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
     /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
     /// so, return the corresponding channel; otherwise, return all the other possibilities.
-    pub fn case<N: Unary>(
+    pub fn case<const N: usize>(
         mut self,
-        _branch: N,
     ) -> Result<
-        Chan<<Choices::AsList as Select<N>>::Selected, Tx, Rx>,
-        Branches<<<Choices::AsList as Select<N>>::Remainder as List>::AsTuple, Tx, Rx>,
+        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+        Branches<<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Remainder as List>::AsTuple, Tx, Rx>,
     >
     where
-        Choices::AsList: Select<N>,
-        <Choices::AsList as Select<N>>::Selected: Session,
-        <Choices::AsList as Select<N>>::Remainder: EachScoped + EachHasDual + HasLength + List,
+        Number<N>: ToUnary,
+        Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Remainder: EachScoped + EachHasDual + HasLength + List,
     {
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.clone();
         let drop_rx = self.drop_rx.clone();
-        let branch: u8 = N::VALUE
+        let branch: u8 = N
             .try_into()
             .expect("branch discriminant exceeded u8::MAX in `case`");
         if variant == branch {
@@ -906,7 +914,7 @@ where
     ///
     /// Ordinarily, you should prefer the [`offer!`](crate::offer) macro in situations where you
     /// need to know this value.
-    pub fn choice(&self) -> Choice<<Choices::AsList as HasLength>::Length> {
+    pub fn choice(&self) -> Length::AsChoice {
         self.variant
             .try_into()
             .expect("internal variant for `Branches` exceeds number of choices")

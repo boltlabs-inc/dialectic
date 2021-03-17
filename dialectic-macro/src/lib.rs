@@ -1,4 +1,4 @@
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 
 extern crate proc_macro;
 use proc_macro2::TokenStream;
@@ -118,7 +118,7 @@ type_eq!(
 type_eq!(
     Session! { loop { send (); } },
     Session! { loop { send (); continue; } },
-    Loop<Send<(), Continue>>,
+    Loop<Send<(), Continue<0>>>,
 );
 
 type_eq!(
@@ -141,7 +141,7 @@ type_eq!(
             }
         }
     },
-    Loop<Send<(), Loop<Continue<_1>>>>
+    Loop<Send<(), Loop<Continue<1>>>>
 );
 ```
 
@@ -173,7 +173,7 @@ type R = Session! {
     }
 };
 
-type_eq!(R, Loop<Choose<(Send<i64, Call<Continue, Recv<i64, Continue>>>, Done)>>);
+type_eq!(R, Loop<Choose<(Send<i64, Call<Continue<0>, Recv<i64, Continue<0>>>>, Done)>>);
 ```
 
 ## The `split` keyword
@@ -222,7 +222,7 @@ type Protocol = Session! {
 
 type_eq!(
     Protocol,
-    Loop<Choose<(Send<i64, Recv<bool, Send<i64, Recv<bool, Continue>>>>, Done)>>,
+    Loop<Choose<(Send<i64, Recv<bool, Send<i64, Recv<bool, Continue<0>>>>>, Done)>>,
 );
 ```
 
@@ -297,7 +297,7 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// });
 ///
 /// // Choose to send an integer
-/// c1.choose(_0).await?.send(42).await?;
+/// c1.choose::<0>().await?.send(42).await?;
 ///
 /// // Wait for the offering thread to finish
 /// t1.await??;
@@ -354,22 +354,12 @@ impl ToTokens for OfferOutput {
         // Find the path necessary to refer to types in the dialectic crate.
         let dialectic_crate = dialectic_compiler::dialectic_path();
 
-        // Convert a `usize` into the tokens that represent it in unary
-        let unary = |n: usize| -> TokenStream {
-            let mut output = quote! { #dialectic_crate::unary::Z };
-            for _ in 0..n {
-                output = quote! { #dialectic_crate::unary::S( #output ) };
-            }
-            output
-        };
-
         // Create an iterator of token streams, one for each branch of the generated `match`
         let arms = branches.iter().enumerate().map(|(choice, body)| {
-            let n = unary(choice);
-            let choice = choice as u8;
+            let byte = choice as u8;
             quote! {
-                #choice => {
-                    let #chan = #dialectic_crate::Branches::case(#chan, #n);
+                #byte => {
+                    let #chan = #dialectic_crate::Branches::case::<#choice>(#chan);
                     let #chan = match #chan {
                         Ok(chan) => chan,
                         Err(_) => unreachable!("malformed generated code from `offer!` macro: mismatch between variant and choice: this is a bug!"),
@@ -589,6 +579,52 @@ pub fn generate_to_unary_impls(input: proc_macro::TokenStream) -> proc_macro::To
         let tokens = quote! {
             impl ToUnary for Number<#i> {
                 type AsUnary = #state;
+            }
+        };
+
+        *state = quote!(S<#state>);
+
+        Some(tokens)
+    });
+
+    quote!(#(#impls)*).into()
+}
+
+/// **Internal implementation detail:** This proc macro generates trait implementations converting
+/// types acting as wrappers for integer constant generics into `Choice<N>` types.
+#[proc_macro]
+pub fn generate_to_choice_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let impls = (0..=arity_limit).scan(quote!(Z), |state, i| {
+        let tokens = quote! {
+            impl ToChoice for #state {
+                type AsChoice = Choice<#i>;
+            }
+        };
+
+        *state = quote!(S<#state>);
+
+        Some(tokens)
+    });
+
+    quote!(#(#impls)*).into()
+}
+
+/// **Internal implementation detail:** This proc macro generates trait implementations converting
+/// types acting as wrappers for integer constant generics into `Continue<N>` types.
+#[proc_macro]
+pub fn generate_to_continue_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let arity_limit = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let impls = (0..=arity_limit).scan(quote!(Z), |state, i| {
+        let tokens = quote! {
+            impl ToContinue for #state {
+                type AsContinue = Continue<#i>;
             }
         };
 

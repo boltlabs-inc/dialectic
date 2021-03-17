@@ -1,7 +1,18 @@
 use crate::unary::*;
 use std::convert::{TryFrom, TryInto};
-use std::marker::PhantomData;
 use thiserror::Error;
+
+/// Helper trait for converting an unary number type corresponding to some const generic `usize` `N`
+/// into a corresponding `Choice<N>`. It is not possible to do this any other way at the moment
+/// because const generic parameters cannot be associated constants and without associated constants
+/// as such we are forced to use this method to produce a type uniquely dependent on one without
+/// having the constant itself available.
+pub trait ToChoice {
+    /// The resulting `Choice<N>` type.
+    type AsChoice: TryFrom<u8, Error = OutOfBoundsChoiceError> + Into<u8> + Send + Sync + 'static;
+}
+
+dialectic_macro::generate_to_choice_impls!(256);
 
 /// A `Choice` represents a selection between several protocols offered by [`offer!`](crate::offer).
 ///
@@ -23,9 +34,9 @@ use thiserror::Error;
 /// use dialectic::unary::types::*;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let zero: Choice<_3> = 0_u8.try_into()?;
-/// let one: Choice<_3> = 1_u8.try_into()?;
-/// let two: Choice<_3> = 2_u8.try_into()?;
+/// let zero: Choice<3> = 0_u8.try_into()?;
+/// let one: Choice<3> = 1_u8.try_into()?;
+/// let two: Choice<3> = 2_u8.try_into()?;
 ///
 /// assert_eq!(zero, 0_u8);
 /// assert_eq!(one, 1_u8);
@@ -42,8 +53,8 @@ use thiserror::Error;
 /// # use dialectic::backend::Choice;
 /// # use dialectic::unary::types::*;
 /// #
-/// let attempted_three: Result<Choice<_3>, _> = 3_u8.try_into();
-/// let attempted_four: Result<Choice<_3>, _> = 4_u8.try_into();
+/// let attempted_three: Result<Choice<3>, _> = 3_u8.try_into();
+/// let attempted_four: Result<Choice<3>, _> = 4_u8.try_into();
 ///
 /// assert!(attempted_three.is_err());
 /// assert!(attempted_four.is_err());
@@ -58,25 +69,27 @@ use thiserror::Error;
 /// # use dialectic::unary::types::*;
 /// #
 /// for i in 0 ..= u8::MAX {
-///    let attempt: Result<Choice<_0>, _> = i.try_into();
+///    let attempt: Result<Choice<0>, _> = i.try_into();
 ///    assert!(attempt.is_err());
 /// }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Choice<N: Unary> {
+pub struct Choice<const N: usize> {
     choice: u8,
-    bound: PhantomData<N>,
 }
 
 // Choice<Z> is unconstructable, but for all N, 0 is a Choice<S<N>>:
-impl<N: Unary> Default for Choice<S<N>> {
+impl<M: Unary, const N: usize> Default for Choice<N>
+where
+    Number<N>: ToUnary<AsUnary = S<M>>,
+{
     fn default() -> Self {
         0.try_into()
             .expect("0 is in bounds for all non-zero-bounded `Choice`s")
     }
 }
 
-impl<N: Unary> PartialEq<u8> for Choice<N> {
+impl<const N: usize> PartialEq<u8> for Choice<N> {
     fn eq(&self, other: &u8) -> bool {
         self.choice == *other
     }
@@ -101,25 +114,19 @@ impl std::fmt::Display for OutOfBoundsChoiceError {
     }
 }
 
-impl<N: Unary> TryFrom<u8> for Choice<N> {
+impl<const N: usize> TryFrom<u8> for Choice<N> {
     type Error = OutOfBoundsChoiceError;
 
     fn try_from(choice: u8) -> Result<Self, Self::Error> {
-        if (choice as usize) < N::VALUE {
-            Ok(Choice {
-                choice,
-                bound: PhantomData,
-            })
+        if (choice as usize) < N {
+            Ok(Choice { choice })
         } else {
-            Err(OutOfBoundsChoiceError {
-                choice,
-                bound: N::VALUE,
-            })
+            Err(OutOfBoundsChoiceError { choice, bound: N })
         }
     }
 }
 
-impl<N: Unary> From<Choice<N>> for u8 {
+impl<const N: usize> From<Choice<N>> for u8 {
     fn from(Choice { choice, .. }: Choice<N>) -> u8 {
         choice
     }
@@ -136,7 +143,7 @@ mod serialization {
         Deserialize, Deserializer, Serialize, Serializer,
     };
 
-    impl<N: Unary> Serialize for Choice<N> {
+    impl<const N: usize> Serialize for Choice<N> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -146,26 +153,24 @@ mod serialization {
     }
 
     #[derive(Debug, Clone, Copy)]
-    struct ChoiceVisitor<N: Unary> {
-        bound: PhantomData<N>,
-    }
+    struct ChoiceVisitor<const N: usize>;
 
-    impl<N: Unary> Default for ChoiceVisitor<N> {
+    impl<const N: usize> Default for ChoiceVisitor<N> {
         fn default() -> Self {
-            ChoiceVisitor { bound: PhantomData }
+            ChoiceVisitor
         }
     }
 
-    impl<'de, N: Unary> Visitor<'de> for ChoiceVisitor<N> {
+    impl<'de, const N: usize> Visitor<'de> for ChoiceVisitor<N> {
         type Value = Choice<N>;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             write!(
                 f,
                 "a non-negative integer strictly less than {}",
-                N::VALUE.min(u8::MAX as usize)
+                N.min(u8::MAX as usize)
             )?;
-            if N::VALUE == 0 {
+            if N == 0 {
                 write!(
                     f,
                     " (since that strict upper bound is 0, this is impossible)"
@@ -189,7 +194,7 @@ mod serialization {
         }
     }
 
-    impl<'de, N: Unary> Deserialize<'de> for Choice<N> {
+    impl<'de, const N: usize> Deserialize<'de> for Choice<N> {
         fn deserialize<D>(deserializer: D) -> Result<Choice<N>, D::Error>
         where
             D: Deserializer<'de>,

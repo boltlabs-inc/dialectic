@@ -93,10 +93,7 @@ impl fmt::Display for Target {
                 write!(f, ")>")?;
             }
             Continue(n) => {
-                write!(f, "Continue")?;
-                if *n > 0 {
-                    write!(f, "<_{}>", n)?;
-                }
+                write!(f, "Continue<{}>", n)?;
             }
             Type(s) => write!(f, "{}", s.to_token_stream())?,
         }
@@ -170,18 +167,7 @@ impl Spanned<Target> {
                 quote_spanned!(span=> #dialectic_crate::types::Offer<(#(#cs,)*)>).to_tokens(tokens)
             }
             Continue(n) => {
-                if *n > 0 {
-                    quote_spanned!(span=> #dialectic_crate::types::Continue<).to_tokens(tokens);
-                    for _ in 0..*n {
-                        quote_spanned!(span=> #dialectic_crate::unary::S< ).to_tokens(tokens);
-                    }
-                    quote_spanned!(span=> #dialectic_crate::unary::Z ).to_tokens(tokens);
-                    for _ in 0..=*n {
-                        quote_spanned!(span=> > ).to_tokens(tokens)
-                    }
-                } else {
-                    quote_spanned!(span=> #dialectic_crate::types::Continue).to_tokens(tokens);
-                }
+                quote_spanned!(span=> #dialectic_crate::types::Continue<#n>).to_tokens(tokens)
             }
             Type(s) => quote_spanned!(span=> #s).to_tokens(tokens),
         }

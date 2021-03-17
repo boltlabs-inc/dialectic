@@ -13,10 +13,9 @@
 #![warn(future_incompatible)]
 #![warn(unused)]
 // Documentation configuration
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 
 use dialectic::backend::*;
-use dialectic::unary::{Unary, S, Z};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
@@ -94,12 +93,12 @@ impl Receive<()> for Receiver {
     }
 }
 
-impl Transmit<Choice<S<Z>>, Val> for Sender {
+impl Transmit<Choice<1>, Val> for Sender {
     type Error = Error;
 
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        _message: <Choice<S<Z>> as CallBy<Val>>::Type,
+        _message: <Choice<1> as CallBy<Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
@@ -108,13 +107,13 @@ impl Transmit<Choice<S<Z>>, Val> for Sender {
     }
 }
 
-impl<N: Unary> Receive<Choice<S<N>>> for Receiver {
+impl<const N: usize> Receive<Choice<N>> for Receiver {
     type Error = Error;
 
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<S<N>>, Self::Error>> + Send + 'async_lifetime>>
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
     {
-        Box::pin(async { Ok((N::VALUE as u8).try_into().unwrap()) })
+        Box::pin(async { Ok((N as u8).try_into().unwrap()) })
     }
 }

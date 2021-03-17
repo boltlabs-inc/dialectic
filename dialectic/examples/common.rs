@@ -1,5 +1,5 @@
 use dialectic::prelude::*;
-use dialectic_tokio_serde::{codec::LengthDelimitedCodec};
+use dialectic_tokio_serde::codec::LengthDelimitedCodec;
 use dialectic_tokio_serde_bincode::Bincode;
 
 use colored::*;

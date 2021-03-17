@@ -7,7 +7,7 @@
 #![warn(future_incompatible)]
 #![warn(unused)]
 // Documentation configuration
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 
 use dialectic_tokio_serde::*;
 use serde::{Deserialize, Serialize};

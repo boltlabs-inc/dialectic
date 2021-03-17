@@ -245,7 +245,7 @@ At current, the target AST does not undergo any kind of transform before it is c
 #![warn(unused_qualifications)]
 #![warn(future_incompatible)]
 #![warn(unused)]
-#![forbid(broken_intra_doc_links)]
+#![forbid(rustdoc::broken_intra_doc_links)]
 
 use {
     proc_macro2::Span,
@@ -401,7 +401,7 @@ mod tests {
         cfg[client].expr = Ir::Loop(Some(choose));
 
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
-        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue>, Recv<i64, Continue<_1>>)>>>)>>");
+        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue<0>>, Recv<i64, Continue<1>>)>>>)>>");
     }
 
     #[test]
@@ -423,7 +423,7 @@ mod tests {
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
         assert_eq!(
             s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
         );
     }
 }

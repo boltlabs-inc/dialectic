@@ -334,7 +334,7 @@ let t1 = tokio::spawn(async move {
 
 // Make a choice
 let t2 = tokio::spawn(async move {
-    let c2 = c2.choose(_1).await?;            // select to `Send<String, Done>`
+    let c2 = c2.choose::<1>().await?;            // select to `Send<String, Done>`
     c2.send("Hi there!".to_string()).await?;  // enact the selected choice
     Ok::<_, mpsc::Error>(())
 });
@@ -477,11 +477,11 @@ tokio::spawn(async move {
 
 // Send some numbers to be summed
 for n in 0..=10 {
-    c1 = c1.choose(_0).await?.send(n).await?;
+    c1 = c1.choose::<0>().await?.send(n).await?;
 }
 
 // Get the sum
-let (sum, c1) = c1.choose(_1).await?.recv().await?;
+let (sum, c1) = c1.choose::<1>().await?.recv().await?;
 c1.close();
 assert_eq!(sum, 55);
 # Ok(())
@@ -602,12 +602,12 @@ async fn query_all(
     let mut answers = Vec::with_capacity(questions.len());
     for question in questions.into_iter() {
         let (answer, c) =
-            chan.choose(_1).await?
+            chan.choose::<1>().await?
                 .call(|c| query(question, c)).await?;  // Call `query` as a subroutine
         chan = c.unwrap();
         answers.push(answer);
     }
-    chan.choose(_0).await?.close();
+    chan.choose::<0>().await?.close();
     Ok(answers)
 }
 ```
