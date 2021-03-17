@@ -1,6 +1,5 @@
 use dialectic::prelude::*;
 use dialectic::types::*;
-use dialectic::unary::{S, Z};
 use static_assertions::assert_type_eq_all;
 
 #[allow(dead_code)]
@@ -32,10 +31,10 @@ assert_type_eq_all!(
                     bool,
                     Offer<(
                         Done,
-                        Continue<S<Z>>,
-                        Recv<i64, Continue<S<Z>>>,
-                        Continue,
-                        Send<String, Send<bool, Continue>>
+                        Continue<1>,
+                        Recv<i64, Continue<1>>,
+                        Continue<0>,
+                        Send<String, Send<bool, Continue<0>>>
                     )>,
                 >,
             >,

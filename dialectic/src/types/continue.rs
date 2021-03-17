@@ -1,47 +1,58 @@
-use std::any::Any;
-
 use super::sealed::IsSession;
 use super::*;
-use crate::unary::{self, Compare};
+use crate::unary::{self, Compare, Number, ToUnary};
+
+/// Helper trait for converting an unary number type corresponding to some const generic `usize` `N`
+/// into a corresponding `Continue<N>`. It is not possible to do this any other way at the moment
+/// because const generic parameters cannot be associated constants and without associated constants
+/// as such we are forced to use this method to produce a type uniquely dependent on one without
+/// having the constant itself available.
+pub trait ToContinue {
+    /// The resulting `Continue<N>` type.
+    type AsContinue: IsSession;
+}
+
+dialectic_macro::generate_to_continue_impls!(256);
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
-/// innermost starting at [`Z`].
-#[repr(transparent)]
+/// innermost starting at `0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Continue<N: Unary = Z>(pub N);
+pub struct Continue<const I: usize>;
 
-impl<N: Unary + Any> IsSession for Continue<N> {}
+impl<const I: usize> IsSession for Continue<I> {}
 
-impl<N: Unary + Any> HasDual for Continue<N> {
-    type DualSession = Continue<N>;
+impl<const I: usize> HasDual for Continue<I> {
+    type DualSession = Continue<I>;
 }
 
-impl<N: Unary, M: Unary> Scoped<N> for Continue<M> where M: LessThan<N> {}
-
-impl<P, N: Unary, M: Unary> Subst<P, N> for Continue<M>
+impl<N: Unary, M: Unary, const I: usize> Scoped<N> for Continue<I>
 where
-    (N, M): Compare<Continue<M>, P, Continue<M>>,
-    <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result: 'static,
+    Number<I>: ToUnary<AsUnary = M>,
+    M: LessThan<N>,
 {
-    type Substituted = <(N, M) as Compare<Continue<M>, P, Continue<M>>>::Result;
 }
 
-impl<P, M: Unary, N: Unary> Then<P, N> for Continue<M> {
-    type Combined = Continue<M>;
-}
-
-impl<N: Unary, M: Unary, Level: Unary> Lift<N, Level> for Continue<M>
+impl<P, N: Unary, M: Unary, const I: usize> Subst<P, N> for Continue<I>
 where
-    (M, Level): Compare<
-        Continue<M>,
-        Continue<<(M, N) as unary::Add>::Result>,
-        Continue<<(M, N) as unary::Add>::Result>,
-    >,
-    (M, N): unary::Add,
+    Number<I>: ToUnary<AsUnary = M>,
+    (N, M): Compare<Continue<I>, P, Continue<I>>,
+    <(N, M) as Compare<Continue<I>, P, Continue<I>>>::Result: 'static,
 {
-    type Lifted = <(M, Level) as Compare<
-        Continue<M>,
-        Continue<<(M, N) as unary::Add>::Result>,
-        Continue<<(M, N) as unary::Add>::Result>,
-    >>::Result;
+    type Substituted = <(N, M) as Compare<Continue<I>, P, Continue<I>>>::Result;
+}
+
+impl<P, N: Unary, const I: usize> Then<P, N> for Continue<I> {
+    type Combined = Continue<I>;
+}
+
+impl<N: Unary, M: Unary, P: Unary, Summed, Level: Unary, const I: usize> Lift<N, Level>
+    for Continue<I>
+where
+    Number<I>: ToUnary<AsUnary = M>,
+    (M, N): unary::Add<Result = P>,
+    <(M, N) as unary::Add>::Result: ToContinue<AsContinue = Summed>,
+    (M, Level): Compare<Continue<I>, Summed, Summed>,
+    <(M, Level) as Compare<Continue<I>, Summed, Summed>>::Result: 'static,
+{
+    type Lifted = <(M, Level) as Compare<Continue<I>, Summed, Summed>>::Result;
 }

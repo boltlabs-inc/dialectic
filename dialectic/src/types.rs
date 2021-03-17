@@ -45,8 +45,8 @@ pub use split::*;
 /// # use static_assertions::assert_type_eq_all;
 /// use dialectic::types::*;
 ///
-/// type Client = Loop<Offer<(Split<Call<Send<String, Done>, Done>, Recv<usize, Done>, Done>, Recv<bool, Continue>)>>;
-/// type Server = Loop<Choose<(Split<Send<usize, Done>, Call<Recv<String, Done>, Done>, Done>, Send<bool, Continue>)>>;
+/// type Client = Loop<Offer<(Split<Call<Send<String, Done>, Done>, Recv<usize, Done>, Done>, Recv<bool, Continue<0>>)>>;
+/// type Server = Loop<Choose<(Split<Send<usize, Done>, Call<Recv<String, Done>, Done>, Done>, Send<bool, Continue<0>>)>>;
 ///
 /// assert_type_eq_all!(Client, <Server as HasDual>::DualSession);
 /// ```
@@ -131,7 +131,7 @@ where
 /// # use static_assertions::assert_type_eq_all;
 ///
 /// assert_type_eq_all!(
-///     <Send<i64, Continue> as Subst<Recv<(), Done>>>::Substituted,
+///     <Send<i64, Continue<0>> as Subst<Recv<(), Done>>>::Substituted,
 ///     Send<i64, Recv<(), Done>>,
 /// );
 /// ```
@@ -310,12 +310,12 @@ mod tests {
         type P = Loop<
             Loop<
                 Choose<(
-                    Send<usize, Continue>,
-                    Recv<String, Continue>,
+                    Send<usize, Continue<0>>,
+                    Recv<String, Continue<0>>,
                     Offer<(
-                        Send<bool, Continue>,
-                        Continue<S<Z>>,
-                        Split<Send<isize, Continue>, Recv<isize, Continue>, Done>,
+                        Send<bool, Continue<0>>,
+                        Continue<1>,
+                        Split<Send<isize, Continue<0>>, Recv<isize, Continue<0>>, Done>,
                     )>,
                 )>,
             >,

@@ -26,7 +26,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         "use crate::types::{{Send, Recv, Choose, Offer, Call, Split, Loop, Continue, Done}};"
     )?;
     writeln!(f, "use crate::Session;")?;
-    writeln!(f, "#[allow(unused_imports)] use crate::unary::types::*;")?;
     writeln!(f, "use static_assertions::assert_impl_all;")?;
     writeln!(f)?;
 
@@ -108,10 +107,7 @@ impl Display for Session {
                 write!(f, ")>")?;
             }
             Continue(n) => {
-                write!(f, "Continue")?;
-                if *n > 0 {
-                    write!(f, "<_{}>", n)?;
-                }
+                write!(f, "Continue<{}>", n)?;
             }
         }
         Ok(())

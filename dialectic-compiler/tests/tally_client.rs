@@ -25,7 +25,7 @@ fn tally_client_expr_call_ast() {
     let s = format!("{}", syntax::compile(&client_ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
     );
 }
 
@@ -45,7 +45,7 @@ fn tally_client_expr_call_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
     );
 }
 
@@ -65,7 +65,7 @@ fn tally_client_invocation_call_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
     );
 }
 
@@ -85,7 +85,7 @@ fn tally_client_invocation_direct_subst_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue>>::Combined>)>>"
+        "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue<0>>>::Combined>)>>"
     );
 }
 
@@ -119,22 +119,22 @@ fn tally_client_direct_subst_nested_loop_break() {
     .unwrap();
 
     let rhs: Type = syn::parse_str(
-            "::dialectic::types::Loop<
+        "::dialectic::types::Loop<
                 ::dialectic::types::Choose<(
                     ::dialectic::types::Done,
                     ::dialectic::types::Send<
                         Operation,
                         ::dialectic::types::Loop<
                             ::dialectic::types::Choose<(
-                                ::dialectic::types::Send<i64, ::dialectic::types::Continue>,
-                                ::dialectic::types::Recv<i64, ::dialectic::types::Continue<::dialectic::unary::S<::dialectic::unary::Z>>>,
+                                ::dialectic::types::Send<i64, ::dialectic::types::Continue<0usize>>,
+                                ::dialectic::types::Recv<i64, ::dialectic::types::Continue<1usize>>,
                             )>
                         >
                     >,
                 )>
             >",
-        )
-        .unwrap();
+    )
+    .unwrap();
 
     assert_eq!(
         lhs.to_token_stream().to_string(),
