@@ -241,10 +241,7 @@ where
     /// other end of the connection, alerting the other party to this choice by sending the number
     /// `N` over the channel.
     ///
-    /// The choice `N` is specified as a type-level [`Unary`] number. Predefined constants for all
-    /// supported numbers of choices (up to a maximum of 127) are available in the
-    /// [`constants`](crate::unary::constants) module, each named for its corresponding
-    /// decimal number prefixed with an underscore (e.g. `_0`, or `_42`).
+    /// The choice `N` is specified as a `const` generic `usize`.
     ///
     /// # Errors
     ///
