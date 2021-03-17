@@ -354,13 +354,7 @@ want to bind a channel name to the result of the `offer!`, each expression must 
 forward to an identical session type (in the case above, that's `Done`).
 
 Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
-channel, passing it as input a constant corresponding to the index of the choice. These
-constants are *not* Rust's built-in numeric types, but rather [unary type-level
-numbers](crate::unary). Dialectic supports up to 128 possible choices in an `Offer` or `Choose`,
-and the corresponding constants [`_0`](crate::unary::constants::_0),
-[`_1`](crate::unary::constants::_1), [`_2`](crate::unary::constants::_2), ...
-[`_127`](crate::unary::constants::_127) are defined in the
-[`constants`](crate::unary::constants) module.
+channel, passing it as its type parameter a numerical constant corresponding to the index of the choice.
 
 # Looping back
 
