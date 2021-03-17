@@ -108,9 +108,9 @@ fn server(
         loop {
             chan = offer!(chan => {
                 // Client doesn't want to push a value
-                _0 => break chan.close(),
+                0 => break chan.close(),
                 // Client wants to push a value
-                _1 => {
+                1 => {
                     let (string, chan) = chan.recv().await?;       // Receive pushed value
                     let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
                     chan.send(&string.to_uppercase()).await?       // Send back that pushed value

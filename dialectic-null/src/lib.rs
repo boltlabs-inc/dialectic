@@ -13,7 +13,7 @@
 #![warn(future_incompatible)]
 #![warn(unused)]
 // Documentation configuration
-#![forbid(rustdoc::broken_intra_doc_links)]
+#![forbid(broken_intra_doc_links)]
 
 use dialectic::backend::*;
 use std::{convert::TryInto, future::Future, pin::Pin};

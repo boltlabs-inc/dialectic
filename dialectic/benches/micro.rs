@@ -61,7 +61,7 @@ where
     Rx::Error: Debug,
 {
     offer!(chan => {
-        _0 => chan,
+        0 => chan,
     })
     .unwrap()
 }
