@@ -16,8 +16,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        components: rustfmt, clippy
     - name: Build
-      run: cargo build --all-features --all-targets --verbose
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --all-features --all-targets --verbose
     - name: Clippy lint
       run: cargo clippy --all-features --all-targets --verbose -- -Dwarnings
     - name: Run tests
