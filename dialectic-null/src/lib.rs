@@ -114,6 +114,10 @@ impl<const N: usize> Receive<Choice<N>> for Receiver {
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
     {
-        Box::pin(async { Ok((N as u8).try_into().unwrap()) })
+        Box::pin(async {
+            Ok((N.checked_sub(1).expect("Choice<0> is uninhabited") as u8)
+                .try_into()
+                .unwrap())
+        })
     }
 }
