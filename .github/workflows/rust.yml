@@ -20,10 +20,7 @@ jobs:
       with:
         components: rustfmt, clippy
     - name: Build
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --all-features --all-targets --verbose
+      run: cargo build --all-features --all-targets --verbose
     - name: Clippy lint
       run: cargo clippy --all-features --all-targets --verbose -- -Dwarnings
     - name: Run tests
