@@ -229,11 +229,11 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
 
 impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
+    S: Session<Action = Choose<Choices>>,
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    S: Session<Action = Choose<Choices>>,
-    Tx: Transmit<Choice<LENGTH>, Val> + marker::Send + 'static,
+    Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -308,6 +308,7 @@ where
         Tx::Error,
     >
     where
+        Tx: Transmit<Choice<LENGTH>, Val>,
         Number<N>: ToUnary,
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
@@ -323,13 +324,13 @@ where
 
 impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
+    S: Session<Action = Offer<Choices>>,
     Choices: Tuple + 'static,
     Choices::AsList: HasLength + EachScoped + EachHasDual,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
-    S: Session<Action = Offer<Choices>>,
     Tx: marker::Send + 'static,
-    Rx: Receive<Choice<LENGTH>> + marker::Send + 'static,
+    Rx: marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -417,7 +418,10 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
+    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error>
+    where
+        Rx: Receive<Choice<LENGTH>>,
+    {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
         let variant = rx.as_mut().unwrap().recv().await?.into();
         Ok(Branches {
