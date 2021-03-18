@@ -224,7 +224,7 @@ impl Parse for Spanned<Syntax> {
                 span: call_span,
             })
         } else if lookahead.peek(kw::choose) {
-            // Ast::Choose: choose { _0 => <Ast>, _1 => <Ast>, ... }
+            // Ast::Choose: choose { 0 => <Ast>, 1 => <Ast>, ... }
             let kw_span = input.parse::<kw::choose>()?.span();
             let choose_span = kw_span.join(input.span()).unwrap_or(kw_span);
 
@@ -255,7 +255,7 @@ impl Parse for Spanned<Syntax> {
                 span: choose_span,
             })
         } else if lookahead.peek(kw::offer) {
-            // Ast::Offer: offer { _0 => <Ast>, _1 => <Ast>, ... }
+            // Ast::Offer: offer { 0 => <Ast>, 1 => <Ast>, ... }
             let kw_span = input.parse::<kw::offer>()?.span();
             let offer_span = kw_span.join(input.span()).unwrap_or(kw_span);
 

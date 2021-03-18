@@ -30,7 +30,7 @@ pub enum Target {
     Offer(Vec<Spanned<Target>>),
     /// Session type: `Loop<...>`.
     Loop(Rc<Spanned<Target>>),
-    /// Session type: `Continue<_N>`.
+    /// Session type: `Continue<N>`.
     Continue(usize),
     /// Session type: `Split<P, Q, R>`.
     Split {
