@@ -19,7 +19,6 @@ use thiserror::Error;
 /// ```
 /// use std::convert::TryInto;
 /// use dialectic::backend::Choice;
-/// use dialectic::unary::types::*;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let zero: Choice<3> = 0_u8.try_into()?;
@@ -39,7 +38,6 @@ use thiserror::Error;
 /// ```
 /// # use std::convert::TryInto;
 /// # use dialectic::backend::Choice;
-/// # use dialectic::unary::types::*;
 /// #
 /// let attempted_three: Result<Choice<3>, _> = 3_u8.try_into();
 /// let attempted_four: Result<Choice<3>, _> = 4_u8.try_into();
@@ -54,7 +52,6 @@ use thiserror::Error;
 /// ```
 /// # use std::convert::TryInto;
 /// # use dialectic::backend::Choice;
-/// # use dialectic::unary::types::*;
 /// #
 /// for i in 0 ..= u8::MAX {
 ///    let attempt: Result<Choice<0>, _> = i.try_into();
@@ -66,7 +63,7 @@ pub struct Choice<const N: usize> {
     choice: u8,
 }
 
-// Choice<Z> is unconstructable, but for all N, 0 is a Choice<S<N>>:
+// Choice<0> is unconstructable, but for all N, 0 is a Choice<N + 1>:
 impl<M: Unary, const N: usize> Default for Choice<N>
 where
     Number<N>: ToUnary<AsUnary = S<M>>,
