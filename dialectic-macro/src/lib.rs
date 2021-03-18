@@ -85,12 +85,12 @@ and the [`offer!`] macro.
 # use dialectic::types::*;
 #
 type_eq!(
-    Session! { offer { _0 => {}, _1 => {} } },
+    Session! { offer { 0 => {}, 1 => {} } },
     Offer<(Done, Done)>
 );
 
 type_eq!(
-    Session! { choose { _0 => {}, _1 => {} } },
+    Session! { choose { 0 => {}, 1 => {} } },
     Choose<(Done, Done)>
 );
 ```
@@ -163,12 +163,12 @@ type_eq!(Q, Call<Send<i64, Done>, Done>);
 type R = Session! {
     loop {
         choose {
-            _0 => {
+            0 => {
                 send i64;
                 call { continue };
                 recv i64;
             },
-            _1 => break,
+            1 => break,
         }
     }
 };
@@ -214,8 +214,8 @@ type Twice<T> = Session! { T; T };
 type Protocol = Session! {
     loop {
         choose {
-            _0 => Twice<Parity>,
-            _1 => break,
+            0 => Twice<Parity>,
+            1 => break,
         }
     }
 };
@@ -280,8 +280,8 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// type GiveOrTake = Session! {
 ///     choose {
-///         _0 => send i64,
-///         _1 => recv String,
+///         0 => send i64,
+///         1 => recv String,
 ///     }
 /// };
 ///
@@ -396,7 +396,7 @@ impl OfferInvocation {
         let mut errors: Vec<syn::Error> = Vec::new();
         for (choice, arm) in self.branches.iter().enumerate() {
             if choice > 128 {
-                let message = format!("at most 128 arms (labeled `_0` through `_127` in ascending order) are permitted in the `offer!` macro; this arm is number {}", choice);
+                let message = format!("at most 128 arms (labeled `0` through `127` in ascending order) are permitted in the `offer!` macro; this arm is number {}", choice);
                 errors.push(syn::Error::new(arm.span(), message));
             }
             match &arm.pat {
