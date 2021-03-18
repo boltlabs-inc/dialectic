@@ -9,7 +9,7 @@
 //!
 //! Additionally, in order to support [`offer!`](crate::offer) and [`choose`](crate::Chan::choose),
 //! the sending channel `Tx` must implement `Transmit<Choice<N>, Val>`, and the receiving channel
-//! `Rx` must implement `Receive<Choice<N>>`, for all `N: Unary`. For more information, see
+//! `Rx` must implement `Receive<Choice<N>>`, for all `const N: usize`. For more information, see
 //! [`Choice`](crate::Choice).
 
 #[doc(no_inline)]
