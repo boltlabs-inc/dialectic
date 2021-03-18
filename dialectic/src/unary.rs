@@ -167,8 +167,8 @@ where
 pub trait Constant: sealed::Constant {}
 
 /// A wrapper for type-level `usize` values to allow implementing traits on them.
-#[allow(missing_debug_implementations)]
-pub struct Number<const N: usize>;
+#[derive(Debug)]
+pub enum Number<const N: usize> {}
 
 impl<const N: usize> Constant for Number<N> {}
 
