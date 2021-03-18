@@ -46,7 +46,6 @@ use dialectic::prelude::*;
 // Normally you don't need to import these, because they are only useful
 // when writing session types directly, not when using the `Session!` macro:
 use dialectic::types::*;
-use dialectic::unary::types::*;
 ```
 
 ## The `send` and `recv` keywords
@@ -108,7 +107,6 @@ To exit a loop, you must use `break`.
 # use static_assertions::assert_type_eq_all as type_eq;
 # use dialectic::prelude::*;
 # use dialectic::types::*;
-# use dialectic::unary::types::*;
 #
 type_eq!(
     Session! { loop { break } },
@@ -395,8 +393,8 @@ impl OfferInvocation {
         // Validate the structure, collecting all errors
         let mut errors: Vec<syn::Error> = Vec::new();
         for (choice, arm) in self.branches.iter().enumerate() {
-            if choice > 128 {
-                let message = format!("at most 128 arms (labeled `0` through `127` in ascending order) are permitted in the `offer!` macro; this arm is number {}", choice);
+            if choice > 256 {
+                let message = format!("at most 256 arms (labeled `0` through `255` in ascending order) are permitted in the `offer!` macro; this arm is number {}", choice);
                 errors.push(syn::Error::new(arm.span(), message));
             }
             match &arm.pat {
@@ -416,7 +414,7 @@ impl OfferInvocation {
                     match lit_int.base10_parse::<usize>() {
                         Ok(n) if n == choice => {}
                         Ok(_) => {
-                            let message = format!("expected the usize literal `{}` for this arm of the `offer!` macro (note: arms must be in ascending order)", choice);
+                            let message = format!("expected the `usize` literal `{}` for this arm of the `offer!` macro (note: arms must be in ascending order)", choice);
                             errors.push(syn::Error::new(pat_lit.span(), message));
                         }
                         Err(e) => {
@@ -426,7 +424,7 @@ impl OfferInvocation {
                     }
                 }
                 _ => {
-                    let message = format!("expected the usize literal `{}` for this arm (note: arms must be in ascending order)", choice);
+                    let message = format!("expected the `usize` literal `{}` for this arm (note: arms must be in ascending order)", choice);
                     errors.push(syn::Error::new(arm.pat.span(), message))
                 }
             }
@@ -496,81 +494,9 @@ pub fn impl_tuples(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     impls.into()
 }
 
-/// **Internal implementation detail:** This proc macro generates type synonyms for the
-/// dialectic::unary::types module. It will generate up to the maximum number specified as the
-/// argument.
-#[proc_macro]
-pub fn generate_unary_types(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let arity_limit = parse_macro_input!(input as LitInt)
-        .base10_parse::<usize>()
-        .unwrap();
-
-    let type_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
-    let type_values = type_idents.fold(vec![], |mut acc, ident| {
-        let value = match acc.last() {
-            Some((pred_ident, _)) => quote!(S<#pred_ident>),
-            None => quote!(Z),
-        };
-
-        acc.push((ident, value));
-
-        acc
-    });
-
-    let types = type_values.iter().map(|(ident, value)| {
-        quote!(
-            pub type #ident = #value;
-        )
-    });
-
-    let contents = quote! {
-        use crate::unary::{S, Z};
-
-        #(#types)*
-    };
-
-    contents.into()
-}
-
-/// **Internal implementation detail:** This proc macro generates unary type constants for the
-/// dialectic::unary::constants module. It will generate up to the maximum number specified as the
-/// argument.
-#[proc_macro]
-pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let arity_limit = parse_macro_input!(input as LitInt)
-        .base10_parse::<usize>()
-        .unwrap();
-
-    let constant_idents = (0..=arity_limit).map(|i| format_ident!("_{}", i));
-    let constant_values = constant_idents.fold(vec![], |mut acc, ident| {
-        let value = match acc.last() {
-            Some((pred_ident, _)) => quote!(S(#pred_ident)),
-            None => quote!(Z),
-        };
-
-        acc.push((ident, value));
-
-        acc
-    });
-
-    let constants = constant_values.iter().map(|(ident, value)| {
-        quote!(
-            pub const #ident: #ident = #value;
-        )
-    });
-
-    let contents = quote! {
-        use crate::unary::{types::*, S, Z};
-
-        #(#constants)*
-    };
-
-    contents.into()
-}
-
-/// **Internal implementation detail:** This proc macro generates trait implementations converting
-/// type-level constants into unary representation. It will generate up to the maximum number
-/// specified as the argument.
+/// **Internal implementation detail:** This proc macro generates trait implementations of `ToUnary`
+/// and `ToConstant` which convert type-level constants into unary representation, and vice versa.
+/// It will generate up to the maximum number specified as the argument.
 #[proc_macro]
 pub fn generate_unary_conversion_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let arity_limit = parse_macro_input!(input as LitInt)

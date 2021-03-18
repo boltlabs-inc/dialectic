@@ -354,7 +354,7 @@ want to bind a channel name to the result of the `offer!`, each expression must 
 forward to an identical session type (in the case above, that's `Done`).
 
 Dually, to select an offered option, you can call the [`choose`](Chan::choose) method on a
-channel, passing it as its type parameter a numerical constant corresponding to the index of the choice.
+channel, passing it as its type parameter a numerical constant corresponding to the index of the choice. This is done using "turbofish" syntax, for example `chan.choose::<N>()` to choose the `N`th choice.
 
 # Looping back
 
