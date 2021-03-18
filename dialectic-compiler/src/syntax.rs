@@ -2,7 +2,7 @@
 
 use {
     proc_macro2::TokenStream,
-    quote::{format_ident, quote_spanned, ToTokens},
+    quote::{quote_spanned, ToTokens},
     syn::{Error, Lifetime, Type},
     thunderdome::Index,
 };
@@ -276,8 +276,7 @@ impl Spanned<Syntax> {
             |add_optional: &mut dyn FnMut() -> bool, arms: &[Spanned<Syntax>]| -> TokenStream {
                 let mut acc = TokenStream::new();
                 for (i, choice) in arms.iter().enumerate() {
-                    let idx = format_ident!("_{}", i, span = sp);
-                    quote_spanned!(sp=> #idx => ).to_tokens(&mut acc);
+                    quote_spanned!(sp=> #i => ).to_tokens(&mut acc);
                     choice.to_tokens_with(add_optional, &mut acc);
                     if i < arms.len() - 1 || add_optional() {
                         quote_spanned!(sp=> ,).to_tokens(&mut acc);

@@ -7,11 +7,11 @@ struct Foo;
 #[allow(dead_code)]
 type BigChoose = Session! {
     choose {
-        _0 => send (),
-        _1 => { send () }
-        _2 => call { Foo }
-        _3 => call Foo,
-        _4 => split {
+        0 => send (),
+        1 => { send () }
+        2 => call { Foo }
+        3 => call Foo,
+        4 => split {
             -> {
                 send String;
             }

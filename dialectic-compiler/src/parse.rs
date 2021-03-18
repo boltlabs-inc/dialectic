@@ -6,7 +6,7 @@ use {
         braced,
         parse::{Error, Parse, ParseStream, Result},
         spanned::Spanned as SpannedExt,
-        token, Ident, Lifetime, Token, Type,
+        token, Lifetime, LitInt, Token, Type,
     },
 };
 
@@ -96,10 +96,10 @@ impl Parse for SplitArm {
 }
 
 /// An arm of a choice (either in `offer` or `choose`), consisting of an index and the code it
-/// refers to: `_N => ...`. This parser also parses a terminator, if necessary or if it is simply
+/// refers to: `N => ...`. This parser also parses a terminator, if necessary or if it is simply
 /// present.
 struct ChoiceArm {
-    /// The index of the arm, i.e. `_0`, `_1`, ... `_127`.
+    /// The index of the arm, i.e. `0`, `1`, ... `127`.
     index: Spanned<usize>,
     /// The body of the arm.
     body: Spanned<Syntax>,
@@ -107,13 +107,11 @@ struct ChoiceArm {
 
 impl Parse for ChoiceArm {
     fn parse(input: ParseStream) -> Result<Self> {
-        let index_ident = input.parse::<Ident>()?;
-        let index_span = index_ident.span();
-        let index = index_ident
-            .to_string()
-            .strip_prefix("_")
-            .ok_or_else(|| input.error("expected index identifier starting with an underscore"))
-            .and_then(|s| s.parse::<usize>().map_err(|e| input.error(e)))?;
+        let index_lit = input.parse::<LitInt>()?;
+        let index_span = index_lit.span();
+        let index = index_lit
+            .base10_parse::<usize>()
+            .map_err(|e| input.error(e))?;
         let _ = input.parse::<Token![=>]>()?;
         let terminator_required = requires_terminator(&input);
         let arm = input.parse::<Spanned<Syntax>>()?;

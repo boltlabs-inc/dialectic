@@ -5,7 +5,7 @@ use static_assertions::assert_type_eq_all;
 type Bug = Session! {
     loop {
         choose {
-            _0 => {},
+            0 => {},
         }
     }
 };

@@ -9,11 +9,11 @@ type LabelExample = Session! {
         loop {
             recv bool;
             offer {
-                _0 => break 'outer,
-                _1 => continue 'outer,
-                _2 => break,
-                _3 => continue,
-                _4 => send String,
+                0 => break 'outer,
+                1 => continue 'outer,
+                2 => break,
+                3 => continue,
+                4 => send String,
             };
             send bool;
         };

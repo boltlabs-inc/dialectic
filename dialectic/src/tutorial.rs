@@ -282,15 +282,15 @@ corresponding to one possible next session.
 # use static_assertions::assert_type_eq_all;
 type P = Session! {
     offer {
-        _0 => send String,
-        _1 => recv i64,
+        0 => send String,
+        1 => recv i64,
     }
 };
 
 type Q = Session! {
     choose {
-        _0 => recv String,
-        _1 => send i64,
+        0 => recv String,
+        1 => send i64,
     }
 };
 
@@ -315,8 +315,8 @@ result of either selection by enacting the protocol chosen.
 
 type P = Session! {
     offer {
-        _0 => send i64,
-        _1 => recv String,
+        0 => send i64,
+        1 => recv String,
     }
 };
 
@@ -325,8 +325,8 @@ let (c1, c2) = P::channel(|| mpsc::channel(1));
 // Offer a choice
 let t1 = tokio::spawn(async move {
     let c1 = offer!(c1 => {
-        0 => c1.send(42).await?,  // handle `c2.choose(_0)`
-        1 => c1.recv().await?.1,  // handle `c2.choose(_1)`
+        0 => c1.send(42).await?,  // handle `c2.choose::<0>()`
+        1 => c1.recv().await?.1,  // handle `c2.choose::<1>()`
     })?;
 #   c1.close();
     Ok::<_, mpsc::Error>(())
@@ -372,8 +372,8 @@ could describe this protocol using the `loop` and `break` keywords in the
 type QuerySum = Session! {
     loop {
         choose {
-            _0 => send i64,
-            _1 => {
+            0 => send i64,
+            1 => {
                 recv i64;
                 break;
             }
@@ -394,8 +394,8 @@ will need to implement:
 # type QuerySum = Session! {
 #     loop {
 #         choose {
-#             _0 => send i64,
-#             _1 => {
+#             0 => send i64,
+#             1 => {
 #                 recv i64;
 #                 break;
 #             }
@@ -405,8 +405,8 @@ will need to implement:
 type ComputeSum = Session! {
     loop {
         offer {
-            _0 => recv i64,
-            _1 => {
+            0 => recv i64,
+            1 => {
                 send i64;
                 break;
             }
@@ -428,8 +428,8 @@ the session type `QuerySum` again.
 # type QuerySum = Session! {
 #     loop {
 #         choose {
-#             _0 => send i64,
-#             _1 => {
+#             0 => send i64,
+#             1 => {
 #                 recv i64;
 #                 break;
 #             }
@@ -439,8 +439,8 @@ the session type `QuerySum` again.
 # type ComputeSum = Session! {
 #     loop {
 #         offer {
-#             _0 => recv i64,
-#             _1 => {
+#             0 => recv i64,
+#             1 => {
 #                 send i64;
 #                 break;
 #             }
@@ -502,11 +502,11 @@ type LabelExample = Session! {
         loop {
             recv bool;
             offer {
-                _0 => break 'outer,
-                _1 => continue 'outer,
-                _2 => break,
-                _3 => continue,
-                _4 => send String,
+                0 => break 'outer,
+                1 => continue 'outer,
+                2 => break,
+                3 => continue,
+                4 => send String,
             };
             send bool;
         };
@@ -583,8 +583,8 @@ channel.
 type MultiQuery = Session! {
     loop {
         choose {
-            _0 => break,
-            _1 => call Query,
+            0 => break,
+            1 => call Query,
         }
     }
 };

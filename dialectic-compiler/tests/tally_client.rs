@@ -33,8 +33,8 @@ fn tally_client_expr_call_ast() {
 fn tally_client_expr_call_parse_string() {
     let to_parse = "loop {
             choose {
-                _0 => break,
-                _1 => {
+                0 => break,
+                1 => {
                     send Operation;
                     call ClientTally;
                 },
@@ -53,8 +53,8 @@ fn tally_client_expr_call_parse_string() {
 fn tally_client_invocation_call_parse_string() {
     let to_parse = "loop {
                 choose {
-                    _0 => break,
-                    _1 => {
+                    0 => break,
+                    1 => {
                         send Operation;
                         call ClientTally;
                     },
@@ -73,8 +73,8 @@ fn tally_client_invocation_call_parse_string() {
 fn tally_client_invocation_direct_subst_parse_string() {
     let to_parse = "'client: loop {
                 choose {
-                    _0 => break,
-                    _1 => {
+                    0 => break,
+                    1 => {
                         send Operation;
                         ClientTally;
                     },
@@ -93,13 +93,13 @@ fn tally_client_invocation_direct_subst_parse_string() {
 fn tally_client_direct_subst_nested_loop_break() {
     let to_parse = "'client: loop {
             choose {
-                _0 => break,
-                _1 => {
+                0 => break,
+                1 => {
                     send Operation;
                     loop {
                         choose {
-                            _0 => send i64,
-                            _1 => {
+                            0 => send i64,
+                            1 => {
                                 recv i64;
                                 continue 'client;
                             }
