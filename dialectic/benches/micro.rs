@@ -42,8 +42,8 @@ where
 }
 
 async fn choose<Tx, Rx>(
-    chan: Chan<Session! { loop { choose { _0 => {} } } }, Tx, Rx>,
-) -> Chan<Session! { loop { choose { _0 => {} } } }, Tx, Rx>
+    chan: Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>,
+) -> Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>
 where
     Tx: Transmit<Choice<1>, Val> + marker::Send,
     Tx::Error: Debug,
@@ -53,8 +53,8 @@ where
 }
 
 async fn offer<Tx, Rx>(
-    chan: Chan<Session! { loop { offer { _0 => {} } } }, Tx, Rx>,
-) -> Chan<Session! { loop { offer { _0 => {} } } }, Tx, Rx>
+    chan: Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>,
+) -> Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>
 where
     Tx: marker::Send,
     Rx: Receive<Choice<1>> + marker::Send,

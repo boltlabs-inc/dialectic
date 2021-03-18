@@ -258,8 +258,8 @@ where
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type GiveOrTake = Session! {
     ///     choose {
-    ///         _0 => send i64,
-    ///         _1 => recv String,
+    ///         0 => send i64,
+    ///         1 => recv String,
     ///     }
     /// };
     ///
@@ -356,8 +356,8 @@ where
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// type GiveOrTake = Session! {
     ///     choose {
-    ///         _0 => send i64,
-    ///         _1 => recv String,
+    ///         0 => send i64,
+    ///         1 => recv String,
     ///     }
     /// };
     ///
@@ -395,8 +395,8 @@ where
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # type GiveOrTake = Session! {
     /// #     choose {
-    /// #         _0 => send i64,
-    /// #         _1 => recv String,
+    /// #         0 => send i64,
+    /// #         1 => recv String,
     /// #     }
     /// # };
     /// #

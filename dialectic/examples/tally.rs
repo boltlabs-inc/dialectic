@@ -20,11 +20,11 @@ async fn main() {
 pub type Client = Session! {
     loop {
         choose {
-            _0 => {
+            0 => {
                 send Operation;
                 call ClientTally;
             },
-            _1 => break,
+            1 => break,
         }
     }
 };
@@ -68,8 +68,8 @@ async fn client(
 pub type ClientTally = Session! {
     loop {
         choose {
-            _0 => send i64,
-            _1 => {
+            0 => send i64,
+            1 => {
                 recv i64;
                 break;
             }

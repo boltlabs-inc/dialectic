@@ -14,8 +14,8 @@ async fn main() {
 type Client = Session! {
     loop {
         choose {
-            _0 => break,
-            _1 => {
+            0 => break,
+            1 => {
                 send String;
                 call { continue };
                 recv String;
