@@ -2,32 +2,6 @@ use super::sealed::IsSession;
 use super::*;
 use crate::unary::{self, Compare, Number, ToConstant, ToUnary};
 
-/// Helper trait for converting an unary number type corresponding to some const generic `usize` `N`
-/// into a corresponding `Continue<N>`. It is not possible to do this any other way at the moment
-/// because const generic parameters cannot be associated constants and without associated constants
-/// as such we are forced to use this method to produce a type uniquely dependent on one without
-/// having the constant itself available.
-pub trait ToContinue {
-    /// The resulting `Continue<N>` type.
-    type AsContinue: IsSession;
-}
-
-impl<const I: usize> ToContinue for Number<I> {
-    type AsContinue = Continue<I>;
-}
-
-impl ToContinue for Z {
-    type AsContinue = <<Z as ToConstant>::AsConstant as ToContinue>::AsContinue;
-}
-
-impl<N: Unary, Const> ToContinue for S<N>
-where
-    Self: ToConstant<AsConstant = Const>,
-    Const: ToContinue,
-{
-    type AsContinue = Const::AsContinue;
-}
-
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at `0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -59,14 +33,13 @@ impl<P, N: Unary, const I: usize> Then<P, N> for Continue<I> {
     type Combined = Continue<I>;
 }
 
-impl<N: Unary, M: Unary, P: Unary, Summed, Level: Unary, const I: usize> Lift<N, Level>
+impl<N: Unary, M: Unary, P: Unary, Level: Unary, const I: usize, const J: usize> Lift<N, Level>
     for Continue<I>
 where
     Number<I>: ToUnary<AsUnary = M>,
     (M, N): unary::Add<Result = P>,
-    <(M, N) as unary::Add>::Result: ToContinue<AsContinue = Summed>,
-    (M, Level): Compare<Continue<I>, Summed, Summed>,
-    <(M, Level) as Compare<Continue<I>, Summed, Summed>>::Result: 'static,
+    P: ToConstant<AsConstant = Number<J>>,
+    (M, Level): Compare<Continue<I>, Continue<J>, Continue<J>>,
 {
-    type Lifted = <(M, Level) as Compare<Continue<I>, Summed, Summed>>::Result;
+    type Lifted = <(M, Level) as Compare<Continue<I>, Continue<J>, Continue<J>>>::Result;
 }
