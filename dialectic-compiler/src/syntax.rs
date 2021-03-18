@@ -41,9 +41,9 @@ pub enum Syntax {
     Send(Type),
     /// Syntax: `call T` or `call { ... }`.
     Call(Box<Spanned<Syntax>>),
-    /// Syntax: `choose { _0 => ..., ... }`.
+    /// Syntax: `choose { 0 => ..., ... }`.
     Choose(Vec<Spanned<Syntax>>),
-    /// Syntax: `offer { _0 => ..., ... }`.
+    /// Syntax: `offer { 0 => ..., ... }`.
     Offer(Vec<Spanned<Syntax>>),
     /// Syntax: `split { -> ..., <- ... }`.
     Split {

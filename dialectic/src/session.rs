@@ -36,7 +36,7 @@ use std::marker;
 ///    }
 ///    ```
 ///
-/// 2. The session type `Loop<Continue<_1>>` is not `Scoped`, because `Continue<_1>` must occur
+/// 2. The session type `Loop<Continue<1>>` is not `Scoped`, because `Continue<1>` must occur
 ///    within two nested [`Loop`]s to be properly scoped:
 ///
 ///    ```compile_fail
@@ -44,7 +44,7 @@ use std::marker;
 ///    # use dialectic_tokio_mpsc as mpsc;
 ///    use dialectic::types::{Loop, Continue};
 ///    use dialectic::unary::types::*;
-///    let (c1, c2) = <Loop<Continue<_1>>>::channel(mpsc::unbounded_channel);
+///    let (c1, c2) = <Loop<Continue<1>>>::channel(mpsc::unbounded_channel);
 ///    ```
 ///
 ///    Note that you cannot write out an ill-scoped session type using the
