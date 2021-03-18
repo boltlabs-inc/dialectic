@@ -227,13 +227,13 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     }
 }
 
-impl<Tx, Rx, S, Choices, Length, const N: usize> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
     Choices: Tuple,
-    Choices::AsList: HasLength<Length = Length>,
-    Length: ToConstant<AsConstant = Number<N>>,
+    Choices::AsList: HasLength,
+    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     S: Session<Action = Choose<Choices>>,
-    Tx: Transmit<Choice<N>, Val> + marker::Send + 'static,
+    Tx: Transmit<Choice<LENGTH>, Val> + marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -301,18 +301,18 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn choose<const M: usize>(
+    pub async fn choose<const N: usize>(
         mut self,
     ) -> Result<
-        Chan<<Choices::AsList as Select<<Number<M> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
         Tx::Error,
     >
     where
-        Number<M>: ToUnary,
-        Choices::AsList: Select<<Number<M> as ToUnary>::AsUnary>,
-        <Choices::AsList as Select<<Number<M> as ToUnary>::AsUnary>>::Selected: Session,
+        Number<N>: ToUnary,
+        Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
     {
-        let choice = u8::try_from(M)
+        let choice = u8::try_from(N)
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
@@ -321,15 +321,15 @@ where
     }
 }
 
-impl<Tx, Rx, S, Choices, Length, const L: usize> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
     Choices: Tuple + 'static,
-    Choices::AsList: HasLength<Length = Length> + EachScoped + EachHasDual,
-    Length: ToConstant<AsConstant = Number<L>>,
-    Z: LessThan<Length>,
+    Choices::AsList: HasLength + EachScoped + EachHasDual,
+    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
+    Z: LessThan<<Choices::AsList as HasLength>::Length>,
     S: Session<Action = Offer<Choices>>,
     Tx: marker::Send + 'static,
-    Rx: Receive<Choice<L>> + marker::Send + 'static,
+    Rx: Receive<Choice<LENGTH>> + marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -849,11 +849,11 @@ where
     }
 }
 
-impl<Tx, Rx, Choices, Length, const L: usize> Branches<Choices, Tx, Rx>
+impl<Tx, Rx, Choices, const LENGTH: usize> Branches<Choices, Tx, Rx>
 where
     Choices: Tuple + 'static,
-    Choices::AsList: EachScoped + EachHasDual + HasLength<Length = Length>,
-    Length: ToConstant<AsConstant = Number<L>>,
+    Choices::AsList: EachScoped + EachHasDual + HasLength,
+    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
@@ -909,7 +909,7 @@ where
     ///
     /// Ordinarily, you should prefer the [`offer!`](crate::offer) macro in situations where you
     /// need to know this value.
-    pub fn choice(&self) -> Choice<L> {
+    pub fn choice(&self) -> Choice<LENGTH> {
         self.variant
             .try_into()
             .expect("internal variant for `Branches` exceeds number of choices")
