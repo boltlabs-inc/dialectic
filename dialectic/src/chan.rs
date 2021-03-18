@@ -48,13 +48,13 @@ use futures::Future;
 /// halves of the channel on one computer, and instead each computer will wrap one end of the
 /// connection:
 ///
-/// ```
+/// ```ignore
 /// # use dialectic::prelude::*;
 /// # use dialectic_tokio_mpsc as mpsc;
 /// #
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let (tx, rx) = mpsc::channel(1);
+/// let (tx, rx) = /* ... */;
 /// let c = <Session! { send String }>::wrap(tx, rx);
 /// # Ok(())
 /// # }
