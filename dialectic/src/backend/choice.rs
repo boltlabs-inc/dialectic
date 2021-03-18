@@ -2,32 +2,6 @@ use crate::unary::*;
 use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
 
-/// Helper trait for converting an unary number type corresponding to some const generic `usize` `N`
-/// into a corresponding `Choice<N>`. It is not possible to do this any other way at the moment
-/// because const generic parameters cannot be associated constants and without associated constants
-/// as such we are forced to use this method to produce a type uniquely dependent on one without
-/// having the constant itself available.
-pub trait ToChoice {
-    /// The resulting `Choice<N>` type.
-    type AsChoice: TryFrom<u8, Error = OutOfBoundsChoiceError> + Into<u8> + Send + Sync + 'static;
-}
-
-impl<const I: usize> ToChoice for Number<I> {
-    type AsChoice = Choice<I>;
-}
-
-impl ToChoice for Z {
-    type AsChoice = <<Z as ToConstant>::AsConstant as ToChoice>::AsChoice;
-}
-
-impl<N: Unary, Const> ToChoice for S<N>
-where
-    Self: ToConstant<AsConstant = Const>,
-    Const: ToChoice,
-{
-    type AsChoice = Const::AsChoice;
-}
-
 /// A `Choice` represents a selection between several protocols offered by [`offer!`](crate::offer).
 ///
 /// It wraps an ordinary non-negative number, with the guarantee that it is *strictly less than* the
