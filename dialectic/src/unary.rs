@@ -168,24 +168,39 @@ where
     type Result = S<<(N, M) as Add>::Result>;
 }
 
-/// A trait which allows conversion from a wrapper type over a type-level `usize` to a unary
-/// type-level number representation.
-pub trait ToUnary {
-    /// The result of conversion.
-    type AsUnary: Unary;
-}
+/// A trait marking wrapped type-level constants.
+pub trait Constant: sealed::Constant {}
 
 /// A wrapper for type-level `usize` values to allow implementing traits on them.
 #[allow(missing_debug_implementations)]
 pub struct Number<const N: usize>;
 
-dialectic_macro::generate_to_unary_impls!(256);
+impl<const N: usize> Constant for Number<N> {}
+
+/// A trait which allows conversion from a wrapper type over a type-level `usize` to a unary
+/// type-level number representation.
+pub trait ToUnary {
+    /// The result of conversion.
+    type AsUnary: Unary + ToConstant<AsConstant = Self>;
+}
+
+/// A trait which allows conversion from a unary type-level representation to a wrapper over a
+/// type-level `usize`.
+pub trait ToConstant: Unary {
+    /// The result of conversion.
+    type AsConstant: Constant + ToUnary<AsUnary = Self>;
+}
+
+dialectic_macro::generate_unary_conversion_impls!(256);
 
 mod sealed {
     use super::*;
     pub trait Unary: 'static {}
     impl Unary for Z {}
     impl<N: Unary> Unary for S<N> {}
+
+    pub trait Constant: 'static {}
+    impl<const N: usize> Constant for Number<N> {}
 
     pub trait Compare {}
     impl<N: Unary, M: Unary> Compare for (N, M) {}

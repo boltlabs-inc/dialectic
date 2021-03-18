@@ -12,7 +12,21 @@ pub trait ToChoice {
     type AsChoice: TryFrom<u8, Error = OutOfBoundsChoiceError> + Into<u8> + Send + Sync + 'static;
 }
 
-dialectic_macro::generate_to_choice_impls!(256);
+impl<const I: usize> ToChoice for Number<I> {
+    type AsChoice = Choice<I>;
+}
+
+impl ToChoice for Z {
+    type AsChoice = <<Z as ToConstant>::AsConstant as ToChoice>::AsChoice;
+}
+
+impl<N: Unary, Const> ToChoice for S<N>
+where
+    Self: ToConstant<AsConstant = Const>,
+    Const: ToChoice,
+{
+    type AsChoice = Const::AsChoice;
+}
 
 /// A `Choice` represents a selection between several protocols offered by [`offer!`](crate::offer).
 ///
