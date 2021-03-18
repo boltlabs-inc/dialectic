@@ -227,15 +227,15 @@ where
 /// ```
 /// use static_assertions::{assert_impl_all, assert_not_impl_any};
 /// use dialectic::types::*;
-/// use dialectic::unary::types::*;
+/// use dialectic::unary::UnaryOf;
 ///
-/// type L = (_0, (_1, (_2, ())));
+/// type L = (UnaryOf<0>, (UnaryOf<1>, (UnaryOf<2>, ())));
 ///
-/// assert_impl_all!(L: Select<_0, Selected = _0, Remainder = (_1, (_2, ()))>);
-/// assert_impl_all!(L: Select<_1, Selected = _1, Remainder = (_0, (_2, ()))>);
-/// assert_impl_all!(L: Select<_2, Selected = _2, Remainder = (_0, (_1, ()))>);
+/// assert_impl_all!(L: Select<UnaryOf<0>, Selected = UnaryOf<0>, Remainder = (UnaryOf<1>, (UnaryOf<2>, ()))>);
+/// assert_impl_all!(L: Select<UnaryOf<1>, Selected = UnaryOf<1>, Remainder = (UnaryOf<0>, (UnaryOf<2>, ()))>);
+/// assert_impl_all!(L: Select<UnaryOf<2>, Selected = UnaryOf<2>, Remainder = (UnaryOf<0>, (UnaryOf<1>, ()))>);
 ///
-/// assert_not_impl_any!(L: Select<_3>);
+/// assert_not_impl_any!(L: Select<UnaryOf<3>>);
 /// ```
 pub trait Select<N: Unary>: sealed::Select<N> {
     /// The thing which is selected from this list by the index `N`.

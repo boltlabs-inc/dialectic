@@ -1,11 +1,5 @@
 //! The unary numbers, represented by zero [`Z`] and successor [`S`].
 
-pub mod types {
-    //! Predefined type-level constants for small type-level numbers.
-    #![allow(missing_docs)]
-    dialectic_macro::generate_unary_types!(256);
-}
-
 /// The number zero.
 ///
 /// # Examples
@@ -31,6 +25,9 @@ pub struct Z;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct S<N>(pub N);
 
+/// A convenient type synonym for writing out unary types using constants.
+pub type UnaryOf<const N: usize> = <Number<N> as ToUnary>::AsUnary;
+
 /// All unary numbers can be converted to their value-level equivalent `usize`.
 ///
 /// # Examples
@@ -38,13 +35,13 @@ pub struct S<N>(pub N);
 /// ```
 /// # #![recursion_limit = "256"]
 /// use dialectic::prelude::*;
-/// use dialectic::unary::{types::*, Unary};
+/// use dialectic::unary::*;
 ///
-/// assert_eq!(_0::VALUE, 0);
-/// assert_eq!(_1::VALUE, 1);
-/// assert_eq!(_2::VALUE, 2);
+/// assert_eq!(<UnaryOf<0>>::VALUE, 0);
+/// assert_eq!(<UnaryOf<1>>::VALUE, 1);
+/// assert_eq!(<UnaryOf<2>>::VALUE, 2);
 /// // ...
-/// assert_eq!(_256::VALUE, 256);
+/// assert_eq!(<UnaryOf<256>>::VALUE, 256);
 /// ```
 pub trait Unary: sealed::Unary + Sized + Sync + Send + 'static {
     /// The runtime value of this type-level number, as a `usize`.
@@ -67,18 +64,18 @@ impl<N: Unary> Unary for S<N> {
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::unary::{types::*, LessThan};
+/// use dialectic::unary::*;
 ///
-/// fn ok() where _1: LessThan<_2> {}
+/// fn ok() where UnaryOf<1>: LessThan<UnaryOf<2>> {}
 /// ```
 ///
 /// But this does not compile, because `2 >= 1`:
 ///
 /// ```compile_fail
 /// # use dialectic::prelude::*;
-/// # use dialectic::unary::{types::*, LessThan};
+/// # use dialectic::unary::*;
 /// #
-/// fn bad() where _2: LessThan<_1> {}
+/// fn bad() where UnaryOf<2>: LessThan<UnaryOf<1>> {}
 /// ```
 ///
 /// Because [`LessThan`] is a *strict* less-than relationship (i.e. `<`, not `<=`), this does not
@@ -86,9 +83,9 @@ impl<N: Unary> Unary for S<N> {
 ///
 /// ```compile_fail
 /// # use dialectic::prelude::*;
-/// # use dialectic::unary::types::*;
+/// # use dialectic::unary::*;
 /// #
-/// fn bad() where _100: LessThan<_100> {}
+/// fn bad() where UnaryOf<100>: LessThan<UnaryOf<100>> {}
 /// ```
 pub trait LessThan<N: Unary>
 where
@@ -106,13 +103,12 @@ impl<N: Unary, M: LessThan<N>> LessThan<S<N>> for S<M> {}
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::unary::Compare;
-/// use dialectic::unary::types::*;
+/// use dialectic::unary::{Compare, UnaryOf};
 /// use static_assertions::assert_type_eq_all;
 ///
-/// assert_type_eq_all!(<(_0, _1) as Compare<u8, u16, u32>>::Result, u8);
-/// assert_type_eq_all!(<(_1, _1) as Compare<u8, u16, u32>>::Result, u16);
-/// assert_type_eq_all!(<(_2, _1) as Compare<u8, u16, u32>>::Result, u32);
+/// assert_type_eq_all!(<(UnaryOf<0>, UnaryOf<1>) as Compare<u8, u16, u32>>::Result, u8);
+/// assert_type_eq_all!(<(UnaryOf<1>, UnaryOf<1>) as Compare<u8, u16, u32>>::Result, u16);
+/// assert_type_eq_all!(<(UnaryOf<2>, UnaryOf<1>) as Compare<u8, u16, u32>>::Result, u32);
 /// ```
 pub trait Compare<IfLess, IfEqual, IfGreater>: sealed::Compare {
     /// The result of the comparison: either `T` if `Self == N` or `E` if `Self != N`.
@@ -146,11 +142,10 @@ impl<N: Unary, IfLess, IfEqual, IfGreater> Compare<IfLess, IfEqual, IfGreater> f
 /// ```
 /// use dialectic::prelude::*;
 /// use dialectic::unary::*;
-/// use dialectic::unary::types::*;
 /// use static_assertions::assert_type_eq_all;
 ///
-/// assert_type_eq_all!(<(_1, _1) as Add>::Result, _2);
-/// assert_type_eq_all!(<(_5, _7) as Add>::Result, _12);
+/// assert_type_eq_all!(<(UnaryOf<1>, UnaryOf<1>) as Add>::Result, UnaryOf<2>);
+/// assert_type_eq_all!(<(UnaryOf<5>, UnaryOf<7>) as Add>::Result, UnaryOf<12>);
 /// ```
 pub trait Add: sealed::Add {
     /// The result of the addition.
