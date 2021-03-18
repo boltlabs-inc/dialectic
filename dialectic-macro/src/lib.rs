@@ -572,7 +572,7 @@ pub fn generate_unary_constants(input: proc_macro::TokenStream) -> proc_macro::T
 /// type-level constants into unary representation. It will generate up to the maximum number
 /// specified as the argument.
 #[proc_macro]
-pub fn generate_to_unary_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn generate_unary_conversion_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let arity_limit = parse_macro_input!(input as LitInt)
         .base10_parse::<usize>()
         .unwrap();
@@ -582,51 +582,9 @@ pub fn generate_to_unary_impls(input: proc_macro::TokenStream) -> proc_macro::To
             impl ToUnary for Number<#i> {
                 type AsUnary = #state;
             }
-        };
 
-        *state = quote!(S<#state>);
-
-        Some(tokens)
-    });
-
-    quote!(#(#impls)*).into()
-}
-
-/// **Internal implementation detail:** This proc macro generates trait implementations converting
-/// types acting as wrappers for integer constant generics into `Choice<N>` types.
-#[proc_macro]
-pub fn generate_to_choice_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let arity_limit = parse_macro_input!(input as LitInt)
-        .base10_parse::<usize>()
-        .unwrap();
-
-    let impls = (0..=arity_limit).scan(quote!(Z), |state, i| {
-        let tokens = quote! {
-            impl ToChoice for #state {
-                type AsChoice = Choice<#i>;
-            }
-        };
-
-        *state = quote!(S<#state>);
-
-        Some(tokens)
-    });
-
-    quote!(#(#impls)*).into()
-}
-
-/// **Internal implementation detail:** This proc macro generates trait implementations converting
-/// types acting as wrappers for integer constant generics into `Continue<N>` types.
-#[proc_macro]
-pub fn generate_to_continue_impls(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let arity_limit = parse_macro_input!(input as LitInt)
-        .base10_parse::<usize>()
-        .unwrap();
-
-    let impls = (0..=arity_limit).scan(quote!(Z), |state, i| {
-        let tokens = quote! {
-            impl ToContinue for #state {
-                type AsContinue = Continue<#i>;
+            impl ToConstant for #state {
+                type AsConstant = Number<#i>;
             }
         };
 

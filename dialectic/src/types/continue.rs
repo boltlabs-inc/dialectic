@@ -1,6 +1,6 @@
 use super::sealed::IsSession;
 use super::*;
-use crate::unary::{self, Compare, Number, ToUnary};
+use crate::unary::{self, Compare, Number, ToConstant, ToUnary};
 
 /// Helper trait for converting an unary number type corresponding to some const generic `usize` `N`
 /// into a corresponding `Continue<N>`. It is not possible to do this any other way at the moment
@@ -12,7 +12,21 @@ pub trait ToContinue {
     type AsContinue: IsSession;
 }
 
-dialectic_macro::generate_to_continue_impls!(256);
+impl<const I: usize> ToContinue for Number<I> {
+    type AsContinue = Continue<I>;
+}
+
+impl ToContinue for Z {
+    type AsContinue = <<Z as ToConstant>::AsConstant as ToContinue>::AsContinue;
+}
+
+impl<N: Unary, Const> ToContinue for S<N>
+where
+    Self: ToConstant<AsConstant = Const>,
+    Const: ToContinue,
+{
+    type AsContinue = Const::AsContinue;
+}
 
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at `0`.
