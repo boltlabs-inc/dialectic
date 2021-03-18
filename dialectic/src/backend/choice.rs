@@ -60,7 +60,7 @@ dialectic_macro::generate_to_choice_impls!(256);
 /// assert!(attempted_four.is_err());
 /// ```
 ///
-/// Note that this means `Choice<_0>` is unrepresentable, because you cannot choose something from a
+/// Note that this means `Choice<0>` is unrepresentable, because you cannot choose something from a
 /// set of zero things:
 ///
 /// ```
