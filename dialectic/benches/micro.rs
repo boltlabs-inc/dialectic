@@ -60,7 +60,7 @@ where
     Rx: Receive<Choice<1>> + marker::Send,
     Rx::Error: Debug,
 {
-    offer!(chan => {
+    offer!(in chan {
         0 => chan,
     })
     .unwrap()
