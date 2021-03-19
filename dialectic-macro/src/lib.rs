@@ -287,7 +287,7 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///
 /// // Spawn a thread to offer a choice
 /// let t1 = tokio::spawn(async move {
-///     offer!(c2 => {
+///     offer!(in c2 {
 ///         0 => { c2.recv().await?; },
 ///         1 => { c2.send("Hello!".to_string()).await?; },
 ///     })?;
@@ -333,8 +333,8 @@ struct OfferOutput {
 
 impl Parse for OfferInvocation {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let _ = input.parse::<Token![in]>()?;
         let chan = input.parse::<Ident>()?;
-        let _ = input.parse::<Token![=>]>()?;
         let content;
         let _ = braced!(content in input);
         let mut branches = Vec::new();
