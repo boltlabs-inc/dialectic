@@ -19,10 +19,10 @@ use std::{future::Future, pin::Pin};
 mod choice;
 pub use choice::*;
 
-/// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`]) must implement
-/// [`Transmitter`], which specifies what type of errors it might return, whether it sends things by
-/// owned value or by reference, and describes how to send a [`Choice`] of arbitrary size over the
-/// channel.
+/// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
+/// must implement [`Transmitter`], which specifies what type of errors it might return, whether it
+/// sends things by owned value or by reference, and describes how to send a [`Choice`] of arbitrary
+/// size over the channel.
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
@@ -64,9 +64,9 @@ pub trait Transmit<T>: Transmitter {
         'a: 'async_lifetime;
 }
 
-/// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`]) must implement
-/// [`Receiver`], which specifies what type of errors it might return, and describes how to receive
-/// a [`Choice`] of arbitrary size over the channel.
+/// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
+/// implement [`Receiver`], which specifies what type of errors it might return, and describes how
+/// to receive a [`Choice`] of arbitrary size over the channel.
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;

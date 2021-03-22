@@ -1,5 +1,5 @@
-//! The [`Chan`] type is defined here. Typically, you don't need to import this module, and
-//! should use the [`Chan`](super::Chan) type synonym instead.
+//! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
+//! use the [`Chan`](super::Chan) type synonym instead.
 use std::{
     any::TypeId,
     convert::{TryFrom, TryInto},
@@ -158,8 +158,8 @@ where
     ///
     /// # Errors
     ///
-    /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
-    /// an error while receiving.
+    /// This function returns the [`Receiver::Error`] for the underlying `Rx` connection if there
+    /// was an error while receiving.
     ///
     /// # Examples
     ///
@@ -196,7 +196,7 @@ where
     ///
     /// # Errors
     ///
-    /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
+    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
     /// was an error while sending.
     ///
     /// # Examples
@@ -248,7 +248,7 @@ where
     ///
     /// # Errors
     ///
-    /// This function returns the [`Transmit::Error`] for the underlying `Tx` connection if there
+    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
     /// was an error while sending the choice.
     ///
     /// # Examples
@@ -349,8 +349,8 @@ where
     ///
     /// # Errors
     ///
-    /// This function returns the [`Receive::Error`] for the underlying `Rx` connection if there was
-    /// an error while receiving.
+    /// This function returns the [`Receiver::Error`] for the underlying `Rx` connection if there
+    /// was an error while receiving.
     ///
     /// # Examples
     ///
