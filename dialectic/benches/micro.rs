@@ -151,9 +151,9 @@ fn bench_all_on<Tx, Rx, H, A>(
     channel: fn(Primitive, u64) -> (Tx, Rx, H),
 ) where
     Tx: Transmitter<Convention = Val> + Transmit<()> + marker::Send + 'static,
-    <Tx as Transmitter>::Error: Debug,
-    Rx: Receiver + Receive<()> + marker::Send + 'static,
-    <Rx as Receiver>::Error: Debug,
+    Rx: Receive<()> + marker::Send + 'static,
+    Tx::Error: Debug,
+    Rx::Error: Debug,
     A: AsyncExecutor,
 {
     use Primitive::*;
