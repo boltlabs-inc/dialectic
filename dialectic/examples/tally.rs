@@ -124,17 +124,15 @@ type Server = <Client as Session>::Dual;
 /// The implementation of the server for each client connection.
 async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
     loop {
-        chan = offer!(
-            in chan {
-                // Client wants to compute another tally
-                0 => {
-                    let (op, chan) = chan.recv().await?;
-                    chan.call(|chan| server_tally(&op, chan)).await?.1.unwrap()
-                },
-                // Client wants to quit
-                1 => break chan.close(),
-            }
-        )?;
+        chan = offer!(in chan {
+            // Client wants to compute another tally
+            0 => {
+                let (op, chan) = chan.recv().await?;
+                chan.call(|chan| server_tally(&op, chan)).await?.1.unwrap()
+            },
+            // Client wants to quit
+            1 => break chan.close(),
+        })?;
     }
     Ok(())
 }
@@ -149,21 +147,19 @@ async fn server_tally(
 ) -> Result<(), Box<dyn Error>> {
     let mut tally = op.unit();
     loop {
-        chan = offer!(
-            in chan {
-                // Client wants to add another number to the tally
-                0 => {
-                    let (i, chan) = chan.recv().await?;
-                    tally = op.combine(tally, i);
-                    chan
-                },
-                // Client wants to finish this tally
-                1 => {
-                    chan.send(&tally).await?.close();
-                    break Ok(());
-                }
+        chan = offer!(in chan {
+            // Client wants to add another number to the tally
+            0 => {
+                let (i, chan) = chan.recv().await?;
+                tally = op.combine(tally, i);
+                chan
+            },
+            // Client wants to finish this tally
+            1 => {
+                chan.send(&tally).await?.close();
+                break Ok(());
             }
-        )?;
+        })?;
     }
 }
 

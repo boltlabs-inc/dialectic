@@ -106,18 +106,16 @@ fn server(
 ) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + std::marker::Send>> {
     Box::pin(async move {
         loop {
-            chan = offer!(
-                in chan {
-                    // Client doesn't want to push a value
-                    0 => break chan.close(),
-                    // Client wants to push a value
-                    1 => {
-                        let (string, chan) = chan.recv().await?;       // Receive pushed value
-                        let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
-                        chan.send(&string.to_uppercase()).await?       // Send back that pushed value
-                    },
-                }
-            )?;
+            chan = offer!(in chan {
+                // Client doesn't want to push a value
+                0 => break chan.close(),
+                // Client wants to push a value
+                1 => {
+                    let (string, chan) = chan.recv().await?;       // Receive pushed value
+                    let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
+                    chan.send(&string.to_uppercase()).await?       // Send back that pushed value
+                },
+            })?;
         }
         Ok(())
     })
