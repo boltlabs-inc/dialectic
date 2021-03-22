@@ -32,7 +32,7 @@ use std::{future::Future, pin::Pin};
 
 use call_by::CallBy;
 use dialectic::{
-    backend::{Choice, Receive, Ref, Transmit, Val},
+    backend::{self, Choice, Receive, Ref, Transmit},
     Chan,
 };
 use futures::sink::SinkExt;
@@ -155,9 +155,8 @@ impl<F: Serializer, E: Encoder<F::Output>, W: AsyncWrite> Sender<F, E, W> {
     }
 }
 
-impl<T, F, E, W> Transmit<T, Ref> for Sender<F, E, W>
+impl<F, E, W> backend::Transmitter for Sender<F, E, W>
 where
-    T: Serialize + Sync,
     F: Serializer + Unpin + Send,
     F::Output: Send,
     F::Error: Send,
@@ -166,6 +165,35 @@ where
 {
     type Error = SendError<F, E>;
 
+    type Convention = Ref;
+
+    fn send_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<N>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        Box::pin(async move {
+            let serialized = self
+                .serializer
+                .serialize(&choice)
+                .map_err(SendError::Serialize)?;
+            self.framed_write
+                .send(serialized)
+                .await
+                .map_err(SendError::Encode)?;
+            Ok(())
+        })
+    }
+}
+
+impl<T, F, E, W> Transmit<T> for Sender<F, E, W>
+where
+    T: Serialize + Sync,
+    F: Serializer + Unpin + Send,
+    F::Output: Send,
+    F::Error: Send,
+    E: Encoder<F::Output> + Send,
+    W: AsyncWrite + Unpin + Send,
+{
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Ref>>::Type,
@@ -177,41 +205,6 @@ where
             let serialized = self
                 .serializer
                 .serialize(message)
-                .map_err(SendError::Serialize)?;
-            self.framed_write
-                .send(serialized)
-                .await
-                .map_err(SendError::Encode)?;
-            Ok(())
-        })
-    }
-}
-
-// We could allow *anything* to be sent by value, but that would create ambiguity at the call-sites
-// for `send`, and since everything is actually sent by reference, there's no reason to provide the
-// extra ability. Instead, we specifically implement send-by-value for `Choice`, because it's
-// required for all backends, and let everything else be send-by-ref only.
-impl<F, E, W, const N: usize> Transmit<Choice<N>, Val> for Sender<F, E, W>
-where
-    F: Serializer + Unpin + Send,
-    F::Output: Send,
-    F::Error: Send,
-    E: Encoder<F::Output> + Send,
-    W: AsyncWrite + Unpin + Send,
-{
-    type Error = SendError<F, E>;
-
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        message: <Choice<N> as CallBy<'a, Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
-    where
-        'a: 'async_lifetime,
-    {
-        Box::pin(async move {
-            let serialized = self
-                .serializer
-                .serialize(&message)
                 .map_err(SendError::Serialize)?;
             self.framed_write
                 .send(serialized)
@@ -249,6 +242,22 @@ impl<F: Deserializer<D::Item>, D: Decoder, R: AsyncRead> Receiver<F, D, R> {
     }
 }
 
+impl<F, D, R> backend::Receiver for Receiver<F, D, R>
+where
+    F: Deserializer<D::Item> + Unpin + Send,
+    D: Decoder + Send,
+    R: AsyncRead + Unpin + Send,
+{
+    type Error = RecvError<F, D>;
+
+    fn recv_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        <Self as Receive<Choice<N>>>::recv(self)
+    }
+}
+
 impl<T, F, D, R> Receive<T> for Receiver<F, D, R>
 where
     T: for<'a> Deserialize<'a>,
@@ -256,8 +265,6 @@ where
     D: Decoder + Send,
     R: AsyncRead + Unpin + Send,
 {
-    type Error = RecvError<F, D>;
-
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {

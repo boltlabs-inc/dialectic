@@ -98,7 +98,12 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S, Tx, Rx> {
+impl<Tx, Rx, S> Chan<S, Tx, Rx>
+where
+    S: Session,
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+{
     /// Close a finished session, dropping the underlying connections.
     ///
     /// If called inside a future given to [`split`](Chan::split) or [`call`](Chan::call), the
@@ -210,17 +215,16 @@ impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S,
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send<'b, Convention, T, P>(
+    pub async fn send<'b, T, P>(
         mut self,
-        message: <T as CallBy<'b, Convention>>::Type,
-    ) -> Result<Chan<P, Tx, Rx>, <Tx as Transmit<T, Convention>>::Error>
+        message: <T as CallBy<'b, Tx::Convention>>::Type,
+    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
-        Convention: CallingConvention,
-        Tx: Transmit<T, Convention>,
-        T: CallBy<'b, Convention>,
-        <T as CallBy<'b, Convention>>::Type: marker::Send,
+        Tx: Transmit<T>,
+        T: CallBy<'b, Tx::Convention>,
+        <T as CallBy<'b, Tx::Convention>>::Type: marker::Send,
     {
         self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
@@ -233,7 +237,7 @@ where
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: marker::Send + 'static,
+    Tx: Transmitter + marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -308,7 +312,6 @@ where
         Tx::Error,
     >
     where
-        Tx: Transmit<Choice<LENGTH>, Val>,
         Number<N>: ToUnary,
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
@@ -317,7 +320,11 @@ where
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        self.tx.as_mut().unwrap().send(choice).await?;
+        self.tx
+            .as_mut()
+            .unwrap()
+            .send_choice::<LENGTH>(choice)
+            .await?;
         Ok(self.unchecked_cast())
     }
 }
@@ -330,7 +337,7 @@ where
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
     Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Rx: Receiver + marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -418,12 +425,9 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error>
-    where
-        Rx: Receive<Choice<LENGTH>>,
-    {
+    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let variant = rx.as_mut().unwrap().recv().await?.into();
+        let variant = rx.as_mut().unwrap().recv_choice::<LENGTH>().await?.into();
         Ok(Branches {
             variant,
             tx,
@@ -435,7 +439,12 @@ where
     }
 }
 
-impl<Tx: marker::Send + 'static, Rx: marker::Send + 'static, S: Session> Chan<S, Tx, Rx> {
+impl<Tx, Rx, S> Chan<S, Tx, Rx>
+where
+    S: Session,
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+{
     /// Execute the session type `P` as a subroutine in a closure.
     ///
     /// This operation takes as input an asynchronous closure that runs a channel for the session

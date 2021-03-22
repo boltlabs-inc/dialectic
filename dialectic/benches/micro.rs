@@ -23,7 +23,7 @@ async fn send<Tx, Rx>(
     chan: Chan<Session! { loop { send () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { send () } }, Tx, Rx>
 where
-    Tx: Transmit<(), Val> + marker::Send,
+    Tx: Transmitter<Convention = Val> + Transmit<()> + marker::Send,
     Tx::Error: Debug,
     Rx: marker::Send,
 {
@@ -35,7 +35,7 @@ async fn recv<Tx, Rx>(
 ) -> Chan<Session! { loop { recv () } }, Tx, Rx>
 where
     Tx: marker::Send,
-    Rx: Receive<()> + marker::Send,
+    Rx: Receiver + Receive<()> + marker::Send,
     Rx::Error: Debug,
 {
     chan.recv().await.unwrap().1
@@ -45,7 +45,7 @@ async fn choose<Tx, Rx>(
     chan: Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>
 where
-    Tx: Transmit<Choice<1>, Val> + marker::Send,
+    Tx: Transmitter<Convention = Val> + marker::Send,
     Tx::Error: Debug,
     Rx: marker::Send,
 {
@@ -57,7 +57,7 @@ async fn offer<Tx, Rx>(
 ) -> Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>
 where
     Tx: marker::Send,
-    Rx: Receive<Choice<1>> + marker::Send,
+    Rx: Receiver + marker::Send,
     Rx::Error: Debug,
 {
     offer!(in chan {
@@ -150,12 +150,10 @@ fn bench_all_on<Tx, Rx, H, A>(
     backend_name: &str,
     channel: fn(Primitive, u64) -> (Tx, Rx, H),
 ) where
-    Tx: Transmit<(), Val> + Transmit<Choice<1>, Val> + marker::Send + 'static,
-    <Tx as Transmit<(), Val>>::Error: Debug,
-    <Tx as Transmit<Choice<1>, Val>>::Error: Debug,
-    Rx: Receive<()> + Receive<Choice<1>> + marker::Send + 'static,
-    <Rx as Receive<()>>::Error: Debug,
-    <Rx as Receive<Choice<1>>>::Error: Debug,
+    Tx: Transmitter<Convention = Val> + Transmit<()> + marker::Send + 'static,
+    <Tx as Transmitter>::Error: Debug,
+    Rx: Receiver + Receive<()> + marker::Send + 'static,
+    <Rx as Receiver>::Error: Debug,
     A: AsyncExecutor,
 {
     use Primitive::*;

@@ -19,12 +19,30 @@ use std::{future::Future, pin::Pin};
 mod choice;
 pub use choice::*;
 
-/// If a transport is `Transmit<T, Convention>`, we can use it to [`send`](Transmit::send) a message
-/// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified.
-///
-/// In order to support the [`Chan::choose`](crate::Chan::choose) method, all backends must
-/// implement `Transmit<Choice<N>, Val>` for all `N`. For more information, see
-/// [`Choice`](crate::Choice).
+/// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`]) must implement
+/// [`Transmitter`], which specifies what type of errors it might return, whether it sends things by
+/// owned value or by reference, and describes how to send a [`Choice`] of arbitrary size over the
+/// channel.
+pub trait Transmitter {
+    /// The type of possible errors when sending.
+    type Error;
+
+    /// The calling convention for sending values over this channel. Possible options: [`Val`],
+    /// [`Ref`], or [`Mut`]. For backends that move owned values, pick [`Val`]; for those which
+    /// serialize by taking references, pick [`Ref`].
+    type Convention: CallingConvention;
+
+    /// Send a [`Choice`] over this channel. Often this can be implemented by delegating to
+    /// [`Transmit`].
+    fn send_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<N>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
+}
+
+/// If a transport is `Transmit<T>`, we can use it to [`send`](Transmit::send) a message
+/// of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention specified by
+/// its [`Transmitter`] implementation.
 ///
 /// # Examples
 ///
@@ -34,26 +52,33 @@ pub use choice::*;
 ///
 /// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
 /// [`dialectic_tokio_mpsc::Sender`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
-pub trait Transmit<T, Convention: CallingConvention> {
-    /// The type of possible errors when sending.
-    type Error;
-
+pub trait Transmit<T>: Transmitter {
     /// Send a message using the [`CallingConvention`] specified by the trait implementation.
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: <T as CallBy<'a, Convention>>::Type,
+        message: <T as CallBy<'a, Self::Convention>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
-        T: CallBy<'a, Convention>,
-        <T as CallBy<'a, Convention>>::Type: Send,
+        T: CallBy<'a, Self::Convention>,
+        <T as CallBy<'a, Self::Convention>>::Type: Send,
         'a: 'async_lifetime;
 }
 
+/// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`]) must implement
+/// [`Receiver`], which specifies what type of errors it might return, and describes how to receive
+/// a [`Choice`] of arbitrary size over the channel.
+pub trait Receiver {
+    /// The type of possible errors when receiving.
+    type Error;
+
+    /// Receive a [`Choice`] over this channel. Often this can be implemented by delegating to
+    /// [`Receive`].
+    fn recv_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>;
+}
+
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
-///
-/// In order to support the [`Chan::offer`](crate::Chan::offer) method, all backends must implement
-/// `Receive<Choice<N>>`, in addition to whatever other types they support. For more information,
-/// see [`Choice`](crate::Choice).
 ///
 /// # Examples
 ///
@@ -63,10 +88,7 @@ pub trait Transmit<T, Convention: CallingConvention> {
 ///
 /// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
 /// [`dialectic_tokio_mpsc::Receiver`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Receiver.html
-pub trait Receive<T> {
-    /// The type of possible errors when receiving.
-    type Error;
-
+pub trait Receive<T>: Receiver {
     /// Receive a message. This may require type annotations for disambiguation.
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,

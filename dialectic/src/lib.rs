@@ -147,7 +147,7 @@ pub(crate) mod dialectic {
 /// all the bits and pieces you need to start writing programs with Dialectic.
 pub mod prelude {
     #[doc(no_inline)]
-    pub use crate::backend::{Choice, Receive, Transmit};
+    pub use crate::backend::{Choice, Receive, Receiver, Transmit, Transmitter};
     #[doc(no_inline)]
     pub use crate::session::Session;
     #[doc(no_inline)]
