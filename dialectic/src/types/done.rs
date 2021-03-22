@@ -55,7 +55,7 @@ mod tests {
 
         async fn serve<Tx, Rx>(chan: Chan<S, Tx, Rx>) -> Result<(), Box<dyn std::error::Error>>
         where
-            Tx: std::marker::Send + Transmit<String, Val>,
+            Tx: std::marker::Send + Transmitter<Convention = Val> + Transmit<String>,
             Rx: std::marker::Send + Receive<String>,
             Tx::Error: std::error::Error,
             Rx::Error: std::error::Error,

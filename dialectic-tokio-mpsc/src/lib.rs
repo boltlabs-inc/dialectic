@@ -13,7 +13,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::*;
+use dialectic::backend::{self, CallBy, Choice, Val};
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -141,9 +141,19 @@ pub enum RecvError {
     DowncastFailed(Box<dyn Any + Send>),
 }
 
-impl<T: Send + Any> Transmit<T, Val> for Sender {
-    type Error = SendError<T>;
+impl backend::Transmitter for Sender {
+    type Error = SendError<Box<dyn Any + Send>>;
+    type Convention = Val;
 
+    fn send_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<N>,
+    ) -> Pin<Box<(dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime)>> {
+        <Self as backend::Transmit<Choice<N>>>::send(self, choice)
+    }
+}
+
+impl<T: Send + Any> backend::Transmit<T> for Sender {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Val>>::Type,
@@ -151,19 +161,22 @@ impl<T: Send + Any> Transmit<T, Val> for Sender {
     where
         'a: 'async_lifetime,
     {
-        Box::pin(async move {
-            mpsc::Sender::send(&self.0, Box::new(message))
-                .await
-                .map_err(|SendError(message): SendError<Box<dyn Any + Send>>| {
-                    SendError(*message.downcast().unwrap())
-                })
-        })
+        Box::pin(mpsc::Sender::send(&self.0, Box::new(message)))
     }
 }
 
-impl<T: Send + Any> Receive<T> for Receiver {
+impl backend::Receiver for Receiver {
     type Error = RecvError;
 
+    fn recv_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<(dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime)>>
+    {
+        <Self as backend::Receive<Choice<N>>>::recv(self)
+    }
+}
+
+impl<T: Send + Any> backend::Receive<T> for Receiver {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
@@ -179,9 +192,19 @@ impl<T: Send + Any> Receive<T> for Receiver {
     }
 }
 
-impl<T: Send + Any> Transmit<T, Val> for UnboundedSender {
-    type Error = SendError<T>;
+impl backend::Transmitter for UnboundedSender {
+    type Error = SendError<Box<dyn Any + Send>>;
+    type Convention = Val;
 
+    fn send_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<N>,
+    ) -> Pin<Box<(dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime)>> {
+        <Self as backend::Transmit<Choice<N>>>::send(self, choice)
+    }
+}
+
+impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as CallBy<'a, Val>>::Type,
@@ -189,19 +212,22 @@ impl<T: Send + Any> Transmit<T, Val> for UnboundedSender {
     where
         'a: 'async_lifetime,
     {
-        Box::pin(async move {
-            mpsc::UnboundedSender::send(&self.0, Box::new(message)).map_err(
-                |SendError(message): SendError<Box<dyn Any + Send>>| {
-                    SendError(*message.downcast().unwrap())
-                },
-            )
-        })
+        Box::pin(async move { mpsc::UnboundedSender::send(&self.0, Box::new(message)) })
     }
 }
 
-impl<T: Send + Any> Receive<T> for UnboundedReceiver {
+impl backend::Receiver for UnboundedReceiver {
     type Error = RecvError;
 
+    fn recv_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<(dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime)>>
+    {
+        <Self as backend::Receive<Choice<N>>>::recv(self)
+    }
+}
+
+impl<T: Send + Any> backend::Receive<T> for UnboundedReceiver {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {

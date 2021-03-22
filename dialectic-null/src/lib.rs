@@ -15,7 +15,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::*;
+use dialectic::backend::{self, CallBy, Choice, Val};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
@@ -69,9 +69,19 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl Transmit<(), Val> for Sender {
+impl backend::Transmitter for Sender {
     type Error = Error;
+    type Convention = Val;
 
+    fn send_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        _choice: Choice<N>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl backend::Transmit<()> for Sender {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         _message: <() as CallBy<Val>>::Type,
@@ -83,41 +93,21 @@ impl Transmit<(), Val> for Sender {
     }
 }
 
-impl Receive<()> for Receiver {
+impl backend::Receiver for Receiver {
     type Error = Error;
 
+    fn recv_choice<'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async { Ok(0.try_into().unwrap()) })
+    }
+}
+
+impl backend::Receive<()> for Receiver {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async { Ok(()) })
-    }
-}
-
-impl Transmit<Choice<1>, Val> for Sender {
-    type Error = Error;
-
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        _message: <Choice<1> as CallBy<Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
-    where
-        'a: 'async_lifetime,
-    {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-impl<const N: usize> Receive<Choice<N>> for Receiver {
-    type Error = Error;
-
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async {
-            Ok((N.checked_sub(1).expect("Choice<0> is uninhabited") as u8)
-                .try_into()
-                .unwrap())
-        })
     }
 }
