@@ -2,10 +2,10 @@
 
 extern crate proc_macro;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens, TokenStreamExt};
+use quote::{format_ident, quote, quote_spanned, ToTokens, TokenStreamExt};
 use syn::{
-    braced, parse::Parse, parse::ParseStream, parse_macro_input, spanned::Spanned, Arm, Ident,
-    LitInt, Pat, Token,
+    braced, parse::Parse, parse::ParseStream, parse_macro_input, punctuated::Punctuated,
+    spanned::Spanned, Arm, Ident, LitInt, Pat, Token,
 };
 
 /**
@@ -447,6 +447,205 @@ impl OfferInvocation {
                 Err(error)
             }
         }
+    }
+}
+
+enum Mutability {
+    Val(Token![move]),
+    Ref(Token![ref]),
+    Mut(Token![mut]),
+}
+
+impl ToTokens for Mutability {
+    fn to_tokens(&self, stream: &mut proc_macro2::TokenStream) {
+        use Mutability::*;
+        stream.extend(match self {
+            Val(t) => quote_spanned!(t.span()=> call_by::Val),
+            Ref(t) => quote_spanned!(t.span()=> call_by::Ref),
+            Mut(t) => quote_spanned!(t.span()=> call_by::Mut),
+        })
+    }
+}
+
+struct TransmitterSpec {
+    mutability: Option<Mutability>,
+    name: syn::Type,
+    types: Punctuated<syn::Type, Token![,]>,
+}
+
+struct ReceiverSpec {
+    name: syn::Type,
+    types: Punctuated<syn::Type, Token![,]>,
+}
+
+impl Parse for TransmitterSpec {
+    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
+        let name: syn::Type = input.parse()?;
+        let lookahead = input.lookahead1();
+        let mutability = if lookahead.peek(Token![ref]) {
+            Some(Mutability::Ref(input.parse()?))
+        } else if lookahead.peek(Token![mut]) {
+            Some(Mutability::Mut(input.parse()?))
+        } else if lookahead.peek(Token![move]) {
+            Some(Mutability::Val(input.parse()?))
+        } else {
+            None
+        };
+        if input.is_empty() {
+            Ok(TransmitterSpec {
+                name,
+                mutability,
+                types: Punctuated::new(),
+            })
+        } else {
+            let _for: Token![for] = input.parse()?;
+            let types = if input.is_empty() {
+                Punctuated::new()
+            } else {
+                input.parse_terminated(syn::Type::parse)?
+            };
+            Ok(TransmitterSpec {
+                mutability,
+                name,
+                types,
+            })
+        }
+    }
+}
+
+impl Parse for ReceiverSpec {
+    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
+        let name: syn::Type = input.parse()?;
+        if input.is_empty() {
+            Ok(ReceiverSpec {
+                name,
+                types: Punctuated::new(),
+            })
+        } else {
+            let _for: Token![for] = input.parse()?;
+            let types = if input.is_empty() {
+                Punctuated::new()
+            } else {
+                input.parse_terminated(syn::Type::parse)?
+            };
+            Ok(ReceiverSpec { name, types })
+        }
+    }
+}
+
+/// Get a mutable reference to the `where` predicates of an item, if the item supports `where`
+/// predicates. Creates empty `where` clause if none exists yet.
+fn where_predicates_mut(
+    item: &mut syn::Item,
+) -> Option<&mut Punctuated<syn::WherePredicate, Token![,]>> {
+    use syn::Item::*;
+    let span = item.span();
+    let maybe_where = match item {
+        Fn(i) => &mut i.sig.generics.where_clause,
+        Enum(i) => &mut i.generics.where_clause,
+        Impl(i) => &mut i.generics.where_clause,
+        Struct(i) => &mut i.generics.where_clause,
+        Trait(i) => &mut i.generics.where_clause,
+        TraitAlias(i) => &mut i.generics.where_clause,
+        Type(i) => &mut i.generics.where_clause,
+        Union(i) => &mut i.generics.where_clause,
+        _ => return None,
+    };
+    if let Some(where_clause) = maybe_where {
+        Some(&mut where_clause.predicates)
+    } else {
+        let clause = syn::WhereClause {
+            where_token: syn::token::Where { span },
+            predicates: Punctuated::new(),
+        };
+        *maybe_where = Some(clause);
+        Some(&mut maybe_where.as_mut().unwrap().predicates)
+    }
+}
+
+#[allow(non_snake_case)]
+#[proc_macro_attribute]
+pub fn Transmitter(
+    params: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let TransmitterSpec {
+        name,
+        mutability,
+        types,
+    } = parse_macro_input!(params as TransmitterSpec);
+    let mut item = parse_macro_input!(input as syn::Item);
+    if let Some(predicates) = where_predicates_mut(&mut item) {
+        predicates.push(if let Some(mutability) = mutability {
+            syn::parse_quote! {
+                #name: ::std::marker::Send
+                + ::dialectic::backend::Transmitter<Convention = #mutability>
+                + 'static
+            }
+        } else {
+            syn::parse_quote! {
+                #name: ::std::marker::Send
+                + ::dialectic::backend::Transmitter
+                + 'static
+            }
+        });
+        for ty in types {
+            predicates.push(syn::parse_quote! {
+                #name: ::dialectic::backend::Transmit<#ty>
+            });
+        }
+        for n in 0usize..255 {
+            predicates.push(syn::parse_quote! {
+                #name: ::dialectic::backend::Transmit<dialectic::backend::Choice<#n>>
+            });
+            predicates.push(syn::parse_quote! {
+                ::dialectic::backend::Choice<#n>:
+                    for<'a> ::dialectic::call_by::By<'a, <#name as dialectic::backend::Transmitter>::Convention>
+                    + for<'a> ::dialectic::call_by::Convert<'a, call_by::Mut, <#name as dialectic::backend::Transmitter>::Convention>
+                    + for<'a> ::dialectic::call_by::By<'a, call_by::Mut, Type = &'a mut Choice<#n>>
+            });
+        }
+        item.into_token_stream().into()
+    } else {
+        let message = "unexpected kind of item for `Transmitter` attribute: expecting `enum`, `fn`, `impl`, `struct`, `trait`, `type`, or `union`";
+        syn::Error::new(item.span(), message)
+            .into_compile_error()
+            .into_token_stream()
+            .into()
+    }
+}
+
+#[allow(non_snake_case)]
+#[proc_macro_attribute]
+pub fn Receiver(
+    params: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let ReceiverSpec { name, types } = parse_macro_input!(params as ReceiverSpec);
+    let mut item = parse_macro_input!(input as syn::Item);
+    if let Some(predicates) = where_predicates_mut(&mut item) {
+        predicates.push(syn::parse_quote! {
+            #name: ::std::marker::Send
+            + ::dialectic::backend::Receiver
+            + 'static
+        });
+        for ty in types {
+            predicates.push(syn::parse_quote! {
+                #name: ::dialectic::backend::Receive<#ty>
+            });
+        }
+        for n in 0usize..255 {
+            predicates.push(syn::parse_quote! {
+                #name: ::dialectic::backend::Receive<dialectic::backend::Choice<#n>>
+            });
+        }
+        item.into_token_stream().into()
+    } else {
+        let message = "unexpected kind of item for `Receiver` attribute: expecting `enum`, `fn`, `impl`, `struct`, `trait`, `type`, or `union`";
+        syn::Error::new(item.span(), message)
+            .into_compile_error()
+            .into_token_stream()
+            .into()
     }
 }
 

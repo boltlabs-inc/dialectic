@@ -19,45 +19,45 @@ enum Primitive {
     Split,
 }
 
+#[Transmitter(Tx move for ())]
 async fn send<Tx, Rx>(
     chan: Chan<Session! { loop { send () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { send () } }, Tx, Rx>
 where
-    Tx: Transmitter<Convention = Val> + Transmit<()> + marker::Send,
+    Rx: Send,
     Tx::Error: Debug,
-    Rx: marker::Send,
 {
     chan.send(()).await.unwrap()
 }
 
+#[Receiver(Rx for ())]
 async fn recv<Tx, Rx>(
     chan: Chan<Session! { loop { recv () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { recv () } }, Tx, Rx>
 where
-    Tx: marker::Send,
-    Rx: Receiver + Receive<()> + marker::Send,
+    Tx: Send,
     Rx::Error: Debug,
 {
     chan.recv().await.unwrap().1
 }
 
+#[Transmitter(Tx)]
 async fn choose<Tx, Rx>(
     chan: Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>
 where
-    Tx: Transmitter<Convention = Val> + marker::Send,
+    Rx: Send,
     Tx::Error: Debug,
-    Rx: marker::Send,
 {
     chan.choose::<0>().await.unwrap()
 }
 
+#[Receiver(Rx)]
 async fn offer<Tx, Rx>(
     chan: Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>
 where
-    Tx: marker::Send,
-    Rx: Receiver + marker::Send,
+    Tx: Send,
     Rx::Error: Debug,
 {
     offer!(in chan {
@@ -70,8 +70,8 @@ async fn call<Tx, Rx>(
     chan: Chan<Session! { loop { call {} } }, Tx, Rx>,
 ) -> Chan<Session! { loop { call {} } }, Tx, Rx>
 where
-    Tx: marker::Send,
-    Rx: marker::Send,
+    Tx: Send,
+    Rx: Send,
 {
     chan.call(|_| async { Ok::<_, ()>(()) })
         .await
@@ -84,8 +84,8 @@ async fn split<Tx, Rx>(
     chan: Chan<Session! { loop { split { -> {}, <- {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { split { -> {} <- {} } } }, Tx, Rx>
 where
-    Tx: marker::Send,
-    Rx: marker::Send,
+    Tx: Send,
+    Rx: Send,
 {
     chan.split(|_, _| async { Ok::<_, ()>(()) })
         .await
@@ -143,6 +143,8 @@ fn bench_chan_loop_group<S, Tx, Rx, Fut, H, A>(
     });
 }
 
+#[Transmitter(Tx move for ())]
+#[Receiver(Rx for ())]
 fn bench_all_on<Tx, Rx, H, A>(
     c: &mut Criterion,
     rt_name: &str,
@@ -150,8 +152,6 @@ fn bench_all_on<Tx, Rx, H, A>(
     backend_name: &str,
     channel: fn(Primitive, u64) -> (Tx, Rx, H),
 ) where
-    Tx: Transmitter<Convention = Val> + Transmit<()> + marker::Send + 'static,
-    Rx: Receive<()> + marker::Send + 'static,
     Tx::Error: Debug,
     Rx::Error: Debug,
     A: AsyncExecutor,
