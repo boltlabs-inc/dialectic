@@ -120,8 +120,10 @@ mod chan;
 mod error;
 mod session;
 
+#[doc(no_inline)]
+pub use call_by;
 pub use chan::{Branches, Chan};
-pub use dialectic_macro::{offer, Session};
+pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;
 
@@ -155,5 +157,5 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use call_by::{Mut, Ref, Val};
     #[doc(no_inline)]
-    pub use dialectic_macro::{offer, Session};
+    pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
 }

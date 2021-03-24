@@ -30,9 +30,9 @@
 
 use std::{future::Future, pin::Pin};
 
-use call_by::CallBy;
 use dialectic::{
-    backend::{self, Choice, Receive, Ref, Transmit},
+    backend::{self, Receive, Ref, Transmit},
+    call_by::By,
     Chan,
 };
 use futures::sink::SinkExt;
@@ -164,25 +164,7 @@ where
     W: AsyncWrite + Unpin + Send,
 {
     type Error = SendError<F, E>;
-
     type Convention = Ref;
-
-    fn send_choice<'async_lifetime, const N: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<N>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            let serialized = self
-                .serializer
-                .serialize(&choice)
-                .map_err(SendError::Serialize)?;
-            self.framed_write
-                .send(serialized)
-                .await
-                .map_err(SendError::Encode)?;
-            Ok(())
-        })
-    }
 }
 
 impl<T, F, E, W> Transmit<T> for Sender<F, E, W>
@@ -196,7 +178,7 @@ where
 {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: <T as CallBy<'a, Ref>>::Type,
+        message: <T as By<'a, Ref>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
@@ -249,13 +231,6 @@ where
     R: AsyncRead + Unpin + Send,
 {
     type Error = RecvError<F, D>;
-
-    fn recv_choice<'async_lifetime, const N: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        <Self as Receive<Choice<N>>>::recv(self)
-    }
 }
 
 impl<T, F, D, R> Receive<T> for Receiver<F, D, R>

@@ -15,7 +15,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::{self, CallBy, Choice, Val};
+use dialectic::backend::{self, By, Choice, Val};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
@@ -59,7 +59,9 @@ pub fn channel() -> (Sender, Receiver) {
 ///
 /// No such errors are possible, so this type cannot be constructed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Error {}
+pub struct Error {
+    _private: (),
+}
 
 impl std::fmt::Display for Error {
     fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -72,19 +74,24 @@ impl std::error::Error for Error {}
 impl backend::Transmitter for Sender {
     type Error = Error;
     type Convention = Val;
-
-    fn send_choice<'async_lifetime, const N: usize>(
-        &'async_lifetime mut self,
-        _choice: Choice<N>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async { Ok(()) })
-    }
 }
 
 impl backend::Transmit<()> for Sender {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        _message: <() as CallBy<Val>>::Type,
+        _message: <() as By<Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl<const LENGTH: usize> backend::Transmit<Choice<LENGTH>> for Sender {
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        _message: <Choice<LENGTH> as By<Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
         'a: 'async_lifetime,
@@ -95,13 +102,6 @@ impl backend::Transmit<()> for Sender {
 
 impl backend::Receiver for Receiver {
     type Error = Error;
-
-    fn recv_choice<'async_lifetime, const N: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<N>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async { Ok(0.try_into().unwrap()) })
-    }
 }
 
 impl backend::Receive<()> for Receiver {
@@ -109,5 +109,14 @@ impl backend::Receive<()> for Receiver {
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async { Ok(()) })
+    }
+}
+
+impl<const LENGTH: usize> backend::Receive<Choice<LENGTH>> for Receiver {
+    fn recv<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async { 0.try_into().map_err(|_| Error { _private: () }) })
     }
 }

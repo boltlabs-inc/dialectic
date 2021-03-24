@@ -1,5 +1,8 @@
 //! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
 //! use the [`Chan`](super::Chan) type synonym instead.
+use call_by::Convert;
+use futures::Future;
+use pin_project::pin_project;
 use std::{
     any::TypeId,
     convert::{TryFrom, TryInto},
@@ -10,13 +13,10 @@ use std::{
     task::{Context, Poll},
 };
 
-use pin_project::pin_project;
-
 use crate::tuple::{HasLength, List, Tuple};
 use crate::Unavailable;
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
 use crate::{prelude::*, types::*, unary::*};
-use futures::Future;
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
 /// `Rx`.
@@ -190,7 +190,7 @@ where
     /// Send something of type `T` on the channel, returning the channel.
     ///
     /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
-    /// [`CallingConvention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
+    /// [`Convention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
     /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val, i64, _>(1)` or
     /// `chan.send::<Ref, bool, _>(&true)`.
     ///
@@ -217,14 +217,14 @@ where
     /// ```
     pub async fn send<'b, T, P>(
         mut self,
-        message: <T as CallBy<'b, Tx::Convention>>::Type,
+        message: <T as By<'b, Tx::Convention>>::Type,
     ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
         Tx: Transmit<T>,
-        T: CallBy<'b, Tx::Convention>,
-        <T as CallBy<'b, Tx::Convention>>::Type: marker::Send,
+        T: By<'b, Tx::Convention>,
+        <T as By<'b, Tx::Convention>>::Type: marker::Send,
     {
         self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
@@ -237,7 +237,10 @@ where
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: Transmitter + marker::Send + 'static,
+    for<'a> Choice<LENGTH>: By<'a, Tx::Convention>
+        + Convert<'a, Mut, Tx::Convention>
+        + By<'a, Mut, Type = &'a mut Choice<LENGTH>>,
+    Tx: Transmit<Choice<LENGTH>> + marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -316,15 +319,13 @@ where
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
     {
-        let choice = u8::try_from(N)
+        let mut choice: Choice<LENGTH> = u8::try_from(N)
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        self.tx
-            .as_mut()
-            .unwrap()
-            .send_choice::<LENGTH>(choice)
-            .await?;
+        let message: <Choice<LENGTH> as By<'_, Tx::Convention>>::Type =
+            <Choice<LENGTH> as Convert<Mut, Tx::Convention>>::convert(&mut choice);
+        self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
     }
 }
@@ -337,7 +338,7 @@ where
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
     Tx: marker::Send + 'static,
-    Rx: Receiver + marker::Send + 'static,
+    Rx: Receive<Choice<LENGTH>> + marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -427,7 +428,7 @@ where
     /// ```
     pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let variant = rx.as_mut().unwrap().recv_choice::<LENGTH>().await?.into();
+        let variant = rx.as_mut().unwrap().recv().await?.into();
         Ok(Branches {
             variant,
             tx,
