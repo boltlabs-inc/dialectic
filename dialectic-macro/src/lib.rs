@@ -634,7 +634,7 @@ fn where_predicates_mut(
 /// the item does not have a `where-clause, one will be created containing the bounds).
 ///
 /// For a transmitter type `Tx`, optional calling convention `C?` (none, or one of `move`, `ref`, or
-/// `mut`), and types `T1`, `T2`, ..., the invocation:
+/// `mut`), and types `T1`, `T2`, `...`, the invocation:
 ///
 /// ```ignore
 /// #[Transmitter(Tx C? for T1, T2, ...)]
@@ -728,6 +728,84 @@ pub fn Transmitter(
     }
 }
 
+/// In situations where the transmitting backend for a channel is generic, explicitly writing down
+/// all the trait bounds necessary to implement a protocol for that parameterized backend can be a
+/// lot of boilerplate. The `Receiver` attribute macro abbreviates these bounds by modifying the
+/// `where` clause of the item to which it is attached.
+///
+/// This macro may be attached to any item capable of supporting a `where`-clause: an `enum`
+/// definition, `fn` item (top level or in a trait definition or implementation), `impl` block,
+/// `struct` definition, `trait` definition, `type` synonym, or `union` definition.
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+///
+/// #[Receiver(Rx for bool, i64)]
+/// async fn foo<Tx, Rx>(
+///     chan: Chan<Session!{ recv bool; recv i64 }, Tx, Rx>
+/// ) -> Result<(), Rx::Error>
+/// where
+///     Tx: Send + 'static,
+/// {
+///     let (_, chan) = chan.recv().await?;
+///     let (_, chan) = chan.recv().await?;
+///     chan.close();
+///     Ok(())
+/// }
+/// ```
+///
+/// # Syntax
+///
+/// The `Receiver` attribute takes the name of the receiver for which the bounds will be generated,
+/// and, optionally, the keyword `for` followed by a comma-separated list of types.
+///
+/// Some example invocations:
+///
+/// ```
+/// # use dialectic::prelude::*;
+/// #[Receiver(Rx)]
+/// # fn a<Rx>() {}
+/// #[Receiver(Rx for bool)]
+/// # fn b<Rx>() {}
+/// #[Receiver(Rx for bool, i64, Vec<String>)]
+/// # fn c<Rx>() {}
+/// ```
+///
+/// # Expansion
+///
+/// The attribute adds extra bounds to the `where`-clause of the item to which it is attached (if
+/// the item does not have a `where-clause, one will be created containing the bounds).
+///
+/// For a transmitter type `Rx`, and types `T1`, `T2`, `...`, the invocation:
+///
+/// ```ignore
+/// #[Receiver(Rx for T1, T2, ...)]
+/// fn f<Rx>() {}
+/// ```
+///
+/// ...translates to the following bounds:
+///
+/// ```
+/// use dialectic::prelude::*;
+///
+/// # struct T1;
+/// # struct T2;
+/// #
+/// fn f<Rx>()
+/// where
+///     Rx: Receiver + Send + 'static,
+///     // For each of the types `T1`, `T2`, ...
+///     Rx: Receive<T1>,
+///     Rx: Receive<T2>,
+///     // ...
+///     // For each `N` from 0 to 255:
+///     Rx: Receive<Choice<0>>,
+///     // ...
+///     Rx: Receive<Choice<255>>,
+/// {}
+/// ```
 #[allow(non_snake_case)]
 #[proc_macro_attribute]
 pub fn Receiver(
