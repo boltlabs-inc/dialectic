@@ -459,10 +459,11 @@ enum Mutability {
 impl ToTokens for Mutability {
     fn to_tokens(&self, stream: &mut proc_macro2::TokenStream) {
         use Mutability::*;
+        let dialectic_path = dialectic_compiler::dialectic_path();
         stream.extend(match self {
-            Val(t) => quote_spanned!(t.span()=> call_by::Val),
-            Ref(t) => quote_spanned!(t.span()=> call_by::Ref),
-            Mut(t) => quote_spanned!(t.span()=> call_by::Mut),
+            Val(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Val),
+            Ref(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Ref),
+            Mut(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Mut),
         })
     }
 }
@@ -563,6 +564,117 @@ fn where_predicates_mut(
     }
 }
 
+/// In situations where the transmitting backend for a channel is generic, explicitly writing down
+/// all the trait bounds necessary to implement a protocol for that parameterized backend can be a
+/// lot of boilerplate. The `Transmitter` attribute macro abbreviates these bounds by modifying the
+/// `where` clause of the item to which it is attached.
+///
+/// This macro may be attached to any item capable of supporting a `where`-clause: an `enum`
+/// definition, `fn` item (top level or in a trait definition or implementation), `impl` block,
+/// `struct` definition, `trait` definition, `type` synonym, or `union` definition.
+///
+/// # Examples
+///
+/// ```
+/// use dialectic::prelude::*;
+///
+/// #[Transmitter(Tx move for bool, i64)]
+/// async fn foo<Tx, Rx>(
+///     chan: Chan<Session!{ send bool; send i64 }, Tx, Rx>
+/// ) -> Result<(), Tx::Error>
+/// where
+///     Rx: Send + 'static,
+/// {
+///     let chan = chan.send(true).await?;
+///     let chan = chan.send(42).await?;
+///     chan.close();
+///     Ok(())
+/// }
+/// ```
+///
+/// # Syntax
+///
+/// The `Transmitter` attribute takes the name of the transmitter for which the bounds will be
+/// generated, an optional *calling convention* (one of `move`, `ref`, or `mut`), and, optionally,
+/// the keyword `for` followed by a comma-separated list of types.
+///
+/// Some example invocations:
+///
+/// ```
+/// # use dialectic::prelude::*;
+/// #[Transmitter(Tx)]
+/// # fn a<Tx>() {}
+/// #[Transmitter(Tx move)]
+/// # fn b<Tx>() {}
+/// #[Transmitter(Tx ref)]
+/// # fn c<Tx>() {}
+/// #[Transmitter(Tx mut)]
+/// # fn d<Tx>() {}
+/// #[Transmitter(Tx for bool)]
+/// # fn e<Tx>() {}
+/// #[Transmitter(Tx move for bool)]
+/// # fn f<Tx>() {}
+/// #[Transmitter(Tx ref for bool)]
+/// # fn g<Tx>() {}
+/// #[Transmitter(Tx mut for bool)]
+/// # fn h<Tx>() {}
+/// #[Transmitter(Tx for bool, i64, Vec<String>)]
+/// # fn i<Tx>() {}
+/// #[Transmitter(Tx move for bool, i64, Vec<String>)]
+/// # fn j<Tx>() {}
+/// #[Transmitter(Tx ref for bool, i64, Vec<String>)]
+/// # fn k<Tx>() {}
+/// #[Transmitter(Tx mut for bool, i64, Vec<String>)]
+/// # fn l<Tx>() {}
+/// ```
+///
+/// # Expansion
+///
+/// The attribute adds extra bounds to the `where`-clause of the item to which it is attached (if
+/// the item does not have a `where-clause, one will be created containing the bounds).
+///
+/// For a transmitter type `Tx`, optional calling convention `C?` (none, or one of `move`, `ref`, or
+/// `mut`), and types `T1`, `T2`, ..., the invocation:
+///
+/// ```ignore
+/// #[Transmitter(Tx C? for T1, T2, ...)]
+/// fn f<Tx>() {}
+/// ```
+///
+/// ...translates to the following bounds:
+///
+/// ```
+/// use dialectic::prelude::*;
+/// use dialectic::call_by::{By, Convert};
+///
+/// # type C = Ref;
+/// # struct T1;
+/// # struct T2;
+/// #
+/// fn f<Tx>()
+/// where
+///     // If the convention is unspecified, `C` is left unspecified;
+///     // otherwise, we translate into `call_by` conventions using
+///     // `move` => `Val`, `ref` => `Ref`, and `mut` => `Mut`
+///     Tx: Transmitter<Convention = C> + Send + 'static,
+///     // For each of the types `T1`, `T2`, ...
+///     Tx: Transmit<T1>,
+///     Tx: Transmit<T2>,
+///     // ...
+///     // For each `N` from 0 to 255:
+///     Tx: Transmit<Choice<0>>,
+///     // ...
+///     Tx: Transmit<Choice<255>>,
+///     // For each `N` from 0 to 255:
+///     for<'a> Choice<0>: By<'a, Tx::Convention>
+///         + Convert<'a, Mut, Tx::Convention>
+///         + By<'a, Mut, Type = &'a mut Choice<0>>,
+///     // ...
+///     for<'a> Choice<255>: By<'a, Tx::Convention>
+///         + Convert<'a, Mut, Tx::Convention>
+///         + By<'a, Mut, Type = &'a mut Choice<255>>,
+/// {}
+/// ```
 #[allow(non_snake_case)]
 #[proc_macro_attribute]
 pub fn Transmitter(
@@ -574,35 +686,36 @@ pub fn Transmitter(
         mutability,
         types,
     } = parse_macro_input!(params as TransmitterSpec);
+    let dialectic_path = dialectic_compiler::dialectic_path();
     let mut item = parse_macro_input!(input as syn::Item);
     if let Some(predicates) = where_predicates_mut(&mut item) {
         predicates.push(if let Some(mutability) = mutability {
             syn::parse_quote! {
                 #name: ::std::marker::Send
-                + ::dialectic::backend::Transmitter<Convention = #mutability>
+                + #dialectic_path::backend::Transmitter<Convention = #mutability>
                 + 'static
             }
         } else {
             syn::parse_quote! {
                 #name: ::std::marker::Send
-                + ::dialectic::backend::Transmitter
+                + #dialectic_path::backend::Transmitter
                 + 'static
             }
         });
         for ty in types {
             predicates.push(syn::parse_quote! {
-                #name: ::dialectic::backend::Transmit<#ty>
+                #name: #dialectic_path::backend::Transmit<#ty>
             });
         }
         for n in 0usize..255 {
             predicates.push(syn::parse_quote! {
-                #name: ::dialectic::backend::Transmit<dialectic::backend::Choice<#n>>
+                #name: #dialectic_path::backend::Transmit<dialectic::backend::Choice<#n>>
             });
             predicates.push(syn::parse_quote! {
-                ::dialectic::backend::Choice<#n>:
-                    for<'a> ::dialectic::call_by::By<'a, <#name as dialectic::backend::Transmitter>::Convention>
-                    + for<'a> ::dialectic::call_by::Convert<'a, call_by::Mut, <#name as dialectic::backend::Transmitter>::Convention>
-                    + for<'a> ::dialectic::call_by::By<'a, call_by::Mut, Type = &'a mut Choice<#n>>
+                for<'a> #dialectic_path::backend::Choice<#n>:
+                    #dialectic_path::call_by::By<'a, <#name as dialectic::backend::Transmitter>::Convention>
+                    + #dialectic_path::call_by::Convert<'a, #dialectic_path::call_by::Mut, <#name as dialectic::backend::Transmitter>::Convention>
+                    + #dialectic_path::call_by::By<'a, #dialectic_path::call_by::Mut, Type = &'a mut Choice<#n>>
             });
         }
         item.into_token_stream().into()
@@ -621,22 +734,23 @@ pub fn Receiver(
     params: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
+    let dialectic_path = dialectic_compiler::dialectic_path();
     let ReceiverSpec { name, types } = parse_macro_input!(params as ReceiverSpec);
     let mut item = parse_macro_input!(input as syn::Item);
     if let Some(predicates) = where_predicates_mut(&mut item) {
         predicates.push(syn::parse_quote! {
             #name: ::std::marker::Send
-            + ::dialectic::backend::Receiver
+            + #dialectic_path::backend::Receiver
             + 'static
         });
         for ty in types {
             predicates.push(syn::parse_quote! {
-                #name: ::dialectic::backend::Receive<#ty>
+                #name: #dialectic_path::backend::Receive<#ty>
             });
         }
         for n in 0usize..255 {
             predicates.push(syn::parse_quote! {
-                #name: ::dialectic::backend::Receive<dialectic::backend::Choice<#n>>
+                #name: #dialectic_path::backend::Receive<dialectic::backend::Choice<#n>>
             });
         }
         item.into_token_stream().into()
