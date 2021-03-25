@@ -755,7 +755,7 @@ caveats of `call`, of which it is a close relative:
 
 # Writing backend-agnostic code
 
-When writing functions which are polymorphic over their backend type, you will need to specify [`Transmit`] and [`Receive`] bounds on your backend. If you have a lot of these, the [`macro@Transmitter`] and [`macro@Receiver`] attribute macros can help eliminate them by letting you write them efficiently. The following is an excerpt from the `tally` example:
+When writing functions which are generic over their backend type, you will need to specify [`Transmit`] and [`Receive`] bounds on your backend. If you have a lot of these, the [`macro@Transmitter`] and [`macro@Receiver`] attribute macros can help eliminate them by letting you write them efficiently. The following is an excerpt from the `tally` example:
 
 ```
 # #![allow(unused)]
