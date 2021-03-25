@@ -461,9 +461,9 @@ impl ToTokens for Mutability {
         use Mutability::*;
         let dialectic_path = dialectic_compiler::dialectic_path();
         stream.extend(match self {
-            Val(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Val),
-            Ref(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Ref),
-            Mut(t) => quote_spanned!(t.span()=> #dialectic_path::call_by::Mut),
+            Val(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Val),
+            Ref(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Ref),
+            Mut(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Mut),
         })
     }
 }
