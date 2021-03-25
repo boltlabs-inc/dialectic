@@ -58,7 +58,7 @@ where
 ///
 /// The `max_length` parameter indicates the maximum length of any message received or sent. An
 /// error is thrown during encoding and decoding if a message would exceed this length.
-pub fn length_delimited_bincode<W: AsyncWrite, R: AsyncRead>(
+pub fn length_delimited<W: AsyncWrite, R: AsyncRead>(
     writer: W,
     reader: R,
     length_field_bytes: usize,

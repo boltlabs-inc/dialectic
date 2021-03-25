@@ -3,7 +3,6 @@ use dialectic_tokio_serde::codec::LengthDelimitedCodec;
 use dialectic_tokio_serde_bincode::Bincode;
 
 use colored::*;
-pub use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt::Debug, future::Future, io, process};
 use structopt::StructOpt;
 use tokio::{
@@ -59,7 +58,7 @@ where
     P: Session,
 {
     let (rx, tx) = socket.into_split();
-    let (tx, rx) = dialectic_tokio_serde_bincode::length_delimited_bincode(tx, rx, 4, max_length);
+    let (tx, rx) = dialectic_tokio_serde_bincode::length_delimited(tx, rx, 4, max_length);
     P::wrap(tx, rx)
 }
 
