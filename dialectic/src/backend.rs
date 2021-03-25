@@ -7,9 +7,10 @@
 //! session.
 //!
 //! Functions which are generic over their backend will in turn need to specify the bounds
-//! `Transmit<T>` and `Receive<T>` for all `T`s they send and receive, respectively. The
-//! [`Transmitter`](macro@crate::Transmitter) and [`Receiver`](macro@crate::Receiver) attribute
-//! macros make this bound specification succinct; see their documentation for more details.
+//! [`Transmit<T>`](Transmit) and [`Receive<T>`](Receive) for all `T`s they send and receive,
+//! respectively. The [`Transmitter`](macro@crate::Transmitter) and
+//! [`Receiver`](macro@crate::Receiver) attribute macros make this bound specification succinct; see
+//! their documentation for more details.
 
 #[doc(no_inline)]
 pub use call_by::{By, Convention, Mut, Ref, Val};
@@ -24,7 +25,7 @@ pub use choice::*;
 /// across the channel. This is a super-trait of [`Transmit`], which is what's actually needed to
 /// receive particular values over a [`Chan`](crate::Chan).
 ///
-/// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
+/// If you're writing a function and need a lot of different [`Transmit<T>`](Transmit) bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
 /// succinctly.
 pub trait Transmitter {
@@ -44,9 +45,9 @@ pub trait Transmitter {
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
-/// If a transport is `Transmit<T>`, we can use it to [`send`](Transmit::send) a message of type `T`
-/// by [`Val`] or [`Ref`], depending on the calling convention specified by its [`Transmitter`]
-/// implementation.
+/// If a transport is [`Transmit<T>`](Transmit), we can use it to [`send`](Transmit::send) a message
+/// of type `T` by [`Val`] or [`Ref`], depending on the calling convention specified by its
+/// [`Transmitter`] implementation.
 ///
 /// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
@@ -60,7 +61,8 @@ pub trait Transmitter {
 ///
 /// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
 ///
-/// [`dialectic_tokio_mpsc::Sender`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
+/// [`dialectic_tokio_mpsc::Sender`]:
+/// https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
 pub trait Transmit<T>: Transmitter {
     /// Send a message using the [`Convention`] specified by the trait implementation.
     fn send<'a, 'async_lifetime>(
@@ -77,7 +79,7 @@ pub trait Transmit<T>: Transmitter {
 /// super-trait of [`Receive`], which is what's actually needed to receive particular values over a
 /// [`Chan`](crate::Chan).
 ///
-/// If you're writing a function and need a lot of different `Receive<T>` bounds, the
+/// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
 pub trait Receiver {
     /// The type of possible errors when receiving.
@@ -90,9 +92,10 @@ pub trait Receiver {
     ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
 }
 
-/// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
+/// If a transport is [`Receive<T>`](Receive), we can use it to [`recv`](Receive::recv) a message of
+/// type `T`.
 ///
-/// If you're writing a function and need a lot of different `Receive<T>` bounds, the
+/// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
 ///
 /// # Examples
