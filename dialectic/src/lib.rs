@@ -70,12 +70,11 @@ Dialectic. A quick summary:
   both sides of a channel or just one side, respectively.
 - Backend transports suitable for being wrapped in a [`Chan`] are provided in [`backend`], along
   with the [`Transmit`] and [`Receive`] traits necessary to implement your own.
-- When writing functions which are polymorphic over their backend type, you will need to specify
+- When writing functions which are generic over their backend type, you will need to specify
   [`Transmit`] and [`Receive`] bounds on your backend. If you have a lot of these, the
   [`macro@Transmitter`] and [`macro@Receiver`] attribute macros can help eliminate them by letting
-  you write them efficiently. All of the [examples](https://github.com/boltlabs-inc/dialectic/tree
-  main/dialectic/examples) are written to be backend-agnostic, so taking a look at them may help if
-  you get stuck.
+  you write them efficiently. All of the [examples](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic/examples)
+  are written to be backend-agnostic, so taking a look at them may help if you get stuck.
 
 Once you've got a channel, here's what you can do:
 

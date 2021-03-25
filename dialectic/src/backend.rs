@@ -11,6 +11,12 @@
 //! the sending channel `Tx` must implement `Transmit<Choice<N>, Val>`, and the receiving channel
 //! `Rx` must implement `Receive<Choice<N>>`, for all `const N: usize`. For more information, see
 //! [`Choice`](crate::Choice).
+//!
+//! Functions which are generic over their backend will need to specify `Transmit<T>` and
+//! `Receive<T>` for all `T`s they send and receive, respectively. The
+//! [`Transmitter`](macro@crate::Transmitter) and [`Receiver`](macro@crate::Receiver) macros are
+//! provided to streamline this process and eliminate almost all necessary/common trait bounds on
+//! generic backend type parameters.
 
 #[doc(no_inline)]
 pub use call_by::*;
@@ -23,6 +29,9 @@ pub use choice::*;
 /// must implement [`Transmitter`], which specifies what type of errors it might return and whether
 /// it sends things by owned value or by reference, as well as giving a method to send [`Choice`]s
 /// across the channel.
+///
+/// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
+/// [`Transmitter`](macro@crate::Transmitter) can help you specify them more succinctly.
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
@@ -43,6 +52,9 @@ pub trait Transmitter {
 /// If a transport is `Transmit<T>`, we can use it to [`send`](Transmit::send) a message of type `T`
 /// by [`Val`] or [`Ref`], depending on the calling convention specified by its [`Transmitter`]
 /// implementation.
+///
+/// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
+/// [`Transmitter`](macro@crate::Transmitter) can help you specify them more succinctly.
 ///
 /// # Examples
 ///
@@ -65,6 +77,9 @@ pub trait Transmit<T>: Transmitter {
 
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
 /// implement [`Receiver`], which specifies what type of errors it might return.
+///
+/// If you're writing a function and need a lot of different `Receive<T>` bounds, the
+/// [`Receiver`](macro@crate::Receiver) can help you specify them more succinctly.
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;
@@ -77,6 +92,9 @@ pub trait Receiver {
 }
 
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
+///
+/// If you're writing a function and need a lot of different `Receive<T>` bounds, the
+/// [`Receiver`](macro@crate::Receiver) can help you specify them more succinctly.
 ///
 /// # Examples
 ///
