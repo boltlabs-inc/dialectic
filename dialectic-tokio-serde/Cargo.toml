@@ -9,7 +9,7 @@ repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 
 [dependencies]
-call-by = "0.1"
+call-by = "0.2"
 dialectic = { path = "../dialectic", features = ["serde"] }
 futures = { version = "0.3", default-features = false }
 serde = { version = "1" }
