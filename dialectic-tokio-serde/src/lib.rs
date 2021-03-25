@@ -31,8 +31,7 @@
 use std::{future::Future, pin::Pin};
 
 use dialectic::{
-    backend::{self, Choice, Receive, Ref, Transmit},
-    call_by::By,
+    backend::{self, By, Choice, Receive, Ref, Transmit},
     Chan,
 };
 use futures::sink::SinkExt;

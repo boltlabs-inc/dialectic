@@ -125,8 +125,6 @@ mod chan;
 mod error;
 mod session;
 
-#[doc(no_inline)]
-pub use call_by;
 pub use chan::{Branches, Chan};
 pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};

@@ -1,5 +1,6 @@
 //! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
 //! use the [`Chan`](super::Chan) type synonym instead.
+use call_by::By;
 use futures::Future;
 use pin_project::pin_project;
 use std::{

@@ -12,7 +12,7 @@
 //! generic backend type parameters.
 
 #[doc(no_inline)]
-pub use call_by::*;
+pub use call_by::{By, Convention, Mut, Ref, Val};
 use std::{future::Future, pin::Pin};
 
 mod choice;
