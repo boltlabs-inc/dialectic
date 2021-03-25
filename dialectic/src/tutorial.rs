@@ -753,6 +753,35 @@ caveats of `call`, of which it is a close relative:
   before the future completes. This is subject to the same behavior as in [`call`](Chan::call),
   described below. [See here for more explanation](#errors-in-subroutines-what-not-to-do).
 
+# Writing backend-agnostic code
+
+When writing functions which are polymorphic over their backend type, you will need to specify [`Transmit`] and [`Receive`] bounds on your backend. If you have a lot of these, the [`macro@Transmitter`] and [`macro@Receiver`] attribute macros can help eliminate them by letting you write them efficiently. The following is an excerpt from the `tally` example:
+
+```
+# #![allow(unused)]
+# use dialectic::prelude::*;
+# use std::error::Error;
+# use tokio::io::{Stdin, Stdout};
+# type Client = Session! {};
+# struct Operation;
+#[Transmitter(Tx ref for Operation, i64)]
+#[Receiver(Rx for i64)]
+async fn client<Tx, Rx>(
+    mut input: BufReader<Stdin>,
+    mut output: Stdout,
+    mut chan: Chan<Client, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
+    // ...
+#   Ok(())
+}
+```
+
+All of the [examples](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic/examples) are written to be backend-agnostic, so taking a look at them may help if you get stuck.
+
 # Wrapping up
 
 We've now finished our tour of everything you need to get started programming with Dialectic! ✨
