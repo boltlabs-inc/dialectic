@@ -1,9 +1,10 @@
+#![allow(clippy::type_complexity)]
 use dialectic::prelude::*;
 use std::{error::Error, future::Future, pin::Pin};
 use tokio::io::{AsyncWriteExt, BufReader, Stdin, Stdout};
 
 mod common;
-use common::{demo, prompt, TcpChan};
+use common::{demo, prompt};
 
 #[tokio::main]
 async fn main() {
@@ -25,11 +26,18 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-async fn client(
+#[Transmitter(Tx ref for String)]
+#[Receiver(Rx for String)]
+async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
     mut output: Stdout,
-    chan: TcpChan<Client>,
-) -> Result<(), Box<dyn Error>> {
+    chan: Chan<Client, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
+    // Invoke the recursive client function...
     client_rec(0, &mut input, &mut output, chan).await
 }
 
@@ -56,13 +64,18 @@ async fn client_prompt(
 /// reference instead of by value. This function can't be written in `async fn` style because it is
 /// recursive, and current restrictions in Rust mean that recursive functions returning futures must
 /// explicitly return a boxed `dyn Future` object.
-#[allow(clippy::type_complexity)]
-fn client_rec<'a>(
+#[Transmitter(Tx ref for String)]
+#[Receiver(Rx for String)]
+fn client_rec<'a, Tx, Rx>(
     size: usize,
     input: &'a mut BufReader<Stdin>,
     output: &'a mut Stdout,
-    mut chan: TcpChan<Client>,
-) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + std::marker::Send + 'a>> {
+    mut chan: Chan<Client, Tx, Rx>,
+) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + Send + 'a>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     Box::pin(async move {
         loop {
             chan = {
@@ -100,10 +113,15 @@ type Server = <Client as Session>::Dual;
 /// The implementation of the server for each client connection. This function can't be written in
 /// `async fn` style because it is recursive, and current restrictions in Rust mean that recursive
 /// functions returning futures must explicitly return a boxed `dyn Future` object.
-#[allow(clippy::type_complexity)]
-fn server(
-    mut chan: TcpChan<Server>,
-) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + std::marker::Send>> {
+#[Transmitter(Tx ref for String)]
+#[Receiver(Rx for String)]
+fn server<Tx, Rx>(
+    mut chan: Chan<Server, Tx, Rx>,
+) -> Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + Send>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     Box::pin(async move {
         loop {
             chan = offer!(in chan {
@@ -111,9 +129,9 @@ fn server(
                 0 => break chan.close(),
                 // Client wants to push a value
                 1 => {
-                    let (string, chan) = chan.recv().await?;       // Receive pushed value
+                    let (string, chan) = chan.recv().await?;        // Receive pushed value
                     let chan = chan.call(server).await?.1.unwrap(); // Recursively do `Server`
-                    chan.send(&string.to_uppercase()).await?       // Send back that pushed value
+                    chan.send(&string.to_uppercase()).await?        // Send back that pushed value
                 },
             })?;
         }
