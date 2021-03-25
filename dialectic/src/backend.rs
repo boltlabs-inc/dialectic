@@ -28,10 +28,12 @@ pub use choice::*;
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
 /// must implement [`Transmitter`], which specifies what type of errors it might return and whether
 /// it sends things by owned value or by reference, as well as giving a method to send [`Choice`]s
-/// across the channel.
+/// across the channel. This is a super-trait of [`Transmit`], which is what's actually needed to
+/// receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
-/// [`Transmitter`](macro@crate::Transmitter) can help you specify them more succinctly.
+/// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
+/// succinctly.
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
@@ -54,7 +56,8 @@ pub trait Transmitter {
 /// implementation.
 ///
 /// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
-/// [`Transmitter`](macro@crate::Transmitter) can help you specify them more succinctly.
+/// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
+/// succinctly.
 ///
 /// # Examples
 ///
@@ -63,6 +66,7 @@ pub trait Transmitter {
 /// crate.
 ///
 /// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+///
 /// [`dialectic_tokio_mpsc::Sender`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
 pub trait Transmit<T>: Transmitter {
     /// Send a message using the [`Convention`] specified by the trait implementation.
@@ -76,10 +80,12 @@ pub trait Transmit<T>: Transmitter {
 }
 
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
-/// implement [`Receiver`], which specifies what type of errors it might return.
+/// implement [`Receiver`], which specifies what type of errors it might return. This is a
+/// super-trait of [`Receive`], which is what's actually needed to receive particular values over a
+/// [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different `Receive<T>` bounds, the
-/// [`Receiver`](macro@crate::Receiver) can help you specify them more succinctly.
+/// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;
@@ -94,7 +100,7 @@ pub trait Receiver {
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
 ///
 /// If you're writing a function and need a lot of different `Receive<T>` bounds, the
-/// [`Receiver`](macro@crate::Receiver) can help you specify them more succinctly.
+/// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
 ///
 /// # Examples
 ///
@@ -103,7 +109,9 @@ pub trait Receiver {
 /// crate.
 ///
 /// [`dialectic_tokio_mpsc`]: https://docs.rs/dialectic-tokio-mpsc
-/// [`dialectic_tokio_mpsc::Receiver`]: https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Receiver.html
+///
+/// [`dialectic_tokio_mpsc::Receiver`]:
+/// https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Receiver.html
 pub trait Receive<T>: Receiver {
     /// Receive a message. This may require type annotations for disambiguation.
     fn recv<'async_lifetime>(
