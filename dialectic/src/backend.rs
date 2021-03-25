@@ -1,16 +1,9 @@
-//! Transport backends for [`Chan`](crate::Chan), and the traits they implement in order to be used
-//! as such.
+//! The interface implemented by all transport backends for a [`Chan`](crate::Chan).
 //!
 //! A [`Chan<S, Tx, Rx>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
-//! session (and in the case of [`Transmit`], for the particular calling conventions used to pass
-//! those types to [`Chan::send`](crate::Chan::send)).
-//!
-//! Additionally, in order to support [`offer!`](crate::offer) and [`choose`](crate::Chan::choose),
-//! the sending channel `Tx` must implement `Transmit<Choice<N>, Val>`, and the receiving channel
-//! `Rx` must implement `Receive<Choice<N>>`, for all `const N: usize`. For more information, see
-//! [`Choice`](crate::Choice).
+//! session.
 //!
 //! Functions which are generic over their backend will need to specify `Transmit<T>` and
 //! `Receive<T>` for all `T`s they send and receive, respectively. The
