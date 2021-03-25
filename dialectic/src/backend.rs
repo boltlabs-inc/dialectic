@@ -2,14 +2,14 @@
 //!
 //! A [`Chan<S, Tx, Rx>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
-//! must implement the traits [`Transmit`] and [`Receive`] for at least the types used in any given
+//! must implement the traits [`Transmitter`] and [`Receiver`], as well as [`Transmit<T>`](Transmit)
+//! and [`Receive<T>`](Receive) for at least the types `T` used in those capacities in any given
 //! session.
 //!
-//! Functions which are generic over their backend will need to specify `Transmit<T>` and
-//! `Receive<T>` for all `T`s they send and receive, respectively. The
-//! [`Transmitter`](macro@crate::Transmitter) and [`Receiver`](macro@crate::Receiver) macros are
-//! provided to streamline this process and eliminate almost all necessary/common trait bounds on
-//! generic backend type parameters.
+//! Functions which are generic over their backend will in turn need to specify the bounds
+//! `Transmit<T>` and `Receive<T>` for all `T`s they send and receive, respectively. The
+//! [`Transmitter`](macro@crate::Transmitter) and [`Receiver`](macro@crate::Receiver) attribute
+//! macros make this bound specification succinct; see their documentation for more details.
 
 #[doc(no_inline)]
 pub use call_by::{By, Convention, Mut, Ref, Val};
