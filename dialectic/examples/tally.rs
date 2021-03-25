@@ -8,7 +8,8 @@ use thiserror::Error;
 use tokio::io::{AsyncWriteExt, BufReader, Stdin, Stdout};
 
 mod common;
-use common::{demo, prompt, Deserialize, Serialize, TcpChan};
+use common::{demo, prompt};
+use serde::{Deserialize, Serialize};
 
 #[tokio::main]
 async fn main() {
@@ -30,11 +31,17 @@ pub type Client = Session! {
 };
 
 /// The implementation of the client.
-async fn client(
+#[Transmitter(Tx ref for Operation, i64)]
+#[Receiver(Rx for i64)]
+async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
     mut output: Stdout,
-    mut chan: TcpChan<Client>,
-) -> Result<(), Box<dyn Error>> {
+    mut chan: Chan<Client, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     loop {
         // Parse a desired operation from the user
         chan = if let Ok(operation) =
@@ -78,12 +85,18 @@ pub type ClientTally = Session! {
 };
 
 /// The implementation of the client's tally subroutine.
-async fn client_tally(
+#[Transmitter(Tx ref for Operation, i64)]
+#[Receiver(Rx for i64)]
+async fn client_tally<Tx, Rx>(
     operation: &Operation,
     input: &mut BufReader<Stdin>,
     output: &mut Stdout,
-    mut chan: TcpChan<ClientTally>,
-) -> Result<bool, Box<dyn Error>> {
+    mut chan: Chan<ClientTally, Tx, Rx>,
+) -> Result<bool, Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     let (done, chan) = loop {
         // Parse a desired number from the user
         let user_input = prompt(&format!("{} ", operation), input, output, |s| {
@@ -122,7 +135,13 @@ async fn client_tally(
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
+#[Transmitter(Tx ref for i64)]
+#[Receiver(Rx for Operation, i64)]
+async fn server<Tx, Rx>(mut chan: Chan<Server, Tx, Rx>) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     loop {
         chan = offer!(in chan {
             // Client wants to compute another tally
@@ -141,10 +160,16 @@ async fn server(mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
 type ServerTally = <ClientTally as Session>::Dual;
 
 /// The implementation of the server's tally subroutine.
-async fn server_tally(
+#[Transmitter(Tx ref for i64)]
+#[Receiver(Rx for Operation, i64)]
+async fn server_tally<Tx, Rx>(
     op: &Operation,
-    mut chan: TcpChan<ServerTally>,
-) -> Result<(), Box<dyn Error>> {
+    mut chan: Chan<ServerTally, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     let mut tally = op.unit();
     loop {
         chan = offer!(in chan {

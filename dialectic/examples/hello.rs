@@ -3,7 +3,7 @@ use std::error::Error;
 use tokio::io::{AsyncWriteExt, BufReader, Stdin, Stdout};
 
 mod common;
-use common::{demo, prompt, TcpChan};
+use common::{demo, prompt};
 
 #[tokio::main]
 async fn main() {
@@ -17,11 +17,17 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-async fn client(
+#[Transmitter(Tx ref for String)]
+#[Receiver(Rx for String)]
+async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
     mut output: Stdout,
-    chan: TcpChan<Client>,
-) -> Result<(), Box<dyn Error>> {
+    chan: Chan<Client, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     let name = prompt("What's your name? ", &mut input, &mut output, |name| {
         Ok::<_, ()>(name.to_string())
     })
@@ -38,7 +44,13 @@ async fn client(
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-async fn server(chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
+#[Transmitter(Tx ref for String)]
+#[Receiver(Rx for String)]
+async fn server<Tx, Rx>(chan: Chan<Server, Tx, Rx>) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     let (name, chan) = chan.recv().await?;
     let greeting = format!(
         "Hello, {}! Your name is {} characters long.",

@@ -4,7 +4,7 @@ use tokio::io::{BufReader, Stdin, Stdout};
 
 mod common;
 #[allow(unused)]
-use common::{demo, prompt, TcpChan};
+use common::{demo, prompt};
 
 #[tokio::main]
 async fn main() {
@@ -17,11 +17,17 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-async fn client(
+#[Transmitter(Tx ref for /* add types needed by session here */)]
+#[Receiver(Rx for /* add types needed by session here */)]
+async fn client<Tx, Rx>(
     #[allow(unused)] mut input: BufReader<Stdin>,
     #[allow(unused)] mut output: Stdout,
-    #[allow(unused_mut)] mut chan: TcpChan<Client>,
-) -> Result<(), Box<dyn Error>> {
+    #[allow(unused_mut)] mut chan: Chan<Client, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     // Do something with the channel...
     chan.close();
     Ok(())
@@ -31,7 +37,15 @@ async fn client(
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-async fn server(#[allow(unused_mut)] mut chan: TcpChan<Server>) -> Result<(), Box<dyn Error>> {
+#[Transmitter(Tx ref for /* add types needed by session here */)]
+#[Receiver(Rx for /* add types needed by session here */ )]
+async fn server<Tx, Rx>(
+    #[allow(unused_mut)] mut chan: Chan<Server, Tx, Rx>,
+) -> Result<(), Box<dyn Error>>
+where
+    Tx::Error: Error + Send,
+    Rx::Error: Error + Send,
+{
     // Do something with the channel...
     chan.close();
     Ok(())
