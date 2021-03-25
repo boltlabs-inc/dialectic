@@ -31,7 +31,7 @@
 use std::{future::Future, pin::Pin};
 
 use dialectic::{
-    backend::{self, Receive, Ref, Transmit},
+    backend::{self, Choice, Receive, Ref, Transmit},
     call_by::By,
     Chan,
 };
@@ -165,6 +165,23 @@ where
 {
     type Error = SendError<F, E>;
     type Convention = Ref;
+
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        Box::pin(async move {
+            let serialized = self
+                .serializer
+                .serialize(&choice)
+                .map_err(SendError::Serialize)?;
+            self.framed_write
+                .send(serialized)
+                .await
+                .map_err(SendError::Encode)?;
+            Ok(())
+        })
+    }
 }
 
 impl<T, F, E, W> Transmit<T> for Sender<F, E, W>
@@ -231,6 +248,13 @@ where
     R: AsyncRead + Unpin + Send,
 {
     type Error = RecvError<F, D>;
+
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
+    }
 }
 
 impl<T, F, D, R> Receive<T> for Receiver<F, D, R>

@@ -64,30 +64,6 @@ pub struct Choice<const N: usize> {
     choice: u8,
 }
 
-lazy_static::lazy_static! {
-    static ref CHOICES: [u8; 256] = {
-        let mut n: u8 = 0;
-        array_init::array_init(|_| {
-            let i = n;
-            n += 1;
-            i
-        })
-    };
-}
-
-impl<const N: usize> Choice<N> {
-    /// Convert this `Choice` into a `'static` reference to the same `Choice`.
-    ///
-    /// This is possible because there are only 256 possible `Choice`s, and they are all enumerated
-    /// in a [`lazy_static`] block on the first execution of this function.
-    pub fn into_static_ref(self) -> &'static Choice<N> {
-        let n: &'static u8 = &CHOICES[self.choice as usize];
-        // This conversion is safe because `n` is `'static` and `Choice` is `#[repr(transparent)]`,
-        // so the pointer cast is between two equal representations.
-        unsafe { &*(n as *const u8 as *const Choice<N>) }
-    }
-}
-
 // Choice<0> is unconstructable, but for all N, 0 is a Choice<N + 1>:
 impl<M: Unary, const N: usize> Default for Choice<N>
 where

@@ -1,6 +1,5 @@
 //! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
 //! use the [`Chan`](super::Chan) type synonym instead.
-use call_by::Convert;
 use futures::Future;
 use pin_project::pin_project;
 use std::{
@@ -237,10 +236,7 @@ where
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    for<'a> Choice<LENGTH>: By<'a, Tx::Convention>
-        + Convert<'a, Mut, Tx::Convention>
-        + By<'a, Mut, Type = &'a mut Choice<LENGTH>>,
-    Tx: Transmit<Choice<LENGTH>> + marker::Send + 'static,
+    Tx: Transmitter + marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
@@ -319,13 +315,11 @@ where
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
     {
-        let mut choice: Choice<LENGTH> = u8::try_from(N)
+        let choice: Choice<LENGTH> = u8::try_from(N)
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        let message: <Choice<LENGTH> as By<'_, Tx::Convention>>::Type =
-            <Choice<LENGTH> as Convert<Mut, Tx::Convention>>::convert(&mut choice);
-        self.tx.as_mut().unwrap().send(message).await?;
+        self.tx.as_mut().unwrap().send_choice(choice).await?;
         Ok(self.unchecked_cast())
     }
 }
@@ -338,7 +332,7 @@ where
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
     Tx: marker::Send + 'static,
-    Rx: Receive<Choice<LENGTH>> + marker::Send + 'static,
+    Rx: Receiver + marker::Send + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -428,7 +422,7 @@ where
     /// ```
     pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let variant = rx.as_mut().unwrap().recv().await?.into();
+        let variant = rx.as_mut().unwrap().recv_choice::<LENGTH>().await?.into();
         Ok(Branches {
             variant,
             tx,
