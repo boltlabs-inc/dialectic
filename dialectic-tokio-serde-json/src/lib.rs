@@ -65,7 +65,7 @@ impl<Input: AsRef<str>> Deserializer<Input> for Json {
 ///
 /// The `max_length` parameter indicates the maximum length of any message received or sent. An
 /// error is thrown during encoding and decoding if a message exceeds this length.
-pub fn json_lines<W: AsyncWrite, R: AsyncRead>(
+pub fn lines<W: AsyncWrite, R: AsyncRead>(
     writer: W,
     reader: R,
     max_length: usize,
