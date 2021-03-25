@@ -24,8 +24,6 @@ derivative = "2.1"
 pin-project = "1"
 static_assertions = "1.1"
 dialectic-macro = { version = "0.1", path = "../dialectic-macro" }
-lazy_static = "1.4"
-array-init = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

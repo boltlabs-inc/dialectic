@@ -13,7 +13,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::{self, By, Val};
+use dialectic::backend::{self, By, Choice, Val};
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -144,6 +144,13 @@ pub enum RecvError {
 impl backend::Transmitter for Sender {
     type Error = SendError<Box<dyn Any + Send>>;
     type Convention = Val;
+
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        <Self as backend::Transmit<Choice<LENGTH>>>::send(self, choice)
+    }
 }
 
 impl<T: Send + Any> backend::Transmit<T> for Sender {
@@ -160,6 +167,13 @@ impl<T: Send + Any> backend::Transmit<T> for Sender {
 
 impl backend::Receiver for Receiver {
     type Error = RecvError;
+
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
+    }
 }
 
 impl<T: Send + Any> backend::Receive<T> for Receiver {
@@ -181,6 +195,13 @@ impl<T: Send + Any> backend::Receive<T> for Receiver {
 impl backend::Transmitter for UnboundedSender {
     type Error = SendError<Box<dyn Any + Send>>;
     type Convention = Val;
+
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        <Self as backend::Transmit<Choice<LENGTH>>>::send(self, choice)
+    }
 }
 
 impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
@@ -197,6 +218,13 @@ impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
 
 impl backend::Receiver for UnboundedReceiver {
     type Error = RecvError;
+
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
+    }
 }
 
 impl<T: Send + Any> backend::Receive<T> for UnboundedReceiver {

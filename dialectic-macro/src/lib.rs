@@ -661,18 +661,6 @@ fn where_predicates_mut(
 ///     Tx: Transmit<T1>,
 ///     Tx: Transmit<T2>,
 ///     // ...
-///     // For each `N` from 0 to 255:
-///     Tx: Transmit<Choice<0>>,
-///     // ...
-///     Tx: Transmit<Choice<255>>,
-///     // For each `N` from 0 to 255:
-///     for<'a> Choice<0>: By<'a, Tx::Convention>
-///         + Convert<'a, Mut, Tx::Convention>
-///         + By<'a, Mut, Type = &'a mut Choice<0>>,
-///     // ...
-///     for<'a> Choice<255>: By<'a, Tx::Convention>
-///         + Convert<'a, Mut, Tx::Convention>
-///         + By<'a, Mut, Type = &'a mut Choice<255>>,
 /// {}
 /// ```
 #[allow(non_snake_case)]
@@ -705,17 +693,6 @@ pub fn Transmitter(
         for ty in types {
             predicates.push(syn::parse_quote! {
                 #name: #dialectic_path::backend::Transmit<#ty>
-            });
-        }
-        for n in 0usize..255 {
-            predicates.push(syn::parse_quote! {
-                #name: #dialectic_path::backend::Transmit<dialectic::backend::Choice<#n>>
-            });
-            predicates.push(syn::parse_quote! {
-                for<'a> #dialectic_path::backend::Choice<#n>:
-                    #dialectic_path::call_by::By<'a, <#name as dialectic::backend::Transmitter>::Convention>
-                    + #dialectic_path::call_by::Convert<'a, #dialectic_path::call_by::Mut, <#name as dialectic::backend::Transmitter>::Convention>
-                    + #dialectic_path::call_by::By<'a, #dialectic_path::call_by::Mut, Type = &'a mut Choice<#n>>
             });
         }
         item.into_token_stream().into()
@@ -800,10 +777,6 @@ pub fn Transmitter(
 ///     Rx: Receive<T1>,
 ///     Rx: Receive<T2>,
 ///     // ...
-///     // For each `N` from 0 to 255:
-///     Rx: Receive<Choice<0>>,
-///     // ...
-///     Rx: Receive<Choice<255>>,
 /// {}
 /// ```
 #[allow(non_snake_case)]
@@ -824,11 +797,6 @@ pub fn Receiver(
         for ty in types {
             predicates.push(syn::parse_quote! {
                 #name: #dialectic_path::backend::Receive<#ty>
-            });
-        }
-        for n in 0usize..255 {
-            predicates.push(syn::parse_quote! {
-                #name: #dialectic_path::backend::Receive<dialectic::backend::Choice<#n>>
             });
         }
         item.into_token_stream().into()

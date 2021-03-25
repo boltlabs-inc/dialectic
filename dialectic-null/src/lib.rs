@@ -74,6 +74,13 @@ impl std::error::Error for Error {}
 impl backend::Transmitter for Sender {
     type Error = Error;
     type Convention = Val;
+
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        _choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl backend::Transmit<()> for Sender {
@@ -102,6 +109,13 @@ impl<const LENGTH: usize> backend::Transmit<Choice<LENGTH>> for Sender {
 
 impl backend::Receiver for Receiver {
     type Error = Error;
+
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async { 0.try_into().map_err(|_| Error { _private: () }) })
+    }
 }
 
 impl backend::Receive<()> for Receiver {

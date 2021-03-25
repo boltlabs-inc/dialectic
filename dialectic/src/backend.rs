@@ -21,10 +21,8 @@ pub use choice::*;
 
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
 /// must implement [`Transmitter`], which specifies what type of errors it might return and whether
-/// it sends things by owned value or by reference.
-///
-/// A valid [`Transmitter`] **must** implemented `Transmit<Choice<N>>` for all `N` from 0 through
-/// 255, inclusive. Usually this is best done by a blanket instance that is generic over all `N`.
+/// it sends things by owned value or by reference, as well as giving a method to send [`Choice`]s
+/// across the channel.
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
@@ -34,6 +32,12 @@ pub trait Transmitter {
     /// serialize by taking references, pick [`Ref`]. [`Mut`] is an unusual choice of calling
     /// convention, but is supported.
     type Convention: Convention;
+
+    /// Send any `Choice<N>` using the [`Convention`] specified by the trait implementation.
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// If a transport is `Transmit<T>`, we can use it to [`send`](Transmit::send) a message of type `T`
@@ -64,6 +68,12 @@ pub trait Transmit<T>: Transmitter {
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;
+
+    /// Receive any `Choice<N>`. It is impossible to construct a `Choice<0>`, so if `N = 0`, a
+    /// [`Receiver::Error`] must be returned.
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// If a transport is `Receive<T>`, we can use it to [`recv`](Receive::recv) a message of type `T`.
