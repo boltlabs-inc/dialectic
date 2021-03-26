@@ -1,7 +1,7 @@
 //! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
 //! use the [`Chan`](super::Chan) type synonym instead.
+use ::futures::Future;
 use call_by::By;
-use futures::Future;
 use pin_project::pin_project;
 use std::{
     any::TypeId,
@@ -65,7 +65,8 @@ use crate::{prelude::*, types::*, unary::*};
 #[derivative(Debug)]
 #[repr(C)]
 #[must_use]
-pub struct Chan<S: Session, Tx: marker::Send + 'static, Rx: marker::Send + 'static> {
+pub struct Chan<S: Session, Tx: marker::Send + Unpin + 'static, Rx: marker::Send + Unpin + 'static>
+{
     tx: Option<Tx>,
     rx: Option<Rx>,
     drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -75,8 +76,8 @@ pub struct Chan<S: Session, Tx: marker::Send + 'static, Rx: marker::Send + 'stat
 
 impl<Tx, Rx, S> Drop for Chan<S, Tx, Rx>
 where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Tx: marker::Send + Unpin + 'static,
+    Rx: marker::Send + Unpin + 'static,
     S: Session,
 {
     fn drop(&mut self) {
@@ -101,8 +102,8 @@ where
 impl<Tx, Rx, S> Chan<S, Tx, Rx>
 where
     S: Session,
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Tx: marker::Send + Unpin + 'static,
+    Rx: marker::Send + Unpin + 'static,
 {
     /// Close a finished session, dropping the underlying connections.
     ///
@@ -237,8 +238,8 @@ where
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: Transmitter + marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Tx: Transmitter + marker::Send + Unpin + 'static,
+    Rx: marker::Send + Unpin + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
     /// other end of the connection, alerting the other party to this choice by sending the number
@@ -320,7 +321,7 @@ where
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        self.tx.as_mut().unwrap().send_choice(choice).await?;
+        crate::backend::futures::SendChoice::new(self.tx.as_mut().unwrap(), choice).await?;
         Ok(self.unchecked_cast())
     }
 }
@@ -332,8 +333,8 @@ where
     Choices::AsList: HasLength + EachScoped + EachHasDual,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
-    Tx: marker::Send + 'static,
-    Rx: Receiver + marker::Send + 'static,
+    Tx: marker::Send + Unpin + 'static,
+    Rx: Receiver + marker::Send + Unpin + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -423,7 +424,8 @@ where
     /// ```
     pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let variant = rx.as_mut().unwrap().recv_choice::<LENGTH>().await?.into();
+        let choice: Choice<LENGTH> = rx.as_mut().unwrap().recv().await?;
+        let variant = choice.into();
         Ok(Branches {
             variant,
             tx,
@@ -438,8 +440,8 @@ where
 impl<Tx, Rx, S> Chan<S, Tx, Rx>
 where
     S: Session,
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Tx: marker::Send + Unpin + 'static,
+    Rx: marker::Send + Unpin + 'static,
 {
     /// Execute the session type `P` as a subroutine in a closure.
     ///
@@ -747,8 +749,8 @@ where
 pub(crate) fn over<P, Tx, Rx, T, E, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, E, Fut>
 where
     P: Session,
-    Tx: std::marker::Send + 'static,
-    Rx: std::marker::Send + 'static,
+    Tx: std::marker::Send + Unpin + 'static,
+    Rx: std::marker::Send + Unpin + 'static,
     F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
@@ -863,8 +865,8 @@ where
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
+    Tx: marker::Send + Unpin + 'static,
+    Rx: marker::Send + Unpin + 'static,
 {
     /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
     /// so, return the corresponding channel; otherwise, return all the other possibilities.

@@ -2,7 +2,7 @@ pub use crate::chan::Over;
 
 use super::*;
 use crate::types::*;
-use std::marker;
+use std::{future::Future, marker};
 
 /// The `Session` extension trait gives methods to create session-typed channels from session types.
 /// These are implemented as static methods on the session type itself.
@@ -100,12 +100,17 @@ where
     /// # }
     /// ```
     fn channel<Tx, Rx>(
-        make: impl FnMut() -> (Tx, Rx),
+        mut make: impl FnMut() -> (Tx, Rx),
     ) -> (Chan<Self, Tx, Rx>, Chan<Self::Dual, Tx, Rx>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx: marker::Send + 'static,
-        Rx: marker::Send + 'static;
+        Tx: marker::Send + Unpin + 'static,
+        Rx: marker::Send + Unpin + 'static,
+    {
+        let (tx0, rx0) = make();
+        let (tx1, rx1) = make();
+        (Self::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
+    }
 
     /// Given two closures, each of which generates a uni-directional underlying transport channel,
     /// create a pair of dual [`Chan`]s which communicate over the transport channels resulting from
@@ -134,10 +139,15 @@ where
     ) -> (Chan<Self, Tx0, Rx1>, Chan<Self::Dual, Tx1, Rx0>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx0: marker::Send + 'static,
-        Rx0: marker::Send + 'static,
-        Tx1: marker::Send + 'static,
-        Rx1: marker::Send + 'static;
+        Tx0: marker::Send + Unpin + 'static,
+        Rx0: marker::Send + Unpin + 'static,
+        Tx1: marker::Send + Unpin + 'static,
+        Rx1: marker::Send + Unpin + 'static,
+    {
+        let (tx0, rx0) = make0();
+        let (tx1, rx1) = make1();
+        (Self::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
+    }
 
     /// Given a transmitting and receiving end of an un-session-typed connection, wrap them in a new
     /// session-typed channel for the protocol `P.`
@@ -160,8 +170,11 @@ where
     /// ```
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Self, Tx, Rx>
     where
-        Tx: marker::Send + 'static,
-        Rx: marker::Send + 'static;
+        Tx: marker::Send + Unpin + 'static,
+        Rx: marker::Send + Unpin + 'static,
+    {
+        chan::Chan::from_raw_unchecked(tx, rx)
+    }
 
     /// Given a closure which runs the session on a channel from start to completion, run that
     /// session on the given pair of sending and receiving connections.
@@ -248,63 +261,16 @@ where
     /// ```
     fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
     where
-        Tx: std::marker::Send + 'static,
-        Rx: std::marker::Send + 'static,
-        F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
-        Fut: Future<Output = Result<T, Err>>;
-}
-
-impl<P> Session for P
-where
-    Self: Scoped + Actionable + HasDual,
-{
-    type Dual = <Self as HasDual>::DualSession;
-    type Action = <Self as Actionable>::NextAction;
-
-    fn channel<Tx, Rx>(
-        mut make: impl FnMut() -> (Tx, Rx),
-    ) -> (Chan<Self, Tx, Rx>, Chan<Self::Dual, Tx, Rx>)
-    where
-        <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx: marker::Send + 'static,
-        Rx: marker::Send + 'static,
-    {
-        let (tx0, rx0) = make();
-        let (tx1, rx1) = make();
-        (P::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
-    }
-
-    fn bichannel<Tx0, Rx0, Tx1, Rx1>(
-        make0: impl FnOnce() -> (Tx0, Rx0),
-        make1: impl FnOnce() -> (Tx1, Rx1),
-    ) -> (Chan<Self, Tx0, Rx1>, Chan<Self::Dual, Tx1, Rx0>)
-    where
-        <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx0: marker::Send + 'static,
-        Rx0: marker::Send + 'static,
-        Tx1: marker::Send + 'static,
-        Rx1: marker::Send + 'static,
-    {
-        let (tx0, rx0) = make0();
-        let (tx1, rx1) = make1();
-        (P::wrap(tx0, rx1), <Self::Dual>::wrap(tx1, rx0))
-    }
-
-    fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Self, Tx, Rx>
-    where
-        Tx: marker::Send + 'static,
-        Rx: marker::Send + 'static,
-    {
-        chan::Chan::from_raw_unchecked(tx, rx)
-    }
-
-    fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
-    where
-        Tx: std::marker::Send + 'static,
-        Rx: std::marker::Send + 'static,
+        Tx: std::marker::Send + Unpin + 'static,
+        Rx: std::marker::Send + Unpin + 'static,
         F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {
         crate::chan::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
     }
+}
+
+impl<S: Scoped + Actionable + HasDual> Session for S {
+    type Dual = <Self as HasDual>::DualSession;
+    type Action = <Self as Actionable>::NextAction;
 }
