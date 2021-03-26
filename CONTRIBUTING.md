@@ -58,3 +58,6 @@ something like this:
 
 Note that warnings are denied during our CI process, so if you are missing documentation or such,
 your PR *will* fail CI. We also use `clippy` in our CI and disallow warnings there as well.
+
+Thank you again for contributing, we really appreciate it! If you have further questions, please
+feel free to contact Kenny (@kwf) (kwf@boltlabs.io) or Shea (@sdleffler) (shea@errno.com).
