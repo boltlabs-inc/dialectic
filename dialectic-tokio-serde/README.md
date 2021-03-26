@@ -1,4 +1,4 @@
-The `dialectic-tokio-serde` crate provides Dialectic `Transmitter` and `Receiver` types which are
+The `dialectic-tokio-serde` crate provides [Dialectic](https://crates.io/crates/dialectic) `Transmitter` and `Receiver` types which are
 capable of sending/receiving any serde-`Serialize`/`Deserialize` type. These are generic over their
 transport, and require three additional parameters to function:
 
