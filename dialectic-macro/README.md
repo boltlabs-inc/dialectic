@@ -1,4 +1,4 @@
-This crate contains the `Session!`, `Transmitter`, and `Receiver` macros for use in Dialectic, as
+This crate contains the `Session!`, `Transmitter`, and `Receiver` macros for use in [Dialectic](https://crates.io/crates/dialectic), as
 well as several other macros which are used internally to Dialectic. The `dialectic-macro` crate is
 considered an internal implementation detail and should *never* be relied upon or depended on
 outside of the `dialectic` crate itself, which re-exports all the important user-facing procedural
