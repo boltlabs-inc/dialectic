@@ -2,7 +2,7 @@ pub use crate::chan::Over;
 
 use super::*;
 use crate::types::*;
-use std::{future::Future, marker};
+use std::future::Future;
 
 /// The `Session` extension trait gives methods to create session-typed channels from session types.
 /// These are implemented as static methods on the session type itself.
@@ -104,8 +104,8 @@ where
     ) -> (Chan<Self, Tx, Rx>, Chan<Self::Dual, Tx, Rx>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx: marker::Send + Unpin + 'static,
-        Rx: marker::Send + Unpin + 'static,
+        Tx: Transmitter,
+        Rx: Receiver,
     {
         let (tx0, rx0) = make();
         let (tx1, rx1) = make();
@@ -139,10 +139,10 @@ where
     ) -> (Chan<Self, Tx0, Rx1>, Chan<Self::Dual, Tx1, Rx0>)
     where
         <Self as Session>::Dual: Scoped + Actionable + HasDual,
-        Tx0: marker::Send + Unpin + 'static,
-        Rx0: marker::Send + Unpin + 'static,
-        Tx1: marker::Send + Unpin + 'static,
-        Rx1: marker::Send + Unpin + 'static,
+        Tx0: Transmitter,
+        Rx0: Receiver,
+        Tx1: Transmitter,
+        Rx1: Receiver,
     {
         let (tx0, rx0) = make0();
         let (tx1, rx1) = make1();
@@ -170,8 +170,8 @@ where
     /// ```
     fn wrap<Tx, Rx>(tx: Tx, rx: Rx) -> Chan<Self, Tx, Rx>
     where
-        Tx: marker::Send + Unpin + 'static,
-        Rx: marker::Send + Unpin + 'static,
+        Tx: Transmitter,
+        Rx: Receiver,
     {
         chan::Chan::from_raw_unchecked(tx, rx)
     }
@@ -261,8 +261,8 @@ where
     /// ```
     fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
     where
-        Tx: std::marker::Send + Unpin + 'static,
-        Rx: std::marker::Send + Unpin + 'static,
+        Tx: Transmitter,
+        Rx: Receiver,
         F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, Err>>,
     {

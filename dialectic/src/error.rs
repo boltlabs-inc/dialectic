@@ -1,3 +1,10 @@
+use std::{
+    convert::Infallible,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use crate::backend::Transmitter;
 #[allow(unused_imports)] // To link with documentation
 use crate::prelude::*;
 
@@ -6,9 +13,34 @@ use crate::prelude::*;
 /// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
 /// respectively. This is reflected at the type level by the presence of [`Unavailable`] on the type
 /// of the connection which *is not* present for each part of the split.
+///
+/// [`Unavailable`] *does* implement [`Transmitter`] and [`Receiver`] (which is necessary so that it
+/// can be a backend type in a [`Chan`]), but it *does not* implement [`ReceiveChoice`],
+/// [`TransmitChoice`], [`Receive`], or [`Transmit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Unavailable {
     _priv: (),
+}
+
+impl Transmitter for Unavailable {
+    type Error = Infallible;
+    type Convention = Val;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl Receiver for Unavailable {
+    type Error = Infallible;
 }
 
 /// The error returned when a closure which is expected to complete a channel's session fails to

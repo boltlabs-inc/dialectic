@@ -79,6 +79,7 @@ impl std::error::Error for Error {}
 impl backend::Transmitter for Sender {
     type Error = Error;
     type Convention = Val;
+
     fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
@@ -90,6 +91,9 @@ impl backend::Transmitter for Sender {
     fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
+}
+
+impl backend::TransmitChoice for Sender {
     fn start_send_choice<const LENGTH: usize>(
         self: Pin<&mut Self>,
         _: Choice<LENGTH>,
@@ -109,6 +113,9 @@ impl backend::Transmit<()> for Sender {
 
 impl backend::Receiver for Receiver {
     type Error = Error;
+}
+
+impl backend::ReceiveChoice for Receiver {
     fn poll_recv_choice<const LENGTH: usize>(
         self: Pin<&mut Self>,
         _: &mut Context<'_>,

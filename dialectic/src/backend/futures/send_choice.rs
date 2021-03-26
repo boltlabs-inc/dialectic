@@ -34,7 +34,7 @@ impl<'a, Tx: Unpin + ?Sized, const LENGTH: usize> SendChoice<'a, Tx, LENGTH> {
 
 impl<'a, Tx, const LENGTH: usize> Future for SendChoice<'a, Tx, LENGTH>
 where
-    Tx: backend::Transmitter + Unpin + ?Sized,
+    Tx: backend::TransmitChoice + Unpin + ?Sized,
 {
     type Output = Result<(), Tx::Error>;
 

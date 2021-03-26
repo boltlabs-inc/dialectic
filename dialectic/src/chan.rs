@@ -6,6 +6,7 @@ use pin_project::pin_project;
 use std::{
     any::TypeId,
     convert::{TryFrom, TryInto},
+    fmt::{self, Debug, Display, Formatter},
     marker::{self, PhantomData},
     mem,
     pin::Pin,
@@ -17,6 +18,49 @@ use crate::tuple::{HasLength, List, Tuple};
 use crate::Unavailable;
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
 use crate::{prelude::*, types::*, unary::*};
+
+/// The buffering mode for a [`Chan`].
+///
+/// By default, [`Chan`]s do not force the underlying transmitting end to flush messages until the
+/// protocol requires that messages be flushed (i.e., at the boundary between a series of sends and
+/// a subsequent series of receives). You can manually flush a [`Chan`] with [`flush`](Chan::flush),
+/// or set a [`Chan`]'s buffering mode using [`set_buffering`](Chan::set_buffering) to make all send
+/// operations immediately flush afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Buffering {
+    /// Use buffering, when supported by the underlying backend.
+    Buffering,
+    /// Do not use buffering, regardless of whether the underlying backend supports it: follow every
+    /// sending operation with an implicit call to [`flush`](Chan::flush).
+    NoBuffering,
+}
+
+#[derive(Derivative, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derivative(Debug(bound = "Tx::Error: Debug, Rx::Error: Debug"))]
+pub enum Error<Tx: Transmitter, Rx: Receiver> {
+    Send(Tx::Error),
+    Recv(Rx::Error),
+}
+
+impl<Tx: Transmitter, Rx: Receiver> Display for Error<Tx, Rx>
+where
+    Tx::Error: Display,
+    Rx::Error: Display,
+{
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Error::Send(e) => write!(f, "error while sending: {}", e),
+            Error::Recv(e) => write!(f, "error while receiving: {}", e),
+        }
+    }
+}
+
+impl<Tx: Transmitter, Rx: Receiver> std::error::Error for Error<Tx, Rx>
+where
+    Tx::Error: Debug + Display,
+    Rx::Error: Debug + Display,
+{
+}
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
 /// `Rx`.
@@ -65,8 +109,8 @@ use crate::{prelude::*, types::*, unary::*};
 #[derivative(Debug)]
 #[repr(C)]
 #[must_use]
-pub struct Chan<S: Session, Tx: marker::Send + Unpin + 'static, Rx: marker::Send + Unpin + 'static>
-{
+pub struct Chan<S: Session, Tx: Transmitter, Rx: Receiver> {
+    buffering_mode: Buffering,
     tx: Option<Tx>,
     rx: Option<Rx>,
     drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -74,12 +118,7 @@ pub struct Chan<S: Session, Tx: marker::Send + Unpin + 'static, Rx: marker::Send
     session: PhantomData<fn() -> S>,
 }
 
-impl<Tx, Rx, S> Drop for Chan<S, Tx, Rx>
-where
-    Tx: marker::Send + Unpin + 'static,
-    Rx: marker::Send + Unpin + 'static,
-    S: Session,
-{
+impl<Tx: Transmitter, Rx: Receiver, S: Session> Drop for Chan<S, Tx, Rx> {
     fn drop(&mut self) {
         let done = TypeId::of::<<S as Session>::Action>() == TypeId::of::<Done>();
         if let Some(tx) = self.tx.take() {
@@ -99,12 +138,7 @@ where
     }
 }
 
-impl<Tx, Rx, S> Chan<S, Tx, Rx>
-where
-    S: Session,
-    Tx: marker::Send + Unpin + 'static,
-    Rx: marker::Send + Unpin + 'static,
-{
+impl<Tx: Transmitter, Rx: Receiver, S: Session> Chan<S, Tx, Rx> {
     /// Close a finished session, dropping the underlying connections.
     ///
     /// If called inside a future given to [`split`](Chan::split) or [`call`](Chan::call), the
@@ -147,11 +181,17 @@ where
     /// If you *really* want to destruct a channel before the end of its session, use
     /// [`into_inner`](Chan::into_inner), but beware that this may cause the party on the other end
     /// of the channel to throw errors due to your violation of the channel's protocol!
-    pub fn close(self)
+    pub async fn close(mut self) -> Result<(), Error<Tx, Rx>>
     where
         S: Session<Action = Done>,
     {
-        drop(self)
+        // We only want to flush/close the underlying transmitter channel if there is nobody who's
+        // about to receive it and continue to do things with it
+        if Arc::strong_count(&self.drop_tx) <= 1 {
+            let tx = self.tx.as_mut().unwrap();
+            tx.close().await.map_err(Error::Send)?;
+        }
+        Ok(())
     }
 
     /// Receive something of type `T` on the channel, returning the pair of the received object and
@@ -178,13 +218,20 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<P, Tx, Rx>), Rx::Error>
+    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<P, Tx, Rx>), Error<Tx, Rx>>
     where
         S: Session<Action = Recv<T, P>>,
         P: Session,
         Rx: Receive<T>,
     {
-        let result = self.rx.as_mut().unwrap().recv().await?;
+        self.flush().await?;
+        let result = self
+            .rx
+            .as_mut()
+            .unwrap()
+            .recv()
+            .await
+            .map_err(Error::Recv)?;
         Ok((result, self.unchecked_cast()))
     }
 
@@ -219,7 +266,7 @@ where
     pub async fn send<'b, T, P>(
         mut self,
         message: <T as By<'b, Tx::Convention>>::Type,
-    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    ) -> Result<Chan<P, Tx, Rx>, Error<Tx, Rx>>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
@@ -227,19 +274,23 @@ where
         T: By<'b, Tx::Convention>,
         <T as By<'b, Tx::Convention>>::Type: marker::Send,
     {
-        self.tx.as_mut().unwrap().send(message).await?;
+        self.tx
+            .as_mut()
+            .unwrap()
+            .send(message)
+            .await
+            .map_err(Error::Send)?;
+        self.flush_if_no_buffering().await?;
         Ok(self.unchecked_cast())
     }
 }
 
-impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
+impl<Tx: TransmitChoice, Rx: Receiver, S: Session, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
     S: Session<Action = Choose<Choices>>,
     Choices: Tuple,
     Choices::AsList: HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: Transmitter + marker::Send + Unpin + 'static,
-    Rx: marker::Send + Unpin + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
     /// other end of the connection, alerting the other party to this choice by sending the number
@@ -310,7 +361,7 @@ where
         mut self,
     ) -> Result<
         Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
-        Tx::Error,
+        Error<Tx, Rx>,
     >
     where
         Number<N>: ToUnary,
@@ -321,20 +372,21 @@ where
             .expect("choices must fit into a byte")
             .try_into()
             .expect("type system prevents out of range choice in `choose`");
-        crate::backend::futures::SendChoice::new(self.tx.as_mut().unwrap(), choice).await?;
+        crate::backend::futures::SendChoice::new(self.tx.as_mut().unwrap(), choice)
+            .await
+            .map_err(Error::Send)?;
+        self.flush_if_no_buffering().await?;
         Ok(self.unchecked_cast())
     }
 }
 
-impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
+impl<Tx: Transmitter, Rx: ReceiveChoice, S: Session, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
 where
     S: Session<Action = Offer<Choices>>,
     Choices: Tuple + 'static,
     Choices::AsList: HasLength + EachScoped + EachHasDual,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
-    Tx: marker::Send + Unpin + 'static,
-    Rx: Receiver + marker::Send + Unpin + 'static,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
@@ -422,11 +474,13 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
-        let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let choice: Choice<LENGTH> = rx.as_mut().unwrap().recv().await?;
+    pub async fn offer(mut self) -> Result<Branches<Choices, Tx, Rx>, Error<Tx, Rx>> {
+        self.flush().await?;
+        let (buffering_mode, tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
+        let choice: Choice<LENGTH> = rx.as_mut().unwrap().recv().await.map_err(Error::Recv)?;
         let variant = choice.into();
         Ok(Branches {
+            buffering_mode,
             variant,
             tx,
             rx,
@@ -437,12 +491,7 @@ where
     }
 }
 
-impl<Tx, Rx, S> Chan<S, Tx, Rx>
-where
-    S: Session,
-    Tx: marker::Send + Unpin + 'static,
-    Rx: marker::Send + Unpin + 'static,
-{
+impl<Tx: Transmitter, Rx: Receiver, S: Session> Chan<S, Tx, Rx> {
     /// Execute the session type `P` as a subroutine in a closure.
     ///
     /// This operation takes as input an asynchronous closure that runs a channel for the session
@@ -510,11 +559,12 @@ where
         F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
+        let (buffering_mode, tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
         let (result, maybe_chan) = P::over(tx.unwrap(), rx.unwrap(), first).await?;
         Ok((
             result,
             maybe_chan.map(|(tx, rx)| Chan {
+                buffering_mode,
                 tx: Some(tx),
                 rx: Some(rx),
                 drop_tx,
@@ -603,7 +653,7 @@ where
     /// # }
     /// ```
     pub async fn split<T, E, P, Q, R, F, Fut>(
-        self,
+        mut self,
         with_parts: F,
     ) -> Result<(T, Result<Chan<R, Tx, Rx>, SessionIncomplete<Tx, Rx>>), E>
     where
@@ -611,13 +661,20 @@ where
         P: Session,
         Q: Session,
         R: Session,
+        Tx: Transmitter,
+        Rx: Receiver,
+        E: From<Error<Tx, Rx>>,
         F: FnOnce(Chan<P, Tx, Unavailable>, Chan<Q, Unavailable, Rx>) -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
         use IncompleteHalf::*;
         use SessionIncomplete::*;
 
-        let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
+        // We need to flush before a split, because the receiving end won't be able to flush the
+        // transmitting end automatically once they are decoupled
+        self.flush().await?;
+
+        let (sync_mode, tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
         let ((result, maybe_rx), maybe_tx) =
             P::over(tx.unwrap(), Unavailable::default(), |tx_only| async move {
                 Q::over(Unavailable::default(), rx.unwrap(), |rx_only| async move {
@@ -668,6 +725,7 @@ where
         Ok((
             result,
             maybe_tx_rx.map(|(tx, rx)| Chan {
+                buffering_mode: sync_mode,
                 tx: Some(tx),
                 rx: Some(rx),
                 drop_tx,
@@ -675,6 +733,57 @@ where
                 session: PhantomData,
             }),
         ))
+    }
+
+    /// Force a channel to flush its transmitting buffer immediately, returning once all buffered
+    /// messages, if any, have been sent. Unlike most functions on [`Chan`]s, this function takes a
+    /// channel by reference, not value.
+    ///
+    /// You do not typically need to call this method manually, because channels make sure to flush
+    /// their buffers prior to [`recv`](Chan::recv), [`offer`](Chan::offer), and
+    /// [`split`](Chan::split), which are the operations before which it is necessary to ensure that
+    /// all messages have been sent.
+    pub async fn flush(&mut self) -> Result<(), Error<Tx, Rx>>
+    where
+        Tx: Transmitter,
+        Rx: Receiver,
+    {
+        self.tx.as_mut().unwrap().flush().await.map_err(Error::Send)
+    }
+
+    /// Set the buffering mode for this [`Chan`].
+    ///
+    /// If the buffering mode is [`Buffering`] (the default), then the underlying transmitting end
+    /// will be automatically flushed before receiving operations, but otherwise it will not
+    /// necessarily be flushed at the end of every sending operation. If the mode is
+    /// [`NoBuffering`], the underlying transmitting end will be automatically flushed after every
+    /// sending operation, which is less efficient, but may be desirable in some circumstances.
+    pub fn set_buffering(&mut self, buffering: Buffering) {
+        self.buffering_mode = buffering;
+    }
+
+    /// Return the current buffering mode for this [`Chan`].
+    ///
+    /// If the buffering mode is [`Buffering`] (the default), then the underlying transmitting end
+    /// will be automatically flushed before receiving operations, but otherwise it will not
+    /// necessarily be flushed at the end of every sending operation. If the mode is
+    /// [`NoBuffering`], the underlying transmitting end will be automatically flushed after every
+    /// sending operation, which is less efficient, but may be desirable in some circumstances.
+    pub fn buffering(&self) -> Buffering {
+        self.buffering_mode
+    }
+
+    /// Flush the [`Chan`] if in [`NoBuffering`] mode.
+    async fn flush_if_no_buffering(&mut self) -> Result<(), Error<Tx, Rx>>
+    where
+        Tx: Transmitter,
+        Rx: Receiver,
+    {
+        if let Buffering::NoBuffering = self.buffering_mode {
+            self.flush().await
+        } else {
+            Ok(())
+        }
     }
 
     /// Unwrap a channel into its transmit and receive ends, exiting the regimen of session typing,
@@ -696,7 +805,7 @@ where
     /// let (tx2, rx2) = c2.into_inner();
     /// ```
     pub fn into_inner(self) -> (Tx, Rx) {
-        let (tx, rx, _, _) = self.unwrap_contents();
+        let (_, tx, rx, _, _) = self.unwrap_contents();
         (tx.unwrap(), rx.unwrap())
     }
 
@@ -705,6 +814,7 @@ where
     fn unwrap_contents(
         mut self,
     ) -> (
+        Buffering,
         Option<Tx>,
         Option<Rx>,
         Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -714,7 +824,7 @@ where
         let rx = self.rx.take();
         let drop_tx = self.drop_tx.clone();
         let drop_rx = self.drop_rx.clone();
-        (tx, rx, drop_tx, drop_rx)
+        (self.buffering_mode, tx, rx, drop_tx, drop_rx)
     }
 
     /// Cast a channel to arbitrary new session types and environment. Use with care!
@@ -735,6 +845,7 @@ where
     /// coherent with regard to the session type. Use with care!
     pub(crate) fn from_raw_unchecked(tx: Tx, rx: Rx) -> Chan<S, Tx, Rx> {
         Chan {
+            buffering_mode: Buffering::Buffering,
             tx: Some(tx),
             rx: Some(rx),
             drop_tx: Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed))),
@@ -749,8 +860,8 @@ where
 pub(crate) fn over<P, Tx, Rx, T, E, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, E, Fut>
 where
     P: Session,
-    Tx: std::marker::Send + Unpin + 'static,
-    Rx: std::marker::Send + Unpin + 'static,
+    Tx: Transmitter,
+    Rx: Receiver,
     F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
@@ -759,6 +870,7 @@ where
     let reclaimed_tx = drop_tx.clone();
     let reclaimed_rx = drop_rx.clone();
     let chan = Chan {
+        buffering_mode: Buffering::Buffering,
         tx: Some(tx),
         rx: Some(rx),
         drop_tx,
@@ -828,14 +940,13 @@ where
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct Branches<Choices, Tx, Rx>
+pub struct Branches<Choices, Tx: Transmitter, Rx: Receiver>
 where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
     variant: u8,
+    buffering_mode: Buffering,
     tx: Option<Tx>,
     rx: Option<Rx>,
     drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -843,10 +954,8 @@ where
     protocols: PhantomData<fn() -> Choices>,
 }
 
-impl<Tx, Rx, Choices> Drop for Branches<Choices, Tx, Rx>
+impl<Tx: Transmitter, Rx: Receiver, Choices> Drop for Branches<Choices, Tx, Rx>
 where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
@@ -860,13 +969,11 @@ where
     }
 }
 
-impl<Tx, Rx, Choices, const LENGTH: usize> Branches<Choices, Tx, Rx>
+impl<Tx: Transmitter, Rx: Receiver, Choices, const LENGTH: usize> Branches<Choices, Tx, Rx>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
-    Tx: marker::Send + Unpin + 'static,
-    Rx: marker::Send + Unpin + 'static,
 {
     /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
     /// so, return the corresponding channel; otherwise, return all the other possibilities.
@@ -882,6 +989,7 @@ where
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Remainder: EachScoped + EachHasDual + HasLength + List,
     {
+        let sync_mode = self.buffering_mode;
         let variant = self.variant;
         let tx = self.tx.take();
         let rx = self.rx.take();
@@ -892,6 +1000,7 @@ where
             .expect("branch discriminant exceeded u8::MAX in `case`");
         if variant == branch {
             Ok(Chan {
+                buffering_mode: sync_mode,
                 tx,
                 rx,
                 drop_tx,
@@ -906,6 +1015,7 @@ where
                 } else {
                     variant
                 },
+                buffering_mode: sync_mode,
                 tx,
                 rx,
                 drop_tx,
@@ -927,11 +1037,7 @@ where
     }
 }
 
-impl<'a, Tx, Rx> Branches<(), Tx, Rx>
-where
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
-{
+impl<'a, Tx: Transmitter, Rx: Receiver> Branches<(), Tx, Rx> {
     /// Eliminate an empty [`Branches`], returning any type. Any code in which this function can be
     /// called is unreachable, because it's impossible to construct an empty [`Branches`].
     pub fn empty_case<T>(self) -> T {

@@ -2,13 +2,12 @@
 //!
 //! A [`Chan<S, Tx, Rx>`](crate::Chan) is parameterized by its transmitting channel `Tx` and its
 //! receiving channel `Rx`. In order for `Tx` and `Rx` to serve as a backend for a
-//! [`Chan`](crate::Chan), they must implement, for each `T` that is *sent* and each `S` which is
-//! *received*:
+//! [`Chan`](crate::Chan), they must implement:
 //!
-//! - `Tx`: [`Transmitter`] + [`Transmit<T>`](Transmit), and the marker traits [`Send`] + [`Unpin`]
-//!   + `'static`
-//! - `Rx`: [`Receiver`] + [`Receive<S>`](Receive), and the marker traits [`Send`] + [`Unpin`] +
-//!   `'static`
+//! - `Tx`: [`Transmitter`] + [`TransmitChoice`] + [`Transmit<T>`](Transmit) (for each `T` that is
+//!   *sent* in a session on the channel)
+//! - `Rx`: [`Receiver`] + [`ReceiveChoice`] + [`Receive<S>`](Receive) (for each `S` that is
+//!   *received* in a session on the channel)
 //!
 //! Functions which are generic over their backend will in turn need to specify the bounds
 //! [`Transmit<T>`](Transmit) and [`Receive<T>`](Receive) for all `T`s they send and receive,
@@ -34,14 +33,13 @@ pub use choice::*;
 
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
 /// must implement [`Transmitter`], which specifies what type of errors it might return and whether
-/// it sends things by owned value or by reference, as well as giving a method to send [`Choice`]s
-/// across the channel. This is a super-trait of [`Transmit`], which is what's actually needed to
-/// receive particular values over a [`Chan`](crate::Chan).
+/// it sends things by owned value or by reference. This is a super-trait of [`Transmit`], which is
+/// what's actually needed to receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Transmit<T>`](Transmit) bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
 /// succinctly.
-pub trait Transmitter {
+pub trait Transmitter: Send + Unpin + 'static {
     /// The type of possible errors when sending.
     type Error;
 
@@ -85,7 +83,11 @@ pub trait Transmitter {
     /// again.
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>>;
+}
 
+/// A backend transport used for transmitting must implement [`TransmitChoice`], which specifies how
+/// to transmit a [`Choice`] of arbitrary size.
+pub trait TransmitChoice: Transmitter {
     /// Begin the process of sending any [`Choice<N>`](Choice). Each call to this function must be
     /// preceded by a successful call to [`Transmitter::poll_ready`] which returned
     /// `Poll::Ready(Ok(()))`.
@@ -125,7 +127,7 @@ pub trait Transmit<T>: Transmitter {
         T: By<'a, Self::Convention>;
 }
 
-impl<Tx: Transmitter + Unpin, const LENGTH: usize> Transmit<Choice<LENGTH>> for Tx {
+impl<Tx: TransmitChoice + Unpin, const LENGTH: usize> Transmit<Choice<LENGTH>> for Tx {
     fn start_send<'a>(
         self: Pin<&mut Self>,
         choice: <Choice<LENGTH> as By<'a, Self::Convention>>::Type,
@@ -144,10 +146,14 @@ impl<Tx: Transmitter + Unpin, const LENGTH: usize> Transmit<Choice<LENGTH>> for 
 ///
 /// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
-pub trait Receiver {
+pub trait Receiver: Send + Unpin + 'static {
     /// The type of possible errors when receiving.
     type Error;
+}
 
+/// A backend transport used for receiving must implement [`ReceiveChoice`], which describes how to
+/// receive a [`Choice`] of arbitrary size.
+pub trait ReceiveChoice: Receiver {
     /// Poll the receiver, attempting to receive a [`Choice<N>`](Choice).
     ///
     /// This method returns `Poll::Ready(Ok(choice))` when a `Choice<N>` has been received,
@@ -187,7 +193,7 @@ pub trait Receive<T>: Receiver {
     fn poll_recv(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<T, Self::Error>>;
 }
 
-impl<Rx: Receiver + Unpin, const LENGTH: usize> Receive<Choice<LENGTH>> for Rx {
+impl<Rx: ReceiveChoice + Unpin, const LENGTH: usize> Receive<Choice<LENGTH>> for Rx {
     fn poll_recv(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
