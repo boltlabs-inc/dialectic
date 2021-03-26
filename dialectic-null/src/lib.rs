@@ -16,7 +16,12 @@
 #![forbid(broken_intra_doc_links)]
 
 use dialectic::backend::{self, By, Choice, Val};
-use std::{convert::TryInto, future::Future, pin::Pin};
+use std::{
+    convert::TryInto,
+    pin::Pin,
+    result::Result,
+    task::{Context, Poll},
+};
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
 ///
@@ -74,63 +79,46 @@ impl std::error::Error for Error {}
 impl backend::Transmitter for Sender {
     type Error = Error;
     type Convention = Val;
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
 
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        _choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async { Ok(()) })
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+    fn start_send_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        _: Choice<LENGTH>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 }
 
 impl backend::Transmit<()> for Sender {
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        _message: <() as By<Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    fn start_send<'a>(self: Pin<&mut Self>, _: <() as By<'a, Val>>::Type) -> Result<(), Self::Error>
     where
-        'a: 'async_lifetime,
+        (): By<'a, Val>,
     {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-impl<const LENGTH: usize> backend::Transmit<Choice<LENGTH>> for Sender {
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
-        _message: <Choice<LENGTH> as By<Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
-    where
-        'a: 'async_lifetime,
-    {
-        Box::pin(async { Ok(()) })
+        Ok(())
     }
 }
 
 impl backend::Receiver for Receiver {
     type Error = Error;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async { 0.try_into().map_err(|_| Error { _private: () }) })
+    fn poll_recv_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+    ) -> Poll<Result<Choice<LENGTH>, Self::Error>> {
+        Poll::Ready(0.try_into().map_err(|_| Error { _private: () }))
     }
 }
 
 impl backend::Receive<()> for Receiver {
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-impl<const LENGTH: usize> backend::Receive<Choice<LENGTH>> for Receiver {
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async { 0.try_into().map_err(|_| Error { _private: () }) })
+    fn poll_recv(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 }
