@@ -679,16 +679,15 @@ pub fn Transmitter(
     if let Some(predicates) = where_predicates_mut(&mut item) {
         predicates.push(if let Some(mutability) = mutability {
             syn::parse_quote! {
-                #name: ::std::marker::Send
-                + #dialectic_path::backend::Transmitter<Convention = #mutability>
-                + 'static
+                #name: #dialectic_path::backend::Transmitter<Convention = #mutability>
             }
         } else {
             syn::parse_quote! {
-                #name: ::std::marker::Send
-                + #dialectic_path::backend::Transmitter
-                + 'static
+                #name: #dialectic_path::backend::Transmitter
             }
+        });
+        predicates.push(syn::parse_quote! {
+            #name: #dialectic_path::backend::TransmitChoice
         });
         for ty in types {
             predicates.push(syn::parse_quote! {
@@ -790,9 +789,7 @@ pub fn Receiver(
     let mut item = parse_macro_input!(input as syn::Item);
     if let Some(predicates) = where_predicates_mut(&mut item) {
         predicates.push(syn::parse_quote! {
-            #name: ::std::marker::Send
-            + #dialectic_path::backend::Receiver
-            + 'static
+            #name: #dialectic_path::backend::Receiver + #dialectic_path::backend::ReceiveChoice
         });
         for ty in types {
             predicates.push(syn::parse_quote! {
