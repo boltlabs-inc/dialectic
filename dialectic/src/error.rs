@@ -1,5 +1,6 @@
 use std::{
     convert::Infallible,
+    fmt::{self, Debug, Display, Formatter},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -7,6 +8,36 @@ use std::{
 use crate::backend::Transmitter;
 #[allow(unused_imports)] // To link with documentation
 use crate::prelude::*;
+
+/// An error that occurs on a [`Chan`]: either an error while sending, or an error while receiving.
+#[derive(Derivative, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derivative(Debug(bound = "Tx::Error: Debug, Rx::Error: Debug"))]
+pub enum Error<Tx: Transmitter, Rx: Receiver> {
+    /// An error occurred while attempting to send.
+    Send(Tx::Error),
+    /// An error occurred while attempting to receive.
+    Recv(Rx::Error),
+}
+
+impl<Tx: Transmitter, Rx: Receiver> Display for Error<Tx, Rx>
+where
+    Tx::Error: Display,
+    Rx::Error: Display,
+{
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Error::Send(e) => write!(f, "error while sending: {}", e),
+            Error::Recv(e) => write!(f, "error while receiving: {}", e),
+        }
+    }
+}
+
+impl<Tx: Transmitter, Rx: Receiver> std::error::Error for Error<Tx, Rx>
+where
+    Tx::Error: Debug + Display,
+    Rx::Error: Debug + Display,
+{
+}
 
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
@@ -102,8 +133,8 @@ pub enum IncompleteHalf<T> {
 
 impl<T> std::error::Error for IncompleteHalf<T> {}
 
-impl<T> std::fmt::Display for IncompleteHalf<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<T> Display for IncompleteHalf<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "incomplete session or sub-session: channel half ")?;
         write!(
             f,
@@ -135,8 +166,8 @@ impl<Tx, Rx> SessionIncomplete<Tx, Rx> {
 
 impl<Tx, Rx> std::error::Error for SessionIncomplete<Tx, Rx> {}
 
-impl<Tx, Rx> std::fmt::Display for SessionIncomplete<Tx, Rx> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<Tx, Rx> Display for SessionIncomplete<Tx, Rx> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use IncompleteHalf::*;
         write!(f, "incomplete session or sub-session: channel")?;
         let reason = match self {

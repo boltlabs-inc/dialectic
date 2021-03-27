@@ -124,9 +124,9 @@ mod chan;
 mod error;
 mod session;
 
-pub use chan::{Branches, Chan};
+pub use chan::{Branches, Buffering, Chan};
 pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
-pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
+pub use error::{Error, IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;
 
 #[allow(unused_imports)] // If no backends are feature-enabled, don't warn
@@ -151,7 +151,9 @@ pub(crate) mod dialectic {
 /// all the bits and pieces you need to start writing programs with Dialectic.
 pub mod prelude {
     #[doc(no_inline)]
-    pub use crate::backend::{Choice, Receive, Receiver, Transmit, Transmitter};
+    pub use crate::backend::{
+        Choice, Receive, ReceiveChoice, Receiver, Transmit, TransmitChoice, Transmitter,
+    };
     #[doc(no_inline)]
     pub use crate::session::Session;
     #[doc(no_inline)]

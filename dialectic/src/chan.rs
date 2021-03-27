@@ -6,7 +6,7 @@ use pin_project::pin_project;
 use std::{
     any::TypeId,
     convert::{TryFrom, TryInto},
-    fmt::{self, Debug, Display, Formatter},
+    fmt::Debug,
     marker::{self, PhantomData},
     mem,
     pin::Pin,
@@ -14,10 +14,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::tuple::{HasLength, List, Tuple};
-use crate::Unavailable;
-use crate::{backend::*, IncompleteHalf, SessionIncomplete};
-use crate::{prelude::*, types::*, unary::*};
+use crate::{
+    backend::*,
+    prelude::*,
+    tuple::{HasLength, List, Tuple},
+    types::*,
+    unary::*,
+    Error, IncompleteHalf, SessionIncomplete, Unavailable,
+};
 
 /// The buffering mode for a [`Chan`].
 ///
@@ -33,33 +37,6 @@ pub enum Buffering {
     /// Do not use buffering, regardless of whether the underlying backend supports it: follow every
     /// sending operation with an implicit call to [`flush`](Chan::flush).
     NoBuffering,
-}
-
-#[derive(Derivative, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derivative(Debug(bound = "Tx::Error: Debug, Rx::Error: Debug"))]
-pub enum Error<Tx: Transmitter, Rx: Receiver> {
-    Send(Tx::Error),
-    Recv(Rx::Error),
-}
-
-impl<Tx: Transmitter, Rx: Receiver> Display for Error<Tx, Rx>
-where
-    Tx::Error: Display,
-    Rx::Error: Display,
-{
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Error::Send(e) => write!(f, "error while sending: {}", e),
-            Error::Recv(e) => write!(f, "error while receiving: {}", e),
-        }
-    }
-}
-
-impl<Tx: Transmitter, Rx: Receiver> std::error::Error for Error<Tx, Rx>
-where
-    Tx::Error: Debug + Display,
-    Rx::Error: Debug + Display,
-{
 }
 
 /// A bidirectional communications channel using the session type `P` over the connections `Tx` and
