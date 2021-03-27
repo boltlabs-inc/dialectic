@@ -23,7 +23,9 @@ jobs:
       run: cargo build --all-features --all-targets --verbose
     - name: Clippy lint
       run: cargo clippy --all-features --all-targets --verbose -- -Dwarnings
-    - name: Run tests
+    - name: Run all tests except doctests
       run: cargo test --all-features --all-targets --verbose
+    - name: Run all doctests
+      run: cargo test --all-features --doc --verbose
     - name: Build documentation
       run: cargo doc --all-features --verbose

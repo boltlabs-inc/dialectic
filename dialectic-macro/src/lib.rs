@@ -645,7 +645,6 @@ fn where_predicates_mut(
 ///
 /// ```
 /// use dialectic::prelude::*;
-/// use dialectic::call_by::{By, Convert};
 ///
 /// # type C = Ref;
 /// # struct T1;
