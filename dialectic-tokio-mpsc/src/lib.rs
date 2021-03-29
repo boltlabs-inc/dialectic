@@ -14,10 +14,16 @@
 #![forbid(broken_intra_doc_links)]
 
 use dialectic::backend::{self, By, Choice, Val};
-use std::{any::Any, future::Future, pin::Pin};
+use futures::ready;
+use std::{
+    any::Any,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use thiserror::Error;
 use tokio::sync::mpsc;
 pub use tokio::sync::mpsc::error::SendError;
+use tokio_util::sync::PollSender;
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a bounded [`Sender`] and [`Receiver`].
 ///
@@ -50,20 +56,20 @@ pub type UnboundedChan<P> = dialectic::Chan<P, UnboundedSender, UnboundedReceive
 
 /// A bounded receiver for dynamically typed values. See [`tokio::sync::mpsc::Receiver`].
 #[derive(Debug)]
-pub struct Receiver(pub mpsc::Receiver<Box<dyn Any + Send>>);
+pub struct Receiver(mpsc::Receiver<Box<dyn Any + Send>>);
 
 /// A bounded sender for dynamically typed values. See [`tokio::sync::mpsc::Sender`].
 #[derive(Debug, Clone)]
-pub struct Sender(pub mpsc::Sender<Box<dyn Any + Send>>);
+pub struct Sender(PollSender<Box<dyn Any + Send>>);
 
 /// An unbounded receiver for dynamically typed values. See
 /// [`tokio::sync::mpsc::UnboundedReceiver`].
 #[derive(Debug)]
-pub struct UnboundedReceiver(pub mpsc::UnboundedReceiver<Box<dyn Any + Send>>);
+pub struct UnboundedReceiver(mpsc::UnboundedReceiver<Box<dyn Any + Send>>);
 
 /// An unbounded sender for dynamically typed values. See [`tokio::sync::mpsc::UnboundedSender`].
 #[derive(Debug, Clone)]
-pub struct UnboundedSender(pub mpsc::UnboundedSender<Box<dyn Any + Send>>);
+pub struct UnboundedSender(mpsc::UnboundedSender<Box<dyn Any + Send>>);
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
@@ -77,7 +83,7 @@ pub struct UnboundedSender(pub mpsc::UnboundedSender<Box<dyn Any + Send>>);
 /// ```
 pub fn channel(buffer: usize) -> (Sender, Receiver) {
     let (tx, rx) = mpsc::channel(buffer);
-    (Sender(tx), Receiver(rx))
+    (Sender(PollSender::new(tx)), Receiver(rx))
 }
 
 /// Create an unbounded mpsc channel for transporting dynamically typed values.
@@ -145,50 +151,71 @@ impl backend::Transmitter for Sender {
     type Error = SendError<Box<dyn Any + Send>>;
     type Convention = Val;
 
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        <Self as backend::Transmit<Choice<LENGTH>>>::send(self, choice)
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_send_done(cx)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_ready(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_ready(cx))?;
+        self.0.close_this_sender();
+        Poll::Ready(Ok(()))
     }
 }
 
-impl<T: Send + Any> backend::Transmit<T> for Sender {
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
+impl<T: Any + Send> backend::Transmit<T> for Sender {
+    fn start_send<'a>(
+        mut self: Pin<&mut Self>,
         message: <T as By<'a, Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    ) -> Result<(), Self::Error>
     where
-        'a: 'async_lifetime,
+        T: By<'a, Val>,
     {
-        Box::pin(mpsc::Sender::send(&self.0, Box::new(message)))
+        // This transmute is safe because while Rust doesn't know that `for<'a> <T as By<'a,
+        // Val>>::Type` is `T` itself, *we* know that it is. We don't have a way to ask Rust to
+        // prove it during compilation, though, because we can't add the bound to the method or the
+        // impl.
+        let t: T = unsafe { (&message as *const _ as *const T).read() };
+        std::mem::forget(message); // Prevent double-free when message would drop
+        let boxed: Box<dyn Any + Send> = Box::new(t);
+        self.0.start_send(boxed)
+    }
+}
+
+impl backend::TransmitChoice for Sender {
+    fn start_send_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        choice: Choice<LENGTH>,
+    ) -> Result<(), Self::Error> {
+        <Self as backend::Transmit<Choice<LENGTH>>>::start_send(self, choice)
     }
 }
 
 impl backend::Receiver for Receiver {
     type Error = RecvError;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
-    }
 }
 
 impl<T: Send + Any> backend::Receive<T> for Receiver {
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            match mpsc::Receiver::recv(&mut self.0).await {
-                None => Err(RecvError::Closed),
-                Some(b) => match b.downcast() {
-                    Err(b) => Err(RecvError::DowncastFailed(b)),
-                    Ok(t) => Ok(*t),
-                },
-            }
+    fn poll_recv(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<T, Self::Error>> {
+        self.0.poll_recv(cx).map(|option| match option {
+            None => Err(RecvError::Closed),
+            Some(boxed) => match boxed.downcast() {
+                Err(boxed) => Err(RecvError::DowncastFailed(boxed)),
+                Ok(t) => Ok(*t),
+            },
         })
+    }
+}
+
+impl backend::ReceiveChoice for Receiver {
+    fn poll_recv_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Choice<LENGTH>, Self::Error>> {
+        <Self as backend::Receive<Choice<LENGTH>>>::poll_recv(self, cx)
     }
 }
 
@@ -196,49 +223,68 @@ impl backend::Transmitter for UnboundedSender {
     type Error = SendError<Box<dyn Any + Send>>;
     type Convention = Val;
 
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        <Self as backend::Transmit<Choice<LENGTH>>>::send(self, choice)
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 }
 
 impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
+    fn start_send<'a>(
+        self: Pin<&mut Self>,
         message: <T as By<'a, Val>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    ) -> Result<(), Self::Error>
     where
-        'a: 'async_lifetime,
+        T: By<'a, Val>,
     {
-        Box::pin(async move { mpsc::UnboundedSender::send(&self.0, Box::new(message)) })
+        // This transmute is safe because while Rust doesn't know that `for<'a> <T as By<'a,
+        // Val>>::Type` is `T` itself, *we* know that it is. We don't have a way to ask Rust to
+        // prove it during compilation, though, because we can't add the bound to the method or the
+        // impl.
+        let t: T = unsafe { (&message as *const _ as *const T).read() };
+        std::mem::forget(message); // Prevent double-free when message would drop
+        let boxed: Box<dyn Any + Send> = Box::new(t);
+        self.0.send(boxed)
+    }
+}
+
+impl backend::TransmitChoice for UnboundedSender {
+    fn start_send_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        choice: Choice<LENGTH>,
+    ) -> Result<(), Self::Error> {
+        <Self as backend::Transmit<Choice<LENGTH>>>::start_send(self, choice)
     }
 }
 
 impl backend::Receiver for UnboundedReceiver {
     type Error = RecvError;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
-    }
 }
 
 impl<T: Send + Any> backend::Receive<T> for UnboundedReceiver {
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            match mpsc::UnboundedReceiver::recv(&mut self.0).await {
-                None => Err(RecvError::Closed),
-                Some(b) => match b.downcast() {
-                    Err(b) => Err(RecvError::DowncastFailed(b)),
-                    Ok(t) => Ok(*t),
-                },
-            }
+    fn poll_recv(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<T, Self::Error>> {
+        self.0.poll_recv(cx).map(|option| match option {
+            None => Err(RecvError::Closed),
+            Some(boxed) => match boxed.downcast() {
+                Err(boxed) => Err(RecvError::DowncastFailed(boxed)),
+                Ok(t) => Ok(*t),
+            },
         })
+    }
+}
+
+impl backend::ReceiveChoice for UnboundedReceiver {
+    fn poll_recv_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Choice<LENGTH>, Self::Error>> {
+        <Self as backend::Receive<Choice<LENGTH>>>::poll_recv(self, cx)
     }
 }

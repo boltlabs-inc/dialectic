@@ -127,18 +127,6 @@ pub trait Transmit<T>: Transmitter {
         T: By<'a, Self::Convention>;
 }
 
-impl<Tx: TransmitChoice + Unpin, const LENGTH: usize> Transmit<Choice<LENGTH>> for Tx {
-    fn start_send<'a>(
-        self: Pin<&mut Self>,
-        choice: <Choice<LENGTH> as By<'a, Self::Convention>>::Type,
-    ) -> Result<(), Self::Error>
-    where
-        Choice<LENGTH>: By<'a, Self::Convention>,
-    {
-        self.start_send_choice(<Choice<LENGTH> as By<'a, Self::Convention>>::copy(choice))
-    }
-}
-
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
 /// implement [`Receiver`], which specifies what type of errors it might return. This is a
 /// super-trait of [`Receive`], which is what's actually needed to receive particular values over a
@@ -193,27 +181,20 @@ pub trait Receive<T>: Receiver {
     fn poll_recv(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<T, Self::Error>>;
 }
 
-impl<Rx: ReceiveChoice + Unpin, const LENGTH: usize> Receive<Choice<LENGTH>> for Rx {
-    fn poll_recv(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Choice<LENGTH>, Self::Error>> {
-        self.poll_recv_choice(cx)
-    }
-}
-
 /// This module defines the future types returned from the methods of [`ReceiveExt`],
 /// [`TransmitterExt`], and [`TransmitExt`].
 pub mod futures {
     mod close;
     mod flush;
     mod receive;
+    mod receive_choice;
     mod send;
     mod send_choice;
 
     pub use close::Close;
     pub use flush::Flush;
     pub use receive::Receive;
+    pub(crate) use receive_choice::ReceiveChoice;
     pub use send::Send;
     pub(crate) use send_choice::SendChoice;
 }

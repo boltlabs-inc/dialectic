@@ -454,7 +454,10 @@ where
     pub async fn offer(mut self) -> Result<Branches<Choices, Tx, Rx>, Error<Tx, Rx>> {
         self.flush().await?;
         let (buffering_mode, tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let choice: Choice<LENGTH> = rx.as_mut().unwrap().recv().await.map_err(Error::Recv)?;
+        let choice: Choice<LENGTH> =
+            crate::backend::futures::ReceiveChoice::new(rx.as_mut().unwrap())
+                .await
+                .map_err(Error::Recv)?;
         let variant = choice.into();
         Ok(Branches {
             buffering_mode,

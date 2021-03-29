@@ -36,7 +36,7 @@ where
     let (greeting, chan) = chan.recv().await?;
     output.write_all(greeting.as_bytes()).await?;
     output.write_all(b"\n").await?;
-    chan.close();
+    chan.close().await?;
     Ok(())
 }
 
@@ -58,6 +58,6 @@ where
         name.chars().count()
     );
     let chan = chan.send(&greeting).await?;
-    chan.close();
+    chan.close().await?;
     Ok(())
 }

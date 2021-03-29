@@ -83,7 +83,7 @@ where
                 let string = client_prompt(input, output, size).await?;
                 if string.is_empty() {
                     // Break this nested loop (about to go to pop/quit)
-                    break chan.choose::<0>().await?.close();
+                    break chan.choose::<0>().await?.close().await?;
                 } else {
                     // Push the string to the stack
                     let chan = chan.choose::<1>().await?.send(&string).await?;
@@ -126,7 +126,7 @@ where
         loop {
             chan = offer!(in chan {
                 // Client doesn't want to push a value
-                0 => break chan.close(),
+                0 => break chan.close().await?,
                 // Client wants to push a value
                 1 => {
                     let (string, chan) = chan.recv().await?;        // Receive pushed value

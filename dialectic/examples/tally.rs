@@ -66,7 +66,8 @@ where
             break chan.choose::<1>().await?;
         }
     }
-    .close();
+    .close()
+    .await?;
     Ok(())
 }
 
@@ -127,7 +128,7 @@ where
             }
         }
     };
-    chan.close();
+    chan.close().await?;
     Ok(done)
 }
 
@@ -150,7 +151,7 @@ where
                 chan.call(|chan| server_tally(&op, chan)).await?.1.unwrap()
             },
             // Client wants to quit
-            1 => break chan.close(),
+            1 => break chan.close().await?,
         })?;
     }
     Ok(())
@@ -181,7 +182,7 @@ where
             },
             // Client wants to finish this tally
             1 => {
-                chan.send(&tally).await?.close();
+                chan.send(&tally).await?.close().await?;
                 break Ok(());
             }
         })?;
