@@ -6,8 +6,8 @@ use dialectic::prelude::*;
 use dialectic_null as null;
 use dialectic_tokio_mpsc as mpsc;
 use futures::Future;
-use std::{convert::TryInto, fmt::Debug, marker, sync::Arc, time::Instant};
-use tokio::runtime::Runtime;
+use std::{any::Any, convert::TryInto, fmt::Debug, marker, sync::Arc, time::Instant};
+use tokio::{runtime::Runtime, sync::mpsc as tokio_mpsc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Primitive {
@@ -20,44 +20,51 @@ enum Primitive {
 }
 
 #[Transmitter(Tx move for ())]
+#[Receiver(Rx)]
 async fn send<Tx, Rx>(
     chan: Chan<Session! { loop { send () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { send () } }, Tx, Rx>
 where
-    Rx: Send,
     Tx::Error: Debug,
+    Rx::Error: Debug,
 {
     chan.send(()).await.unwrap()
 }
 
+#[Transmitter(Tx)]
 #[Receiver(Rx for ())]
 async fn recv<Tx, Rx>(
     chan: Chan<Session! { loop { recv () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { recv () } }, Tx, Rx>
 where
     Tx: Send,
+    Tx::Error: Debug,
     Rx::Error: Debug,
 {
     chan.recv().await.unwrap().1
 }
 
 #[Transmitter(Tx)]
+#[Receiver(Rx)]
 async fn choose<Tx, Rx>(
     chan: Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>
 where
     Rx: Send,
+    Rx::Error: Debug,
     Tx::Error: Debug,
 {
     chan.choose::<0>().await.unwrap()
 }
 
+#[Transmitter(Tx)]
 #[Receiver(Rx)]
 async fn offer<Tx, Rx>(
     chan: Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>
 where
     Tx: Send,
+    Tx::Error: Debug,
     Rx::Error: Debug,
 {
     offer!(in chan {
@@ -66,6 +73,8 @@ where
     .unwrap()
 }
 
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 async fn call<Tx, Rx>(
     chan: Chan<Session! { loop { call {} } }, Tx, Rx>,
 ) -> Chan<Session! { loop { call {} } }, Tx, Rx>
@@ -80,20 +89,25 @@ where
         .unwrap()
 }
 
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 async fn split<Tx, Rx>(
     chan: Chan<Session! { loop { split { -> {}, <- {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { split { -> {} <- {} } } }, Tx, Rx>
 where
-    Tx: Send,
     Rx: Send,
+    Rx::Error: Debug,
+    Tx::Error: Debug,
 {
-    chan.split(|_, _| async { Ok::<_, ()>(()) })
+    chan.split(|_, _| async { Ok::<_, dialectic::Error<Tx, Rx>>(()) })
         .await
         .unwrap()
         .1
         .unwrap()
 }
 
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 fn bench_chan_loop<S, Tx, Rx, F, Fut, N, H, A>(
     b: &mut Bencher,
     rt: Arc<A>,
@@ -105,8 +119,6 @@ fn bench_chan_loop<S, Tx, Rx, F, Fut, N, H, A>(
     Fut: Future<Output = Chan<S, Tx, Rx>>,
     N: Fn(Primitive, u64) -> (Tx, Rx, H),
     S: Session,
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
     A: AsyncExecutor,
 {
     b.iter_custom(|iters| {
@@ -124,6 +136,8 @@ fn bench_chan_loop<S, Tx, Rx, F, Fut, N, H, A>(
     });
 }
 
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 fn bench_chan_loop_group<S, Tx, Rx, Fut, H, A>(
     g: &mut BenchmarkGroup<WallTime>,
     rt: Arc<A>,
@@ -134,8 +148,6 @@ fn bench_chan_loop_group<S, Tx, Rx, Fut, H, A>(
 ) where
     Fut: Future<Output = Chan<S, Tx, Rx>>,
     S: Session,
-    Tx: marker::Send + 'static,
-    Rx: marker::Send + 'static,
     A: AsyncExecutor,
 {
     g.bench_function(name, move |b| {
@@ -186,24 +198,28 @@ fn bench_tokio_mpsc(c: &mut Criterion) {
         Arc::new(Runtime::new().unwrap()),
         "mpsc",
         |primitive, iters| {
-            let (tx0, rx0) = mpsc::unbounded_channel();
-            let (tx1, rx1) = mpsc::unbounded_channel();
+            let (tx0, rx0) = tokio_mpsc::unbounded_channel::<Box<dyn marker::Send + Any>>();
+            let (tx1, rx1) = tokio_mpsc::unbounded_channel::<Box<dyn marker::Send + Any>>();
             // Pre-allocate responses for those operations which need responses
             match primitive {
                 Send | Choose | Call | Split => {}
                 Recv => {
                     for _ in 0..iters {
-                        tx1.0.send(Box::new(())).unwrap();
+                        tx1.send(Box::new(())).unwrap();
                     }
                 }
                 Offer => {
                     for _ in 0..iters {
                         let zero_choice: Choice<1> = 0u8.try_into().unwrap();
-                        tx1.0.send(Box::new(zero_choice)).unwrap();
+                        tx1.send(Box::new(zero_choice)).unwrap();
                     }
                 }
             };
-            (tx0, rx1, (tx1, rx0))
+            (
+                mpsc::UnboundedSender::new(tx0),
+                mpsc::UnboundedReceiver::new(rx1),
+                (tx1, rx0),
+            )
         },
     )
 }

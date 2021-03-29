@@ -58,18 +58,46 @@ pub type UnboundedChan<P> = dialectic::Chan<P, UnboundedSender, UnboundedReceive
 #[derive(Debug)]
 pub struct Receiver(mpsc::Receiver<Box<dyn Any + Send>>);
 
+impl Receiver {
+    /// Wrap a [`tokio::sync::mpsc::Receiver`] to create a new [`Receiver`].
+    pub fn new(receiver: mpsc::Receiver<Box<dyn Any + Send>>) -> Self {
+        Self(receiver)
+    }
+}
+
 /// A bounded sender for dynamically typed values. See [`tokio::sync::mpsc::Sender`].
 #[derive(Debug, Clone)]
 pub struct Sender(PollSender<Box<dyn Any + Send>>);
+
+impl Sender {
+    /// Wrap a [`tokio::sync::mpsc::Sender`] to create a new [`Sender`].
+    pub fn new(sender: mpsc::Sender<Box<dyn Any + Send>>) -> Self {
+        Self(PollSender::new(sender))
+    }
+}
 
 /// An unbounded receiver for dynamically typed values. See
 /// [`tokio::sync::mpsc::UnboundedReceiver`].
 #[derive(Debug)]
 pub struct UnboundedReceiver(mpsc::UnboundedReceiver<Box<dyn Any + Send>>);
 
+impl UnboundedReceiver {
+    /// Wrap a [`tokio::sync::mpsc::UnboundedReceiver`] to create a new [`UnboundedReceiver`].
+    pub fn new(receiver: mpsc::UnboundedReceiver<Box<dyn Any + Send>>) -> Self {
+        Self(receiver)
+    }
+}
+
 /// An unbounded sender for dynamically typed values. See [`tokio::sync::mpsc::UnboundedSender`].
 #[derive(Debug, Clone)]
 pub struct UnboundedSender(mpsc::UnboundedSender<Box<dyn Any + Send>>);
+
+impl UnboundedSender {
+    /// Wrap a [`tokio::sync::mpsc::UnboundedSender`] to create a new [`UnboundedSender`].
+    pub fn new(sender: mpsc::UnboundedSender<Box<dyn Any + Send>>) -> Self {
+        Self(sender)
+    }
+}
 
 /// Create a bounded mpsc channel for transporting dynamically typed values.
 ///
@@ -83,7 +111,7 @@ pub struct UnboundedSender(mpsc::UnboundedSender<Box<dyn Any + Send>>);
 /// ```
 pub fn channel(buffer: usize) -> (Sender, Receiver) {
     let (tx, rx) = mpsc::channel(buffer);
-    (Sender(PollSender::new(tx)), Receiver(rx))
+    (Sender::new(tx), Receiver::new(rx))
 }
 
 /// Create an unbounded mpsc channel for transporting dynamically typed values.
