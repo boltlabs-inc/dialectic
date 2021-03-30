@@ -26,7 +26,7 @@ necessary tests are basically compile-pass. There are exceptions to this, which 
 backend (the `micro` benchmark) and the [tokio MPSC
 backend](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-mpsc), which is the
 backend used for doc-tests/examples that actually do something. The [tokio serde/bincode
-backend])(https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-serde-bincode) is also
+backend](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-serde-bincode) is also
 used for the examples in the `dialectic/examples` directory.
 
 For the `dialectic-macro` crate, proc macros are tested both inside `dialectic-macro` *and* for the
