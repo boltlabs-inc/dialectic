@@ -29,7 +29,7 @@ where
     Rx::Error: Error + Send,
 {
     // Do something with the channel...
-    chan.close();
+    chan.close().await?;
     Ok(())
 }
 
@@ -47,6 +47,6 @@ where
     Rx::Error: Error + Send,
 {
     // Do something with the channel...
-    chan.close();
+    chan.close().await?;
     Ok(())
 }

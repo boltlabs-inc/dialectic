@@ -1,14 +1,77 @@
+use std::{
+    convert::Infallible,
+    fmt::{self, Debug, Display, Formatter},
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use crate::backend::Transmitter;
 #[allow(unused_imports)] // To link with documentation
 use crate::prelude::*;
+
+/// An error that occurs on a [`Chan`]: either an error while sending, or an error while receiving.
+#[derive(Derivative, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derivative(Debug(bound = "Tx::Error: Debug, Rx::Error: Debug"))]
+pub enum Error<Tx: Transmitter, Rx: Receiver> {
+    /// An error occurred while attempting to send.
+    Send(Tx::Error),
+    /// An error occurred while attempting to receive.
+    Recv(Rx::Error),
+}
+
+impl<Tx: Transmitter, Rx: Receiver> Display for Error<Tx, Rx>
+where
+    Tx::Error: Display,
+    Rx::Error: Display,
+{
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Error::Send(e) => write!(f, "error while sending: {}", e),
+            Error::Recv(e) => write!(f, "error while receiving: {}", e),
+        }
+    }
+}
+
+impl<Tx: Transmitter, Rx: Receiver> std::error::Error for Error<Tx, Rx>
+where
+    Tx::Error: Debug + Display,
+    Rx::Error: Debug + Display,
+{
+}
 
 /// A placeholder for a missing [`Transmit`] or [`Receive`] end of a connection.
 ///
 /// When using [`split`](Chan::split), the resultant two channels can only send or only receive,
 /// respectively. This is reflected at the type level by the presence of [`Unavailable`] on the type
 /// of the connection which *is not* present for each part of the split.
+///
+/// [`Unavailable`] *does* implement [`Transmitter`] and [`Receiver`] (which is necessary so that it
+/// can be a backend type in a [`Chan`]), but it *does not* implement [`ReceiveChoice`],
+/// [`TransmitChoice`], [`Receive`], or [`Transmit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Unavailable {
     _priv: (),
+}
+
+impl Transmitter for Unavailable {
+    type Error = Infallible;
+    type Convention = Val;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl Receiver for Unavailable {
+    type Error = Infallible;
 }
 
 /// The error returned when a closure which is expected to complete a channel's session fails to
@@ -70,8 +133,8 @@ pub enum IncompleteHalf<T> {
 
 impl<T> std::error::Error for IncompleteHalf<T> {}
 
-impl<T> std::fmt::Display for IncompleteHalf<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<T> Display for IncompleteHalf<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "incomplete session or sub-session: channel half ")?;
         write!(
             f,
@@ -103,8 +166,8 @@ impl<Tx, Rx> SessionIncomplete<Tx, Rx> {
 
 impl<Tx, Rx> std::error::Error for SessionIncomplete<Tx, Rx> {}
 
-impl<Tx, Rx> std::fmt::Display for SessionIncomplete<Tx, Rx> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<Tx, Rx> Display for SessionIncomplete<Tx, Rx> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use IncompleteHalf::*;
         write!(f, "incomplete session or sub-session: channel")?;
         let reason = match self {

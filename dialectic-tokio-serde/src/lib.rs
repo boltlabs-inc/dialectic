@@ -28,16 +28,18 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use std::{future::Future, pin::Pin};
-
 use dialectic::{
-    backend::{self, By, Choice, Receive, Ref, Transmit},
+    backend::{self, By, Choice, Receive, ReceiveChoice, Ref, Transmit, TransmitChoice},
     Chan,
 };
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
+use futures::sink::Sink;
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
@@ -154,62 +156,79 @@ impl<F: Serializer, E: Encoder<F::Output>, W: AsyncWrite> Sender<F, E, W> {
     }
 }
 
+impl<F, E, W: Unpin> Unpin for Sender<F, E, W> {}
+
 impl<F, E, W> backend::Transmitter for Sender<F, E, W>
 where
-    F: Serializer + Unpin + Send,
+    F: Serializer + Send + 'static,
+    E: Encoder<F::Output> + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
     F::Output: Send,
     F::Error: Send,
-    E: Encoder<F::Output> + Send,
-    W: AsyncWrite + Unpin + Send,
 {
     type Error = SendError<F, E>;
     type Convention = Ref;
 
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            let serialized = self
-                .serializer
-                .serialize(&choice)
-                .map_err(SendError::Serialize)?;
-            self.framed_write
-                .send(serialized)
-                .await
-                .map_err(SendError::Encode)?;
-            Ok(())
-        })
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.framed_write)
+            .poll_ready(cx)
+            .map(|result| result.map_err(SendError::Encode))
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.framed_write)
+            .poll_flush(cx)
+            .map(|result| result.map_err(SendError::Encode))
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.framed_write)
+            .poll_close(cx)
+            .map(|result| result.map_err(SendError::Encode))
     }
 }
 
 impl<T, F, E, W> Transmit<T> for Sender<F, E, W>
 where
-    T: Serialize + Sync,
-    F: Serializer + Unpin + Send,
+    F: Serializer + Send + 'static,
+    E: Encoder<F::Output> + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+    T: Serialize,
     F::Output: Send,
     F::Error: Send,
-    E: Encoder<F::Output> + Send,
-    W: AsyncWrite + Unpin + Send,
 {
-    fn send<'a, 'async_lifetime>(
-        &'async_lifetime mut self,
+    fn start_send<'a>(
+        mut self: Pin<&mut Self>,
         message: <T as By<'a, Ref>>::Type,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    ) -> Result<(), Self::Error>
     where
-        'a: 'async_lifetime,
+        T: By<'a, Ref>,
     {
-        Box::pin(async move {
-            let serialized = self
-                .serializer
-                .serialize(message)
-                .map_err(SendError::Serialize)?;
-            self.framed_write
-                .send(serialized)
-                .await
-                .map_err(SendError::Encode)?;
-            Ok(())
-        })
+        // This transmute is safe because while Rust doesn't know that `for<'a> <T as By<'a,
+        // Ref>>::Type` is `&'a T`, *we* know that it is. We don't have a way to ask Rust to prove
+        // it during compilation, though, because we can't add the bound to the method or the impl.
+        let t: &T = unsafe { (&message as *const _ as *const &T).read() };
+        std::mem::forget(message); // Prevent double-free when message would drop
+        let serialized = self.serializer.serialize(t).map_err(SendError::Serialize)?;
+        Pin::new(&mut self.framed_write)
+            .start_send(serialized)
+            .map_err(SendError::Encode)
+    }
+}
+
+impl<F, E, W> TransmitChoice for Sender<F, E, W>
+where
+    F: Serializer + Send + 'static,
+    E: Encoder<F::Output> + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+    F::Output: Send,
+    F::Error: Send,
+{
+    fn start_send_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        choice: Choice<LENGTH>,
+    ) -> Result<(), Self::Error> {
+        <Self as backend::Transmit<Choice<LENGTH>>>::start_send(self, &choice)
     }
 }
 
@@ -240,42 +259,48 @@ impl<F: Deserializer<D::Item>, D: Decoder, R: AsyncRead> Receiver<F, D, R> {
     }
 }
 
+impl<F, D, R: Unpin> Unpin for Receiver<F, D, R> {}
+
 impl<F, D, R> backend::Receiver for Receiver<F, D, R>
 where
-    F: Deserializer<D::Item> + Unpin + Send,
-    D: Decoder + Send,
-    R: AsyncRead + Unpin + Send,
+    F: Deserializer<D::Item> + Send + 'static,
+    D: Decoder + Send + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
 {
     type Error = RecvError<F, D>;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        <Self as backend::Receive<Choice<LENGTH>>>::recv(self)
-    }
 }
 
 impl<T, F, D, R> Receive<T> for Receiver<F, D, R>
 where
     T: for<'a> Deserialize<'a>,
-    F: Deserializer<D::Item> + Unpin + Send,
-    D: Decoder + Send,
-    R: AsyncRead + Unpin + Send,
+    F: Deserializer<D::Item> + Send + 'static,
+    D: Decoder + Send + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
 {
-    fn recv<'async_lifetime>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            let unframed = self
-                .framed_read
-                .next()
-                .await
-                .ok_or(RecvError::Closed)?
-                .map_err(RecvError::Decode)?;
-            self.deserializer
-                .deserialize(&unframed)
-                .map_err(RecvError::Deserialize)
-        })
+    fn poll_recv(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<T, Self::Error>> {
+        Pin::new(&mut self.framed_read)
+            .poll_next(cx)
+            .map(|option| match option {
+                None => Err(RecvError::Closed),
+                Some(Err(e)) => Err(RecvError::Decode(e)),
+                Some(Ok(serialized)) => self
+                    .deserializer
+                    .deserialize(&serialized)
+                    .map_err(RecvError::Deserialize),
+            })
+    }
+}
+
+impl<F, D, R> ReceiveChoice for Receiver<F, D, R>
+where
+    F: Deserializer<D::Item> + Send + 'static,
+    D: Decoder + Send + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    fn poll_recv_choice<const LENGTH: usize>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Choice<LENGTH>, Self::Error>> {
+        self.poll_recv(cx)
     }
 }
