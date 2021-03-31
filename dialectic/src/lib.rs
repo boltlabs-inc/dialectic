@@ -145,7 +145,7 @@ mod chan;
 mod error;
 mod session;
 
-pub use chan::{Branches, Chan};
+pub use chan::{Branches, Chan, Over};
 pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;

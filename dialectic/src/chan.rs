@@ -510,10 +510,10 @@ where
         Fut: Future<Output = Result<T, E>>,
     {
         let (tx, rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let (result, maybe_chan) = P::over(tx.unwrap(), rx.unwrap(), first).await?;
+        let (result, chan_result) = P::over(tx.unwrap(), rx.unwrap(), first).await;
         Ok((
-            result,
-            maybe_chan.map(|(tx, rx)| Chan {
+            result?,
+            chan_result.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
                 drop_tx,
@@ -624,7 +624,7 @@ where
                 })
                 .await
             })
-            .await?;
+            .await;
         // Unpack and repack the resultant tx and rx or SessionIncomplete to eliminate
         // Available/Unavailable and maximize possible returned things (it's fine to drop the
         // Unavailable end of something if for some reason you split twice)
@@ -665,7 +665,7 @@ where
             }),
         };
         Ok((
-            result,
+            result?,
             maybe_tx_rx.map(|(tx, rx)| Chan {
                 tx: Some(tx),
                 rx: Some(rx),
@@ -745,13 +745,13 @@ where
 
 /// The implementation of `Session::over`. This has to be defined here because it uses the internals
 /// of `Chan`.
-pub(crate) fn over<P, Tx, Rx, T, E, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, E, Fut>
+pub(crate) fn over<P, Tx, Rx, T, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Fut>
 where
     P: Session,
     Tx: std::marker::Send + 'static,
     Rx: std::marker::Send + 'static,
     F: FnOnce(Chan<P, Tx, Rx>) -> Fut,
-    Fut: Future<Output = Result<T, E>>,
+    Fut: Future<Output = T>,
 {
     let drop_tx = Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed)));
     let drop_rx = Arc::new(Mutex::new(Err(IncompleteHalf::Unclosed)));
@@ -771,11 +771,11 @@ where
     }
 }
 
-impl<Tx, Rx, T, E, Fut> Future for Over<Tx, Rx, T, E, Fut>
+impl<Tx, Rx, T, Fut> Future for Over<Tx, Rx, T, Fut>
 where
-    Fut: Future<Output = Result<T, E>>,
+    Fut: Future<Output = T>,
 {
-    type Output = Result<(T, Result<(Tx, Rx), SessionIncomplete<Tx, Rx>>), E>;
+    type Output = (T, Result<(Tx, Rx), SessionIncomplete<Tx, Rx>>);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         use IncompleteHalf::*;
@@ -794,7 +794,7 @@ where
                 (Ok(tx), Err(rx)) => Err(RxHalf { tx, rx }),
                 (Err(tx), Err(rx)) => Err(BothHalves { tx, rx }),
             };
-            result.map(|result| (result, chan))
+            (result, chan)
         })
     }
 }
@@ -802,9 +802,9 @@ where
 /// The future returned by [`Session::over`] (see its documentation for details).
 #[pin_project]
 #[derive(Debug)]
-pub struct Over<Tx, Rx, T, E, Fut>
+pub struct Over<Tx, Rx, T, Fut>
 where
-    Fut: Future<Output = Result<T, E>>,
+    Fut: Future<Output = T>,
 {
     /// The destination for the reclaimed transmit half after drop.
     reclaimed_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
