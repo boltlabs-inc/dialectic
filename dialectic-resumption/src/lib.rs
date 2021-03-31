@@ -3,44 +3,26 @@ use std::{future::Future, pin::Pin};
 use dialectic::prelude::*;
 use dialectic::SessionIncomplete;
 
-pub type Step<Tx, Rx, St, T, E> =
-    Pin<Box<dyn Future<Output = Result<Next<Tx, Rx, St, T, E>, E>> + Send>>;
+pub type Step<Tx, Rx, State, T, E> =
+    Pin<Box<dyn Future<Output = Result<Next<Tx, Rx, State, T, E>, E>> + Send>>;
 
-pub struct Next<Tx, Rx, St, T, E> {
-    inner: NextInner<Tx, Rx, St, T, E>,
+pub struct Next<Tx, Rx, State, T, E> {
+    inner: NextInner<Tx, Rx, State, T, E>,
 }
 
-enum NextInner<Tx, Rx, St, T, E> {
+enum NextInner<Tx, Rx, State, T, E> {
     Done(T),
-    Then(Suspended<Tx, Rx, St, T, E>),
+    Then {
+        state: State,
+        next: Step<Tx, Rx, State, T, E>,
+    },
 }
 
-struct Suspended<Tx, Rx, St, T, E> {
-    state: St,
-    next: Step<Tx, Rx, St, T, E>,
-}
-
-impl<Tx, Rx, St, T, E> Suspended<Tx, Rx, St, T, E>
+impl<Tx, Rx, State, T, E> Next<Tx, Rx, State, T, E>
 where
     Tx: Send + 'static,
     Rx: Send + 'static,
-{
-    pub fn new<K>(resumption: K, chan: Chan<K::Session, Tx, Rx>) -> Self
-    where
-        K: Resumption<St, T, E>,
-    {
-        Suspended {
-            state: resumption.clone().into(),
-            next: resumption.resume(chan),
-        }
-    }
-}
-
-impl<Tx, Rx, St, T, E> Next<Tx, Rx, St, T, E>
-where
-    Tx: Send + 'static,
-    Rx: Send + 'static,
-    St: Send,
+    State: Send,
     T: 'static,
     E: 'static,
 {
@@ -50,37 +32,52 @@ where
         }
     }
 
-    pub fn then<K>(resumption: K, chan: Chan<K::Session, Tx, Rx>) -> Self
+    pub fn then<K>(
+        resumption: K,
+        chan: Chan<K::Session, Tx, Rx>,
+    ) -> Next<Tx, Rx, State, K::Output, K::Error>
     where
-        K: Resumption<St, T, E>,
+        K: Resumption<State>,
     {
         Next {
-            inner: NextInner::Then(Suspended::new(resumption, chan)),
+            inner: NextInner::Then {
+                state: resumption.clone().into(),
+                next: resumption.resume(chan),
+            },
         }
     }
 }
 
-pub trait Resumption<St, T, E>: Clone + Into<St> {
+pub trait Resumption<State>: Clone + Into<State> {
     type Session: Session;
+    type Output;
+    type Error;
 
-    fn resume<Tx, Rx>(self, chan: Chan<Self::Session, Tx, Rx>) -> Step<Tx, Rx, St, T, E>
+    fn resume<Tx, Rx>(
+        self,
+        chan: Chan<Self::Session, Tx, Rx>,
+    ) -> Step<Tx, Rx, State, Self::Output, Self::Error>
     where
         Tx: Send + 'static,
         Rx: Send + 'static;
 }
 
-pub struct Results<Tx, Rx, St, T, E> {
+pub struct Results<Tx, Rx, State, T, E> {
     pub result: Result<T, E>,
     pub channels: Result<(Tx, Rx), SessionIncomplete<Tx, Rx>>,
-    pub last_state: St,
+    pub last_state: State,
 }
 
-pub async fn run<K, Tx, Rx, St, T, E>(resumption: K, tx: Tx, rx: Rx) -> Results<Tx, Rx, St, T, E>
+pub async fn run<K, Tx, Rx, State>(
+    resumption: K,
+    tx: Tx,
+    rx: Rx,
+) -> Results<Tx, Rx, State, K::Output, K::Error>
 where
-    K: Resumption<St, T, E>,
+    K: Resumption<State>,
     Tx: Send + 'static,
     Rx: Send + 'static,
-    St: Send,
+    State: Send,
 {
     let ((last_state, result), channels) =
         <K::Session as Session>::over(tx, rx, |chan| async move {
@@ -90,7 +87,7 @@ where
                 match step.await {
                     Ok(Next { inner }) => match inner {
                         NextInner::Done(t) => break (snapshot, Ok(t)),
-                        NextInner::Then(Suspended { next, state }) => {
+                        NextInner::Then { next, state } => {
                             snapshot = state;
                             step = next;
                         }
