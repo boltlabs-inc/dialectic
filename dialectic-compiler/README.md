@@ -1,6 +1,5 @@
 # Dialectic session type macro compiler
 
-
 Contains functionality for compiling the language of Dialectic's `Session!` macro into an actual Rust type. This crate is considered an internal implementation detail and none of its API is subject to semantic versioning rules. The compilation process is done via transforming the syntax gradually across three representations:
 
 - [`syntax::Syntax`] - the "surface-level" abstract syntax tree. This is what gets parsed from the tokenstream provided by the proc macro interface.

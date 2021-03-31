@@ -26,7 +26,7 @@ use crate::{prelude::*, types::*, unary::*};
 /// The [`Session`] trait is implemented for all valid session types. To create a new [`Chan`] for
 /// some session type, use one of the provided static methods. Here, we create two `Chan`s with the
 /// session type `send String` and its dual `recv String`, wrapping an underlying bidirectional
-/// transport built from a pair of [`tokio::sync::mpsc::channel`]s:
+/// transport built from a pair of [`tokio::sync::mpsc::channel`][mpsc]s:
 ///
 /// ```
 /// use dialectic::prelude::*;
@@ -61,6 +61,7 @@ use crate::{prelude::*, types::*, unary::*};
 /// ```
 ///
 /// [`Session`]: trait@crate::Session
+/// [mpsc]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[repr(C)]
