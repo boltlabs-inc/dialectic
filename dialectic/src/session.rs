@@ -59,6 +59,8 @@ use std::future::Future;
 ///    # use dialectic_tokio_mpsc as mpsc;
 ///    let (c1, c2) = <Session! { loop {} }>::channel(mpsc::unbounded_channel);
 ///    ```
+///
+/// [`Loop`]: crate::types::Loop
 pub trait Session
 where
     Self: Scoped
@@ -79,6 +81,16 @@ where
     /// iteration.
     ///
     /// This is always the action type defined by [`Actionable`] for this session type.
+    ///
+    /// [`Send`]: crate::types::Send
+    /// [`Recv`]: crate::types::Recv
+    /// [`Offer`]: crate::types::Offer
+    /// [`Choose`]: crate::types::Choose
+    /// [`Split`]: crate::types::Split
+    /// [`Call`]: crate::types::Call
+    /// [`Done`]: crate::types::Done
+    /// [`Loop`]: crate::types::Loop
+    /// [`Continue`]: crate::types::Continue
     type Action;
 
     /// Given a closure which generates a uni-directional underlying transport channel, create a
@@ -183,9 +195,9 @@ where
     ///
     /// The closure must *finish* the session `P` on the channel given to it and *drop* the finished
     /// channel before the future returns. If the channel is dropped before completing `P` or is not
-    /// dropped after completing `P`, a [`SessionIncomplete`] error will be returned instead of a
-    /// channel for `Q`. The best way to ensure this error does not occur is to call
-    /// [`close`](Chan::close) on the channel before returning from the future, because
+    /// dropped after completing `P`, a [`SessionIncomplete`](crate::SessionIncomplete) error will
+    /// be returned instead of a channel for `Q`. The best way to ensure this error does not occur
+    /// is to call [`close`](Chan::close) on the channel before returning from the future, because
     /// this statically checks that the session is complete and drops the channel.
     ///
     /// # Examples
@@ -242,7 +254,8 @@ where
     /// use dialectic::SessionIncomplete::BothHalves;
     /// use dialectic::IncompleteHalf::Unclosed;
     ///
-    /// // We'll put the `Chan` here so it outlives the closure. **Don't do this!**
+    /// // 🚨 DON'T DO THIS! 🚨
+    /// // We'll put the `Chan` here so it outlives the closure
     /// let hold_on_to_chan = Arc::new(Mutex::new(None));
     /// let hold = hold_on_to_chan.clone();
     ///
@@ -254,7 +267,8 @@ where
     ///
     /// assert!(matches!(ends, Err(BothHalves { tx: Unclosed, rx: Unclosed })));
     ///
-    /// // Make sure the `Chan` outlives the closure. **Don't do this!**
+    /// // 🚨 DON'T DO THIS! 🚨
+    /// // Make sure the `Chan` outlives the closure by holding onto it until here
     /// drop(hold_on_to_chan);
     /// # Ok(())
     /// # }
