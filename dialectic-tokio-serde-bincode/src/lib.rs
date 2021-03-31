@@ -1,6 +1,8 @@
 //! This crate provides an implementation of the [`bincode`] serialization format compatible with
 //! the [`dialectic-tokio-serde`] backend for the [`dialectic`] crate. To use it, you will also need
 //! to import the [`dialectic-tokio-serde`] crate.
+//!
+//! [`dialectic`]: https://docs.rs/dialectic
 #![warn(missing_docs)]
 #![warn(missing_copy_implementations, missing_debug_implementations)]
 #![warn(unused_qualifications, unused_results)]

@@ -1,8 +1,14 @@
 //! The structs in this module enumerate the shapes of all expressible sessions.
 //!
+//! 💡 Generally speaking, users of Dialectic (that's you!) don't need to write these types
+//! directly; it's more readable to instead use the [`Session!`](macro@crate::Session) macro to
+//! specify a session type.
+//!
 //! The traits in this module are used to implement the session type system rules, and generally do
 //! not need to be referred to directly from code that uses this library. All of them are sealed, so
-//! that they can only ever apply to the session types defined in this crate.
+//! that they can only ever apply to the session types defined in this crate. If you want to state
+//! the bound that a type is a session type, use the [`Session`](trait@crate::Session) trait rather
+//! than any of these bounds individually.
 
 use crate::unary::{LessThan, Unary, S, Z};
 
