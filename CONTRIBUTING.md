@@ -1,6 +1,8 @@
 # Contributing to Dialectic
 
-Glad to see you reading this! We really appreciate the help.
+Glad to see you reading this! We really appreciate the help. For simple bug fixes, just submit a PR
+with the fix and we can discuss the fix directly in the PR. If the fix is more complex, start with an
+issue.
 
 ## Getting started
 
@@ -26,7 +28,7 @@ necessary tests are basically compile-pass. There are exceptions to this, which 
 backend (the `micro` benchmark) and the [tokio MPSC
 backend](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-mpsc), which is the
 backend used for doc-tests/examples that actually do something. The [tokio serde/bincode
-backend])(https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-serde-bincode) is also
+backend](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic-tokio-serde-bincode) is also
 used for the examples in the `dialectic/examples` directory.
 
 For the `dialectic-macro` crate, proc macros are tested both inside `dialectic-macro` *and* for the
@@ -60,4 +62,12 @@ Note that warnings are denied during our CI process, so if you are missing docum
 your PR *will* fail CI. We also use `clippy` in our CI and disallow warnings there as well.
 
 Thank you again for contributing, we really appreciate it! If you have further questions, please
-feel free to contact Kenny (@kwf) (kwf@boltlabs.io) or Shea (@sdleffler) (shea@errno.com).
+feel free to contact the maintainers: Kenny ([@kwf](https://github.com/kwf) on GitHub / [kwf@boltlabs.io]) or Shea
+([@sdleffler](https://github.com/sdleffler) on GitHub / [shea@errno.com]).
+
+## Code of Conduct
+
+Please be kind, courteous, and respectful. This project, although not formally affiliated with the
+Rust project, supports the [Rust Code of Conduct](https://www.rust-lang.org/policies/code-of-conduct).
+Please report any violations of this code of conduct to
+[conduct@boltlabs.io](mailto:conduct@boltlabs.io).
