@@ -32,49 +32,78 @@ where
         }
     }
 
-    pub fn then<K>(
-        resumption: K,
-        chan: Chan<K::Session, Tx, Rx>,
-    ) -> Next<Tx, Rx, State, K::Output, K::Error>
+    pub fn then<K>(resumption: K, chan: Chan<K::Session, Tx, Rx>) -> Next<Tx, Rx, State, T, E>
     where
-        K: Resumption<State>,
+        K: Resumption<Tx, Rx, Output = T, Error = E> + Into<State>,
     {
         Next {
             inner: NextInner::Then {
                 state: resumption.clone().into(),
-                next: resumption.resume(chan),
+                next: resumption.step(chan),
             },
         }
     }
 }
 
-pub trait Resumption<State>: Clone + Into<State> {
+pub trait Resumption<Tx, Rx>: Clone
+where
+    Tx: Send + 'static,
+    Rx: Send + 'static,
+{
     type Session: Session;
     type Output;
     type Error;
 
-    fn resume<Tx, Rx>(
+    fn step<State: Send>(
         self,
         chan: Chan<Self::Session, Tx, Rx>,
     ) -> Step<Tx, Rx, State, Self::Output, Self::Error>
     where
-        Tx: Send + 'static,
-        Rx: Send + 'static;
+        Self: Into<State>;
 }
 
+#[derive(Clone)]
+struct Loop;
+
+#[Transmitter(Tx move for ())]
+#[Receiver(Rx)]
+impl<Tx, Rx> Resumption<Tx, Rx> for Loop
+where
+    Tx::Error: std::error::Error,
+    Rx::Error: std::error::Error,
+{
+    type Session = Session! { loop { send () } };
+    type Output = ();
+    type Error = Box<dyn std::error::Error>;
+
+    fn step<State: Send>(
+        self,
+        chan: Chan<Self::Session, Tx, Rx>,
+    ) -> Step<Tx, Rx, State, Self::Output, Self::Error>
+    where
+        Self: Into<State>,
+    {
+        Box::pin(async move {
+            let chan = chan.send(()).await?;
+            Ok(Next::then(Loop, chan))
+        })
+    }
+}
+
+#[derive(Debug)]
 pub struct Results<Tx, Rx, State, T, E> {
     pub result: Result<T, E>,
     pub channels: Result<(Tx, Rx), SessionIncomplete<Tx, Rx>>,
     pub last_state: State,
 }
 
-pub async fn run<K, Tx, Rx, State>(
+pub async fn resume<K, Tx, Rx, State>(
     resumption: K,
     tx: Tx,
     rx: Rx,
 ) -> Results<Tx, Rx, State, K::Output, K::Error>
 where
-    K: Resumption<State>,
+    K: Resumption<Tx, Rx> + Into<State>,
     Tx: Send + 'static,
     Rx: Send + 'static,
     State: Send,
@@ -82,7 +111,7 @@ where
     let ((last_state, result), channels) =
         <K::Session as Session>::over(tx, rx, |chan| async move {
             let mut snapshot = resumption.clone().into();
-            let mut step = resumption.resume(chan);
+            let mut step = resumption.step(chan);
             loop {
                 match step.await {
                     Ok(Next { inner }) => match inner {
