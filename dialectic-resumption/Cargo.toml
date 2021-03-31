@@ -8,4 +8,3 @@ edition = "2018"
 
 [dependencies]
 dialectic = { version = "0.4", path = "../dialectic" }
-typetag = { version = "0.1", optional = true }
