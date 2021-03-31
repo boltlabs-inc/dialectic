@@ -19,6 +19,8 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         components: rustfmt, clippy
+    - name: Format check
+      run: cargo fmt -- --check
     - name: Build
       run: cargo build --all-features --all-targets --verbose
     - name: Clippy lint
