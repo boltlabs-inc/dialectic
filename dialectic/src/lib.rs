@@ -113,7 +113,6 @@ Once you've got a channel, here's what you can do:
 
 #[macro_use]
 extern crate derivative;
-use futures::Future;
 
 pub mod backend;
 pub mod tuple;
