@@ -212,9 +212,9 @@ where
     /// let (output, ends) = <Session! { /* ... */ }>::over(tx, rx, |chan| async move {
     ///     chan.close();
     ///     Ok::<_, mpsc::Error>("Hello!".to_string())
-    /// }).await?;
+    /// }).await;
     ///
-    /// assert_eq!(output, "Hello!");
+    /// assert_eq!(output?, "Hello!");
     /// let (tx, rx) = ends?;
     /// # Ok(())
     /// # }
@@ -234,7 +234,7 @@ where
     /// let (tx, rx) = mpsc::unbounded_channel();
     /// let (_, ends) = <Session! { send String }>::over(tx, rx, |chan| async move {
     ///     Ok::<_, mpsc::Error>(())
-    /// }).await?;
+    /// }).await;
     ///
     /// assert!(matches!(ends, Err(BothHalves { tx: Unfinished(_), rx: Unfinished(_) })));
     /// # Ok(())
@@ -263,7 +263,7 @@ where
     /// let (_, ends) = <Session! { send String }>::over(tx, rx, |chan| async move {
     ///     *hold.lock().unwrap() = Some(chan);
     ///     Ok::<_, mpsc::Error>(())
-    /// }).await?;
+    /// }).await;
     ///
     /// assert!(matches!(ends, Err(BothHalves { tx: Unclosed, rx: Unclosed })));
     ///
@@ -273,14 +273,14 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    fn over<Tx, Rx, T, Err, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Err, Fut>
+    fn over<Tx, Rx, T, F, Fut>(tx: Tx, rx: Rx, with_chan: F) -> Over<Tx, Rx, T, Fut>
     where
         Tx: Send + 'static,
         Rx: Send + 'static,
         F: FnOnce(Chan<Self, Tx, Rx>) -> Fut,
-        Fut: Future<Output = Result<T, Err>>,
+        Fut: Future<Output = T>,
     {
-        crate::chan::over::<Self, _, _, _, _, _, _>(tx, rx, with_chan)
+        crate::chan::over::<Self, _, _, _, _, _>(tx, rx, with_chan)
     }
 }
 
