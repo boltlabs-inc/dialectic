@@ -15,10 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        components: rustfmt, clippy
+
     - uses: actions/cache@v2
       with:
         path: |
@@ -26,6 +23,13 @@ jobs:
           ~/.cargo/git
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - uses: actions/checkout@v2
+
+    - uses: actions-rs/toolchain@v1
+      with:
+        components: rustfmt, clippy
+        
     - name: Format check
       run: cargo fmt -- --check
     - name: Build
