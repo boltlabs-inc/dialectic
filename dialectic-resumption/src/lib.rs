@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use dialectic::prelude::*;
 use dialectic::SessionIncomplete;
 
-type Step<Tx, Rx, St, T, E> =
+pub type Step<Tx, Rx, St, T, E> =
     Pin<Box<dyn Future<Output = Result<Next<Tx, Rx, St, T, E>, E>> + Send>>;
 
 pub struct Next<Tx, Rx, St, T, E> {
@@ -15,7 +15,7 @@ enum NextInner<Tx, Rx, St, T, E> {
     Then(Suspended<Tx, Rx, St, T, E>),
 }
 
-pub struct Suspended<Tx, Rx, St, T, E> {
+struct Suspended<Tx, Rx, St, T, E> {
     state: St,
     next: Step<Tx, Rx, St, T, E>,
 }
