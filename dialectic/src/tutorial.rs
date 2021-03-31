@@ -43,8 +43,10 @@ Given a valid session type, we can wrap an underlying communications channel wit
 let's make two ends of a channel for playing out our `JustSendOneString` protocol.
 
 In this case, we're using the [`dialectic_tokio_mpsc`] backend crate for Dialectic, which
-is built on [`tokio::sync::mpsc`]. However, the mechanism for wrapping underlying channels is
+is built on [`tokio::sync::mpsc`][mpsc]. However, the mechanism for wrapping underlying channels is
 extensible, meaning you can choose your own transport if you want.
+
+[mpsc]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html/
 
 ```
 use dialectic_tokio_mpsc as mpsc;
@@ -77,8 +79,10 @@ let _: Chan<Session! { recv String }, mpsc::Sender, mpsc::Receiver> = c2;
 
 Now that we have the two ends of a bidirectional session-typed channel, we can use them to
 concurrently enact the protocol specified by their type. In this case, we're going to run them
-in two parallel [`tokio`] tasks. However, Dialectic is generic over the underlying async
+in two parallel [Tokio] tasks. However, Dialectic is generic over the underlying async
 runtime, provided the underlying transport channel is of a compatible type.
+
+[Tokio]: https://tokio.rs
 
 ```
 # use dialectic::prelude::*;
