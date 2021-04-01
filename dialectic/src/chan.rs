@@ -1,6 +1,5 @@
 //! The [`Chan`] type is defined here. Typically, you don't need to import this module, and should
 //! use the [`Chan`](super::Chan) type synonym instead.
-use call_by::By;
 use futures::Future;
 use pin_project::pin_project;
 use std::{
@@ -188,12 +187,7 @@ where
         Ok((result, self.unchecked_cast()))
     }
 
-    /// Send something of type `T` on the channel, returning the channel.
-    ///
-    /// The underlying sending channel `Tx` may be able to send a `T` using multiple different
-    /// [`Convention`]s: by [`Val`], by [`Ref`] and/or by [`Mut`]. To disambiguate, use
-    /// "turbofish" syntax when calling `send`, i.e. `chan.send::<Val, i64, _>(1)` or
-    /// `chan.send::<Ref, bool, _>(&true)`.
+    /// Send something of type `T` on the channel by value, returning the channel.
     ///
     /// # Errors
     ///
@@ -216,18 +210,89 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send<'b, T, P>(
-        mut self,
-        message: <T as By<'b, Tx::Convention>>::Type,
-    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    pub async fn send<T, P>(mut self, message: T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
         Tx: Transmit<T>,
-        T: By<'b, Tx::Convention>,
-        <T as By<'b, Tx::Convention>>::Type: marker::Send,
+        T: marker::Send,
     {
         self.tx.as_mut().unwrap().send(message).await?;
+        Ok(self.unchecked_cast())
+    }
+
+    /// Send something of type `T` on the channel by reference, returning the channel.
+    ///
+    /// # Errors
+    ///
+    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
+    /// was an error while sending.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic_tokio_mpsc as mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
+    /// c1.send("Hello, world!").await?;
+    ///
+    /// let (s, c2) = c2.recv().await?;
+    /// assert_eq!(s, "Hello, world!");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send_ref<T, P>(
+        mut self,
+        message: impl AsRef<T>,
+    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    where
+        S: Session<Action = Send<T, P>>,
+        P: Session,
+        Tx: Transmit<T, Ref>,
+        T: marker::Send,
+    {
+        self.tx.as_mut().unwrap().send(message.as_ref()).await?;
+        Ok(self.unchecked_cast())
+    }
+
+    /// Send something of type `T` on the channel by mutable reference, returning the channel.
+    ///
+    /// # Errors
+    ///
+    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
+    /// was an error while sending.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic_tokio_mpsc as mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
+    /// let mut string = "Hello, world!".to_string();
+    /// c1.send(&mut string).await?;
+    ///
+    /// let (s, c2) = c2.recv().await?;
+    /// assert_eq!(s, "Hello, world!");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send_mut<T, P>(
+        mut self,
+        mut message: impl AsMut<T>,
+    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    where
+        S: Session<Action = Send<T, P>>,
+        P: Session,
+        Tx: Transmit<T, Mut>,
+        T: marker::Send,
+    {
+        self.tx.as_mut().unwrap().send(message.as_mut()).await?;
         Ok(self.unchecked_cast())
     }
 }
