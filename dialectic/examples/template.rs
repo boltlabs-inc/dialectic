@@ -17,7 +17,7 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-#[Transmitter(Tx ref for /* add types needed by session here */)]
+#[Transmitter(Tx for /* add types needed by session here */)]
 #[Receiver(Rx for /* add types needed by session here */)]
 async fn client<Tx, Rx>(
     #[allow(unused)] mut input: BufReader<Stdin>,
@@ -37,7 +37,7 @@ where
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-#[Transmitter(Tx ref for /* add types needed by session here */)]
+#[Transmitter(Tx for /* add types needed by session here */)]
 #[Receiver(Rx for /* add types needed by session here */ )]
 async fn server<Tx, Rx>(
     #[allow(unused_mut)] mut chan: Chan<Server, Tx, Rx>,

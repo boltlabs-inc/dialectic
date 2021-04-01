@@ -17,7 +17,7 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-#[Transmitter(Tx ref for String)]
+#[Transmitter(Tx for ref String)]
 #[Receiver(Rx for String)]
 async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
@@ -32,7 +32,7 @@ where
         Ok::<_, ()>(name.to_string())
     })
     .await?;
-    let chan = chan.send(&name).await?;
+    let chan = chan.send_ref(&name).await?;
     let (greeting, chan) = chan.recv().await?;
     output.write_all(greeting.as_bytes()).await?;
     output.write_all(b"\n").await?;
@@ -44,7 +44,7 @@ where
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-#[Transmitter(Tx ref for String)]
+#[Transmitter(Tx for ref String)]
 #[Receiver(Rx for String)]
 async fn server<Tx, Rx>(chan: Chan<Server, Tx, Rx>) -> Result<(), Box<dyn Error>>
 where
@@ -57,7 +57,7 @@ where
         name,
         name.chars().count()
     );
-    let chan = chan.send(&greeting).await?;
+    let chan = chan.send_ref(&greeting).await?;
     chan.close();
     Ok(())
 }
