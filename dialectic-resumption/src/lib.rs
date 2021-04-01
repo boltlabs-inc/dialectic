@@ -90,6 +90,9 @@ where
     }
 }
 
+// TODO: use async-trait to make this easier? no lifetime problems here, because everything is by
+// move, not by reference!
+
 #[derive(Debug)]
 pub struct Results<Tx, Rx, State, T, E> {
     pub result: Result<T, E>,
