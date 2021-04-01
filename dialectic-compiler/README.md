@@ -1,4 +1,6 @@
-# Dialectic session type macro compiler
+![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
+[![crates.io](https://img.shields.io/crates/v/dialectic-compiler)](https://crates.io/crates/dialectic-compiler)
+[![docs.rs documentation](https://docs.rs/dialectic-compiler/badge.svg)](https://docs.rs/dialectic-compiler)
 
 Contains functionality for compiling the language of Dialectic's `Session!` macro into an actual Rust type. This crate is considered an internal implementation detail and none of its API is subject to semantic versioning rules. The compilation process is done via transforming the syntax gradually across three representations:
 

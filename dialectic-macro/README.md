@@ -1,3 +1,7 @@
+![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
+[![crates.io](https://img.shields.io/crates/v/dialectic-macro)](https://crates.io/crates/dialectic-macro)
+[![docs.rs documentation](https://docs.rs/dialectic-macro/badge.svg)](https://docs.rs/dialectic-macro)
+
 This crate contains the `Session!`, `Transmitter`, and `Receiver` macros for use in [Dialectic](https://crates.io/crates/dialectic), as
 well as several other macros which are used internally to Dialectic. The `dialectic-macro` crate is
 considered an internal implementation detail and should *never* be relied upon or depended on
