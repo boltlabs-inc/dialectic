@@ -463,7 +463,9 @@ impl ToTokens for Mutability {
         stream.extend(match self {
             Val => quote!(#dialectic_path::backend::Val),
             Ref(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Ref),
-            Mut(t1, t2) => quote_spanned!(t1.span().join(t2.span()).unwrap_or(t2.span())=> #dialectic_path::backend::Mut),
+            Mut(t1, t2) => {
+                quote_spanned!(t1.span().join(t2.span()).unwrap_or_else(|| t2.span())=> #dialectic_path::backend::Mut)
+            },
         })
     }
 }
