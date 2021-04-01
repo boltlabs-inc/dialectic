@@ -75,9 +75,9 @@ pub trait Transmit<T>: Transmitter {
 }
 
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
-/// implement [`Receiver`], which specifies what type of errors it might return. This is a
-/// super-trait of [`Receive`], which is what's actually needed to receive particular values over a
-/// [`Chan`](crate::Chan).
+/// implement [`Receiver`], which specifies what type of errors it might return, as well as giving a
+/// method to send [`Choice`]s across the channel. This is a super-trait of [`Receive`], which is
+/// what's actually needed to receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
