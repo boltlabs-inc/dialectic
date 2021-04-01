@@ -1,3 +1,4 @@
+[![Rust](https://github.com/boltlabs-inc/dialectic/actions/workflows/rust.yml/badge.svg)](https://github.com/boltlabs-inc/dialectic/actions/workflows/rust.yml)
 ![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
 [![crates.io](https://img.shields.io/crates/v/dialectic-compiler)](https://crates.io/crates/dialectic-compiler)
 [![docs.rs documentation](https://docs.rs/dialectic-compiler/badge.svg)](https://docs.rs/dialectic-compiler)
