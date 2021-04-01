@@ -237,7 +237,7 @@ where
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
-    /// c1.send("Hello, world!").await?;
+    /// c1.send_ref("Hello, world!").await?;
     ///
     /// let (s, c2) = c2.recv().await?;
     /// assert_eq!(s, "Hello, world!");
@@ -246,7 +246,7 @@ where
     /// ```
     pub async fn send_ref<T, P>(
         mut self,
-        message: impl AsRef<T>,
+        message: &T,
     ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
@@ -254,7 +254,7 @@ where
         Tx: Transmit<T, Ref>,
         T: marker::Send,
     {
-        self.tx.as_mut().unwrap().send(message.as_ref()).await?;
+        self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
     }
 
