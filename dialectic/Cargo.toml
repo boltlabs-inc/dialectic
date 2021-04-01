@@ -1,6 +1,6 @@
 [package]
 name = "dialectic"
-version = "0.4.0-bootstrap"
+version = "0.4.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"
 license = "MIT"
