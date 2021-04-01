@@ -30,31 +30,52 @@ Together, these make Dialectic ideal for writing networked services that need to
 levels of availability** and **complex protocol correctness properties** in the real world,
 where protocols might be violated and connections might be dropped.
 
-Dialectic supports a number of async runtimes and backends out-of-the-box, if you don't want to or don't need to write your own:
-- The [`dialectic_tokio_mpsc`] crate supports using Dialectic to communicate between threads/tasks using Tokio's [`mpsc`] queues.
-- The [`dialectic_tokio_serde`] crate supports using Dialectic to communicate over any [`AsyncRead`]/[`AsyncWrite`] transport layer encoded using any Tokio [`codec`](tokio_util::codec). A couple of Serde formats are already implemented, but it is easy to implement your own:
-  - [`dialectic_tokio_serde_bincode`] backend using [`bincode`] for serialization
-  - [`dialectic_tokio_serde_json`] backend using [`serde_json`] for serialization
+Dialectic supports a number of async runtimes and backends out-of-the-box, if you don't want to
+or don't need to write your own:
+
+- The [`dialectic-tokio-mpsc`] crate supports using Dialectic to communicate between
+  tasks using Tokio's [`mpsc`] queues.
+- The [`dialectic-tokio-serde`] crate supports using Dialectic to communicate over any [`AsyncRead`]/[`AsyncWrite`] transport layer encoded using any Tokio [`codec`]. A couple of Serde formats are already implemented, but it is easy to implement your own:
+  - [`dialectic-tokio-serde-bincode`] backend using [`bincode`] for serialization
+  - [`dialectic-tokio-serde-json`] backend using [`serde_json`] for serialization
 
 These crates also serve as good references for writing your own backends.
 
-<!-- snip -->
-
-# What now?
+## What now?
 
 - If you are **new to session types** you might consider starting with the **[tutorial-style
-  tour of the crate](tutorial)**.
+  tour of the crate]**.
 - If you're **familiar with session types**, you might jump to the **[quick
-  reference](#quick-reference)**, then read more in the [`types`](crate::types) module and the
-  documentation for [`Chan`](crate::Chan).
+  reference]**, then read more about the [`Session!`] macro for specifying session types, and
+  continue on to look at the [`types`] module and the documentation for [`Chan`].
 - You may also find helpful the **[full self-contained
   examples](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic/examples)**, which show how all
   the features of the crate come together to build session-typed network programs.
 - If you want to **integrate your own channel type** with Dialectic, you need to implement the
   [`Transmit`] and [`Receive`] traits from the [`backend`] module.
-- Or, you can **[dive into the reference documentation below](#modules)**...
+- Or, you can dive into the **[reference documentation]**...
 
-# Quick reference
+[`codec`]: https://docs.rs/tokio-util/latest/tokio_util/codec/index.html
+[`mpsc`]: https://docs.rs/tokio/latest/tokio/sync/mpsc/index.html
+[`AsyncRead`]: https://docs.rs/tokio/latest/tokio/io/trait.AsyncRead.html
+[`AsyncWrite`]: https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html
+<!-- snip -->
+
+<!-- links to other crates' docs -->
+[`dialectic-tokio-mpsc`]: https://docs.rs/dialectic-tokio-mpsc
+[`dialectic-tokio-serde`]: https://docs.rs/dialectic-tokio-serde
+[`dialectic-tokio-serde-bincode`]: https://docs.rs/dialectic-tokio-serde-bincode
+[`dialectic-tokio-serde-json`]: https://docs.rs/dialectic-tokio-serde-json
+[`bincode`]: https://docs.rs/bincode
+[`serde_json`]: https://docs.rs/serde_json
+
+<!-- links to self docs -->
+[tutorial-style tour of the crate]: tutorial
+[quick reference]: #quick-reference
+[reference documentation]: #modules
+[`Session!`]: macro@Session
+
+## Quick reference
 
 The **[`prelude`]** module exports most of the relevant constructs for writing programs with
 Dialectic. Most programs using Dialectic should `use dialectic::prelude::*;`.
@@ -113,7 +134,6 @@ Once you've got a channel, here's what you can do:
 
 #[macro_use]
 extern crate derivative;
-use futures::Future;
 
 pub mod backend;
 pub mod tuple;
@@ -125,7 +145,7 @@ mod chan;
 mod error;
 mod session;
 
-pub use chan::{Branches, Chan};
+pub use chan::{Branches, Chan, Over};
 pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
 pub use error::{IncompleteHalf, SessionIncomplete, Unavailable};
 pub use session::Session;

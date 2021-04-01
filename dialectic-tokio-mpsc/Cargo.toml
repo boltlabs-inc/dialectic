@@ -13,7 +13,7 @@ categories = ["asynchronous", "concurrency"]
 [dependencies]
 dialectic = { version = "0.4", path = "../dialectic" }
 thiserror = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["sync"] }
 
 [package.metadata.docs.rs]
 all-features = true
