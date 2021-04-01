@@ -7,6 +7,8 @@ license = "MIT"
 description = "A backend builder for the Dialectic crate using Serde serialization over Tokio transport"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
+keywords = ["session", "types", "async", "channel", "protocol"]
+categories = ["asynchronous", "concurrency", "encoding", "network-programming"]
 
 [dependencies]
 dialectic = { path = "../dialectic", features = ["serde"] }
