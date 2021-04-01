@@ -7,6 +7,8 @@ license = "MIT"
 description = "Procedural macros used by and exported from the Dialectic crate"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
+keywords = ["session", "types", "async", "channel", "macro"]
+categories = ["asynchronous", "concurrency"]
 
 [lib]
 proc-macro = true

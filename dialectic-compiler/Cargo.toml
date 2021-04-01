@@ -7,6 +7,8 @@ license = "MIT"
 description = "Session type macro compiler for the Dialectic crate"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
+keywords = ["session", "types", "async", "channel", "macro"]
+categories = ["asynchronous", "concurrency"]
 
 [dependencies]
 thunderdome = "0.4"

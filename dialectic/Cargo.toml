@@ -1,14 +1,14 @@
 [package]
 name = "dialectic"
 version = "0.4.0"
-authors = ["Kenny Foner <kwf@boltlabs.io>"]
+authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"
 license = "MIT"
 description = "Transport-polymorphic, asynchronous session types for Rust"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
 keywords = ["session", "types", "async", "channel", "protocol"]
-categories = ["asynchronous", "concurrency"]
+categories = ["asynchronous", "concurrency", "network-programming"]
 readme = "../README.md"
 
 [dependencies]

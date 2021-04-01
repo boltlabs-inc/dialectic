@@ -6,6 +6,7 @@ edition = "2018"
 description = "A backend for the Dialectic crate using JSON serialization over Tokio transport"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
+categories = ["asynchronous", "concurrency", "encoding", "network-programming"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
