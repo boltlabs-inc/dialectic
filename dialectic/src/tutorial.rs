@@ -783,7 +783,7 @@ type S = Session! {
 # struct T4;
 # struct T5;
 
-#[Transmitter(Tx move for T1, T3, T5)]
+#[Transmitter(Tx for T1, T3, T5)]
 #[Receiver(Rx for T2, T4)]
 async fn run<Tx, Rx>(
     chan: Chan<S, Tx, Rx>,

@@ -625,6 +625,7 @@ fn where_predicates_mut(
 /// #[Transmitter(Tx for bool, i64, Vec<String>)]
 /// # fn f<Tx>() {}
 /// #[Transmitter(Tx for bool, ref i64, ref mut Vec<String>)]
+/// # fn g<Tx>() {}
 /// ```
 ///
 /// # Expansion

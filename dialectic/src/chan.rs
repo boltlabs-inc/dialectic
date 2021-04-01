@@ -237,7 +237,7 @@ where
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
-    /// c1.send_ref(&"Hello, world!".to_strong()).await?;
+    /// c1.send_ref(&"Hello, world!".to_string()).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
     /// assert_eq!(s, "Hello, world!");
@@ -272,7 +272,7 @@ where
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
     /// let mut string = "Hello, world!".to_string();
-    /// c1.send(&mut string).await?;
+    /// c1.send_mut(&mut string).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
     /// assert_eq!(s, "Hello, world!");
