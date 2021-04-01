@@ -20,10 +20,9 @@ mod choice;
 pub use choice::*;
 
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
-/// must implement [`Transmitter`], which specifies what type of errors it might return and whether
-/// it sends things by owned value or by reference, as well as giving a method to send [`Choice`]s
-/// across the channel. This is a super-trait of [`Transmit`], which is what's actually needed to
-/// receive particular values over a [`Chan`](crate::Chan).
+/// must implement [`Transmitter`], which specifies what type of errors it might return, as well as
+/// giving a method to send [`Choice`]s across the channel. This is a super-trait of [`Transmit`],
+/// which is what's actually needed to receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Transmit<T>`](Transmit) bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
@@ -32,12 +31,6 @@ pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
 
-    /// The calling convention for sending values over this channel. Possible options: [`Val`],
-    /// [`Ref`], or [`Mut`]. For backends that move owned values, pick [`Val`]; for those which
-    /// serialize by taking references, pick [`Ref`]. [`Mut`] is an unusual choice of calling
-    /// convention, but is supported.
-    type Convention: Convention;
-
     /// Send any `Choice<N>` using the [`Convention`] specified by the trait implementation.
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
@@ -45,11 +38,11 @@ pub trait Transmitter {
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
-/// If a transport is [`Transmit<T>`](Transmit), we can use it to [`send`](Transmit::send) a message
-/// of type `T` by [`Val`] or [`Ref`], depending on the calling convention specified by its
-/// [`Transmitter`] implementation.
+/// If a transport is [`Transmit<T, C>`](Transmit), we can use it to [`send`](Transmit::send) a
+/// message of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention
+/// specified by `C`.
 ///
-/// If you're writing a function and need a lot of different `Transmit<T>` bounds, the
+/// If you're writing a function and need a lot of different `Transmit<T, C>` bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
 /// succinctly.
 ///
@@ -63,14 +56,14 @@ pub trait Transmitter {
 ///
 /// [`dialectic_tokio_mpsc::Sender`]:
 /// https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
-pub trait Transmit<T>: Transmitter {
+pub trait Transmit<T, C: Convention = Val>: Transmitter {
     /// Send a message using the [`Convention`] specified by the trait implementation.
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        message: <T as By<'a, Self::Convention>>::Type,
+        message: <T as By<'a, C>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
-        T: By<'a, Self::Convention>,
+        T: By<'a, C>,
         'a: 'async_lifetime;
 }
 
