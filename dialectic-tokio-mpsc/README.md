@@ -1,3 +1,7 @@
+![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
+[![crates.io](https://img.shields.io/crates/v/dialectic-tokio-mpsc)](https://crates.io/crates/dialectic-tokio-mpsc)
+[![docs.rs documentation](https://docs.rs/dialectic-tokio-mpsc/badge.svg)](https://docs.rs/dialectic-tokio-mpsc)
+
 This crate contains the Tokio/MPSC backend for [Dialectic](https://crates.io/crates/dialectic). It
 supports send/receive operations over all types which are `Send + Any`. This is useful for
 inter-task and inter-thread communication, especially if you're working on a protocol which needs to
