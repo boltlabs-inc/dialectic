@@ -19,7 +19,7 @@ enum Primitive {
     Split,
 }
 
-#[Transmitter(Tx move for ())]
+#[Transmitter(Tx for ())]
 async fn send<Tx, Rx>(
     chan: Chan<Session! { loop { send () } }, Tx, Rx>,
 ) -> Chan<Session! { loop { send () } }, Tx, Rx>
@@ -143,7 +143,7 @@ fn bench_chan_loop_group<S, Tx, Rx, Fut, H, A>(
     });
 }
 
-#[Transmitter(Tx move for ())]
+#[Transmitter(Tx for ())]
 #[Receiver(Rx for ())]
 fn bench_all_on<Tx, Rx, H, A>(
     c: &mut Criterion,

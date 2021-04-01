@@ -451,7 +451,7 @@ impl OfferInvocation {
 }
 
 enum Mutability {
-    Val(Option<Token![move]>),
+    Val,
     Ref(Token![ref]),
     Mut(Token![ref], Token![mut]),
 }
@@ -461,7 +461,7 @@ impl ToTokens for Mutability {
         use Mutability::*;
         let dialectic_path = dialectic_compiler::dialectic_path();
         stream.extend(match self {
-            Val(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Val),
+            Val => quote!(#dialectic_path::backend::Val),
             Ref(t) => quote_spanned!(t.span()=> #dialectic_path::backend::Ref),
             Mut(t1, t2) => quote_spanned!(t1.span().join(t2.span()).unwrap_or(t2.span())=> #dialectic_path::backend::Mut),
         })
@@ -479,7 +479,7 @@ impl Parse for Mutability {
                 Mutability::Ref(ref_token)
             }
         } else {
-            Mutability::Val(input.parse()?)
+            Mutability::Val
         };
 
         Ok(mutability)
@@ -498,7 +498,9 @@ struct ReceiverSpec {
 
 impl Parse for TransmitterSpec {
     fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        fn parse_convention_type_pair(input: ParseStream) -> Result<(Mutability, syn::Type), syn::Error> {
+        fn parse_convention_type_pair(
+            input: ParseStream,
+        ) -> Result<(Mutability, syn::Type), syn::Error> {
             Ok((input.parse()?, input.parse()?))
         }
 
@@ -515,10 +517,7 @@ impl Parse for TransmitterSpec {
             } else {
                 input.parse_terminated(parse_convention_type_pair)?
             };
-            Ok(TransmitterSpec {
-                name,
-                types,
-            })
+            Ok(TransmitterSpec { name, types })
         }
     }
 }
@@ -587,7 +586,7 @@ fn where_predicates_mut(
 /// ```
 /// use dialectic::prelude::*;
 ///
-/// #[Transmitter(Tx move for bool, i64)]
+/// #[Transmitter(Tx for bool, i64)]
 /// async fn foo<Tx, Rx>(
 ///     chan: Chan<Session!{ send bool; send i64 }, Tx, Rx>
 /// ) -> Result<(), Tx::Error>
@@ -667,20 +666,15 @@ pub fn Transmitter(
     params: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let TransmitterSpec {
-        name,
-        types,
-    } = parse_macro_input!(params as TransmitterSpec);
+    let TransmitterSpec { name, types } = parse_macro_input!(params as TransmitterSpec);
     let dialectic_path = dialectic_compiler::dialectic_path();
     let mut item = parse_macro_input!(input as syn::Item);
     if let Some(predicates) = where_predicates_mut(&mut item) {
-        predicates.push(
-            syn::parse_quote! {
-                #name: ::std::marker::Send
-                    + #dialectic_path::backend::Transmitter
-                    + 'static
-            }
-        );
+        predicates.push(syn::parse_quote! {
+            #name: ::std::marker::Send
+                + #dialectic_path::backend::Transmitter
+                + 'static
+        });
         for (mutability, ty) in types {
             predicates.push(syn::parse_quote! {
                 #name: #dialectic_path::backend::Transmit<#ty, #mutability>

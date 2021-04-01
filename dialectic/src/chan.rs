@@ -187,7 +187,7 @@ where
         Ok((result, self.unchecked_cast()))
     }
 
-    /// Send something of type `T` on the channel by value, returning the channel.
+    /// Send something of type `T` on the channel *by value*, returning the channel.
     ///
     /// # Errors
     ///
@@ -221,7 +221,7 @@ where
         Ok(self.unchecked_cast())
     }
 
-    /// Send something of type `T` on the channel by reference, returning the channel.
+    /// Send something of type `T` on the channel *by reference*, returning the channel.
     ///
     /// # Errors
     ///
@@ -237,17 +237,14 @@ where
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
-    /// c1.send_ref("Hello, world!").await?;
+    /// c1.send_ref(&"Hello, world!".to_strong()).await?;
     ///
     /// let (s, c2) = c2.recv().await?;
     /// assert_eq!(s, "Hello, world!");
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_ref<T, P>(
-        mut self,
-        message: &T,
-    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    pub async fn send_ref<T, P>(mut self, message: &T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
@@ -258,7 +255,7 @@ where
         Ok(self.unchecked_cast())
     }
 
-    /// Send something of type `T` on the channel by mutable reference, returning the channel.
+    /// Send something of type `T` on the channel *by mutable reference*, returning the channel.
     ///
     /// # Errors
     ///
@@ -282,17 +279,14 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_mut<T, P>(
-        mut self,
-        mut message: impl AsMut<T>,
-    ) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    pub async fn send_mut<T, P>(mut self, message: &mut T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
         S: Session<Action = Send<T, P>>,
         P: Session,
         Tx: Transmit<T, Mut>,
         T: marker::Send,
     {
-        self.tx.as_mut().unwrap().send(message.as_mut()).await?;
+        self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())
     }
 }
