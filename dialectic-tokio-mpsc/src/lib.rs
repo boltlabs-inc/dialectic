@@ -13,7 +13,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::{self, By, Choice, Mut, Ref, Val, Transmittable};
+use dialectic::backend::{self, By, Choice, Mut, Ref, Transmittable, Val};
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -164,7 +164,11 @@ impl<T: Send + Any> backend::Transmit<T> for Sender {
     }
 }
 
-impl<T: ?Sized> backend::Transmit<T, Ref> for Sender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
+impl<T: ?Sized> backend::Transmit<T, Ref> for Sender
+where
+    T: Transmittable + ToOwned + Send,
+    T::Owned: Send + Any + 'static,
+{
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Ref>>::Type,
@@ -176,7 +180,11 @@ impl<T: ?Sized> backend::Transmit<T, Ref> for Sender where T: Transmittable + To
     }
 }
 
-impl<T: ?Sized> backend::Transmit<T, Mut> for Sender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
+impl<T: ?Sized> backend::Transmit<T, Mut> for Sender
+where
+    T: Transmittable + ToOwned + Send,
+    T::Owned: Send + Any + 'static,
+{
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Mut>>::Type,
@@ -238,7 +246,11 @@ impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
     }
 }
 
-impl<T: ?Sized> backend::Transmit<T, Ref> for UnboundedSender where T: Transmittable + ToOwned + Send + Sync, T::Owned: Send + Any + 'static {
+impl<T: ?Sized> backend::Transmit<T, Ref> for UnboundedSender
+where
+    T: Transmittable + ToOwned + Send + Sync,
+    T::Owned: Send + Any + 'static,
+{
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Ref>>::Type,
@@ -250,7 +262,11 @@ impl<T: ?Sized> backend::Transmit<T, Ref> for UnboundedSender where T: Transmitt
     }
 }
 
-impl<T: ?Sized> backend::Transmit<T, Mut> for UnboundedSender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
+impl<T: ?Sized> backend::Transmit<T, Mut> for UnboundedSender
+where
+    T: Transmittable + ToOwned + Send,
+    T::Owned: Send + Any + 'static,
+{
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Mut>>::Type,
