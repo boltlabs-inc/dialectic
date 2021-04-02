@@ -31,7 +31,7 @@
 use std::{future::Future, pin::Pin};
 
 use dialectic::{
-    backend::{self, By, Choice, Mut, Receive, Ref, Transmit, Val},
+    backend::{self, By, Choice, Mut, Receive, Ref, Transmit, Transmittable, Val},
     Chan,
 };
 use futures::sink::SinkExt;
@@ -67,7 +67,7 @@ pub trait Serializer {
     type Output;
 
     /// Serialize a reference to any [`Serialize`] value.
-    fn serialize<T: Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error>;
+    fn serialize<T: ?Sized + Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error>;
 }
 
 /// The deserialization end of a serialization format: an object which can deserialize to any
@@ -212,9 +212,9 @@ where
     }
 }
 
-impl<T, F, E, W> Transmit<T, Ref> for Sender<F, E, W>
+impl<T: ?Sized, F, E, W> Transmit<T, Ref> for Sender<F, E, W>
 where
-    T: Serialize + Sync,
+    T: Transmittable + Serialize + Sync,
     F: Serializer + Unpin + Send,
     F::Output: Send,
     F::Error: Send,
@@ -242,9 +242,9 @@ where
     }
 }
 
-impl<T, F, E, W> Transmit<T, Mut> for Sender<F, E, W>
+impl<T: ?Sized, F, E, W> Transmit<T, Mut> for Sender<F, E, W>
 where
-    T: Serialize + Sync,
+    T: Transmittable + Serialize + Sync,
     F: Serializer + Unpin + Send,
     F::Output: Send,
     F::Error: Send,

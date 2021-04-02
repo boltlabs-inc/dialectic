@@ -13,7 +13,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::{self, By, Choice, Mut, Ref, Val};
+use dialectic::backend::{self, By, Choice, Mut, Ref, Val, Transmittable};
 use std::{any::Any, future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -164,7 +164,7 @@ impl<T: Send + Any> backend::Transmit<T> for Sender {
     }
 }
 
-impl<T: Clone + Send + Any> backend::Transmit<T, Ref> for Sender {
+impl<T: ?Sized> backend::Transmit<T, Ref> for Sender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Ref>>::Type,
@@ -172,11 +172,11 @@ impl<T: Clone + Send + Any> backend::Transmit<T, Ref> for Sender {
     where
         'a: 'async_lifetime,
     {
-        Box::pin(mpsc::Sender::send(&self.0, Box::new(message.clone())))
+        Box::pin(mpsc::Sender::send(&self.0, Box::new(message.to_owned())))
     }
 }
 
-impl<T: Clone + Send + Any> backend::Transmit<T, Mut> for Sender {
+impl<T: ?Sized> backend::Transmit<T, Mut> for Sender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <T as By<'a, Mut>>::Type,
@@ -184,7 +184,7 @@ impl<T: Clone + Send + Any> backend::Transmit<T, Mut> for Sender {
     where
         'a: 'async_lifetime,
     {
-        <Self as backend::Transmit<T, Ref>>::send(self, &*message)
+        Box::pin(mpsc::Sender::send(&self.0, Box::new(message.to_owned())))
     }
 }
 
@@ -235,6 +235,30 @@ impl<T: Send + Any> backend::Transmit<T> for UnboundedSender {
         'a: 'async_lifetime,
     {
         Box::pin(async move { mpsc::UnboundedSender::send(&self.0, Box::new(message)) })
+    }
+}
+
+impl<T: ?Sized> backend::Transmit<T, Ref> for UnboundedSender where T: Transmittable + ToOwned + Send + Sync, T::Owned: Send + Any + 'static {
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as By<'a, Ref>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        Box::pin(async move { mpsc::UnboundedSender::send(&self.0, Box::new(message.to_owned())) })
+    }
+}
+
+impl<T: ?Sized> backend::Transmit<T, Mut> for UnboundedSender where T: Transmittable + ToOwned + Send, T::Owned: Send + Any + 'static {
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as By<'a, Mut>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        Box::pin(async move { mpsc::UnboundedSender::send(&self.0, Box::new(message.to_owned())) })
     }
 }
 

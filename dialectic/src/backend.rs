@@ -38,9 +38,51 @@ pub trait Transmitter {
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
+/// A marker trait indicating that some type `T` is transmittable as the associated type
+/// `ReceivedAs` in a session type specification.
+///
+/// This type is blanket-implemented for *all* sized types such that they are transmitted as
+/// themselves; for unsized types such as `str` and `[T]`, there are implementations such that `str`
+/// is transmittable and `ReceivedAs = String` and `[T]` is transmittable and `ReceivedAs = Vec<T>`.
+/// Backends must choose whether or not to implement `Transmit` for these unsized types, but *must*
+/// guarantee that they can be received as their associated `ReceivedAs` type if they are
+/// transmittable.
+pub trait Transmittable {
+    /// The equivalent type that receiving this transmitted type will give on the other end of the
+    /// connection.
+    type ReceivedAs: Sized;
+}
+
+impl<T: Sized> Transmittable for T {
+    type ReceivedAs = T;
+}
+
+impl Transmittable for str {
+    type ReceivedAs = String;
+}
+
+impl Transmittable for std::ffi::CStr {
+    type ReceivedAs = std::ffi::CString;
+}
+
+impl Transmittable for std::ffi::OsStr {
+    type ReceivedAs = std::ffi::OsString;
+}
+
+impl Transmittable for std::path::Path {
+    type ReceivedAs = std::path::PathBuf;
+}
+
+impl<T> Transmittable for [T] {
+    type ReceivedAs = Vec<T>;
+}
+
 /// If a transport is [`Transmit<T, C>`](Transmit), we can use it to [`send`](Transmit::send) a
 /// message of type `T` by [`Val`], [`Ref`], or [`Mut`], depending on the calling convention
-/// specified by `C`.
+/// specified by `C`. Any transmitted type `T` may be received as its associated [`<T as
+/// Transmittable>::ReceivedAs`](Transmittable) type; if a backend has `Transmit<T, C>` implemented
+/// for some `T`, it guarantees that `T` will be received on the other side as an equivalent,
+/// well-formed `T::ReceivedAs`.
 ///
 /// If you're writing a function and need a lot of different `Transmit<T, C>` bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
@@ -56,7 +98,7 @@ pub trait Transmitter {
 ///
 /// [`dialectic_tokio_mpsc::Sender`]:
 /// https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
-pub trait Transmit<T, C: Convention = Val>: Transmitter {
+pub trait Transmit<T: ?Sized, C: Convention = Val>: Transmitter where T: Transmittable {
     /// Send a message using the [`Convention`] specified by the trait implementation.
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,

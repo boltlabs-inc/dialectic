@@ -244,12 +244,12 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn send_ref<T, P>(mut self, message: &T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
+    pub async fn send_ref<T: ?Sized, P>(mut self, message: &T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
     where
-        S: Session<Action = Send<T, P>>,
+        S: Session<Action = Send<T::ReceivedAs, P>>,
         P: Session,
         Tx: Transmit<T, Ref>,
-        T: marker::Send,
+        T: Transmittable,
     {
         self.tx.as_mut().unwrap().send(message).await?;
         Ok(self.unchecked_cast())

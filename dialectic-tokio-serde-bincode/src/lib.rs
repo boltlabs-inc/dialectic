@@ -35,7 +35,7 @@ impl<O: bincode::Options + Clone> Serializer for Bincode<O> {
     type Error = bincode::Error;
     type Output = Bytes;
 
-    fn serialize<T: Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error> {
+    fn serialize<T: ?Sized + Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error> {
         self.0.clone().serialize(item).map(Into::into)
     }
 }
