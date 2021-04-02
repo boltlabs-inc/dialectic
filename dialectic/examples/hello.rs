@@ -17,7 +17,7 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-#[Transmitter(Tx for ref String)]
+#[Transmitter(Tx for ref str)]
 #[Receiver(Rx for String)]
 async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
@@ -44,7 +44,7 @@ where
 type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
-#[Transmitter(Tx for ref String)]
+#[Transmitter(Tx for ref str)]
 #[Receiver(Rx for String)]
 async fn server<Tx, Rx>(chan: Chan<Server, Tx, Rx>) -> Result<(), Box<dyn Error>>
 where

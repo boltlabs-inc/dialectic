@@ -26,7 +26,7 @@ type Client = Session! {
 };
 
 /// The implementation of the client.
-#[Transmitter(Tx for ref String)]
+#[Transmitter(Tx for ref str)]
 #[Receiver(Rx for String)]
 async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
@@ -64,7 +64,7 @@ async fn client_prompt(
 /// reference instead of by value. This function can't be written in `async fn` style because it is
 /// recursive, and current restrictions in Rust mean that recursive functions returning futures must
 /// explicitly return a boxed `dyn Future` object.
-#[Transmitter(Tx for ref String)]
+#[Transmitter(Tx for ref str)]
 #[Receiver(Rx for String)]
 fn client_rec<'a, Tx, Rx>(
     size: usize,
@@ -113,7 +113,7 @@ type Server = <Client as Session>::Dual;
 /// The implementation of the server for each client connection. This function can't be written in
 /// `async fn` style because it is recursive, and current restrictions in Rust mean that recursive
 /// functions returning futures must explicitly return a boxed `dyn Future` object.
-#[Transmitter(Tx for ref String)]
+#[Transmitter(Tx for ref str)]
 #[Receiver(Rx for String)]
 fn server<Tx, Rx>(
     mut chan: Chan<Server, Tx, Rx>,
