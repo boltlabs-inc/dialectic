@@ -98,7 +98,10 @@ impl<T> Transmittable for [T] {
 ///
 /// [`dialectic_tokio_mpsc::Sender`]:
 /// https://docs.rs/dialectic-tokio-mpsc/latest/dialectic_tokio_mpsc/struct.Sender.html
-pub trait Transmit<T: ?Sized, C: Convention = Val>: Transmitter where T: Transmittable {
+pub trait Transmit<T: ?Sized, C: Convention = Val>: Transmitter
+where
+    T: Transmittable,
+{
     /// Send a message using the [`Convention`] specified by the trait implementation.
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
