@@ -146,9 +146,7 @@ where
 {
     type Case = ();
 
-    unsafe fn case(_: Self) -> Self::Case {
-        ()
-    }
+    unsafe fn case(_: Self) -> Self::Case {}
 
     fn uncase(_: ()) -> Self {
         Choice { choice: M as u8 }
