@@ -337,7 +337,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<0>().await?.send(42).await?;
+    /// c1.choose::<0>(()).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -460,18 +460,23 @@ where
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case::<0>() {
-    ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case::<0>() {
-    ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
-    ///             Err(rest) => rest.empty_case(),
+    ///     let branches = c2.offer().await?;
+    ///     match branches.tag().unwrap() {
+    ///         0 => {
+    ///             let (c2, ()) = branches.try_case::<0>().unwrap();
+    ///             c2.recv().await()?;
     ///         }
+    ///         1 => {
+    ///             let (c2, ()) = branches.try_case::<1>().unwrap();
+    ///             c2.send("Hello!".to_string()).await?;
+    ///         }
+    ///         _ => unreachable!(),
     ///     }
     ///     Ok::<_, mpsc::Error>(())
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<0>().await?.send(42).await?;
+    /// c1.choose::<0>(()).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -507,7 +512,7 @@ where
     /// # });
     /// #
     /// # // Choose to send an integer
-    /// # c1.choose::<0>().await?.send(42).await?;
+    /// # c1.choose::<0>(()).await?.send(42).await?;
     /// #
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
