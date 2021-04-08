@@ -143,7 +143,7 @@ where
 {
     type Case = ();
 
-    unsafe fn case(self) -> Self::Case {
+    unsafe fn case(_: Self) -> Self::Case {
         ()
     }
 

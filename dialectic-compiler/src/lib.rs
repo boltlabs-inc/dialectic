@@ -393,7 +393,7 @@ mod tests {
         let continue1 = cfg.singleton(Ir::Continue(client));
         cfg[recv].next = Some(continue1);
         let choose_opts = vec![Some(send), Some(recv)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(None, choose_opts));
 
         cfg[client_tally].expr = Ir::Loop(Some(choose));
 
@@ -401,7 +401,7 @@ mod tests {
         let send = cfg.send("Operation");
         cfg[send].next = Some(client_tally);
         let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(None, choose_opts));
 
         cfg[client].expr = Ir::Loop(Some(choose));
 
@@ -421,7 +421,7 @@ mod tests {
         let continue0 = cfg.singleton(Ir::Continue(client));
         cfg[call].next = Some(continue0);
         let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(None, choose_opts));
 
         cfg[client].expr = Ir::Loop(Some(choose));
 

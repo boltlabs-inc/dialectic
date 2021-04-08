@@ -10,4 +10,4 @@ type Bug = Session! {
     }
 };
 
-assert_type_eq_all!(Bug, Loop<Choose<(Continue<0>,)>>,);
+assert_type_eq_all!(Bug, Loop<Choose<Choice<1>, (Continue<0>,)>>,);

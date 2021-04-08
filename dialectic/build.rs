@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "use crate::types::{{Send, Recv, Choose, Offer, Call, Split, Loop, Continue, Done}};"
     )?;
     writeln!(f, "use crate::Session;")?;
+    writeln!(f, "use crate::backend::Choice;")?;
     writeln!(f, "use static_assertions::assert_impl_all;")?;
     writeln!(f)?;
 
@@ -80,7 +81,7 @@ impl Display for Session {
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
-                write!(f, "Choose<(")?;
+                write!(f, "Choose<Choice<{}>, (", count)?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {
@@ -94,7 +95,7 @@ impl Display for Session {
             }
             Offer(cs) => {
                 let count = cs.len();
-                write!(f, "Offer<(")?;
+                write!(f, "Offer<Choice<{}>, (", count)?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {

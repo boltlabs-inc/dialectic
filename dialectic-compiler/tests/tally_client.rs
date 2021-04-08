@@ -9,14 +9,17 @@ fn tally_client_expr_call_ast() {
     let client_ast: Spanned<Syntax> = Syntax::Loop(
         None,
         Box::new(
-            Syntax::Choose(vec![
-                Syntax::Break(None).into(),
-                Syntax::Block(vec![
-                    Syntax::send("Operation").into(),
-                    Syntax::call(Syntax::type_("ClientTally")).into(),
-                ])
-                .into(),
-            ])
+            Syntax::Choose(
+                None,
+                vec![
+                    Syntax::Break(None).into(),
+                    Syntax::Block(vec![
+                        Syntax::send("Operation").into(),
+                        Syntax::call(Syntax::type_("ClientTally")).into(),
+                    ])
+                    .into(),
+                ],
+            )
             .into(),
         ),
     )

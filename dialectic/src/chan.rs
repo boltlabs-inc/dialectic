@@ -985,13 +985,13 @@ where
         Carrier::Case,
     );
 
-    unsafe fn case(mut self) -> Self::Case {
+    unsafe fn case(mut this: Self) -> Self::Case {
         // FIXME(sleffy): unwrap necessary?
-        let carrier_case = self.variant.take().unwrap().case();
-        let tx = self.tx.take();
-        let rx = self.rx.take();
-        let drop_tx = self.drop_tx.clone();
-        let drop_rx = self.drop_rx.clone();
+        let carrier_case = Case::case(this.variant.take().unwrap());
+        let tx = this.tx.take();
+        let rx = this.rx.take();
+        let drop_tx = this.drop_tx.clone();
+        let drop_rx = this.drop_rx.clone();
         let chan = Chan {
             tx,
             rx,

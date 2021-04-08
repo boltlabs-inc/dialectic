@@ -47,7 +47,7 @@ where
     Carrier: 'static,
 {
     type Substituted =
-        Offer<<<Choices::AsList as EachSubst<P, N>>::Substituted as List>::AsTuple, Carrier>;
+        Offer<Carrier, <<Choices::AsList as EachSubst<P, N>>::Substituted as List>::AsTuple>;
 }
 
 impl<N: Unary, P, Choices, Carrier> Then<P, N> for Offer<Carrier, Choices>
@@ -58,7 +58,7 @@ where
     Carrier: 'static,
 {
     type Combined =
-        Offer<<<Choices::AsList as EachThen<P, N>>::Combined as List>::AsTuple, Carrier>;
+        Offer<Carrier, <<Choices::AsList as EachThen<P, N>>::Combined as List>::AsTuple>;
 }
 
 impl<N: Unary, Level: Unary, Choices, Carrier> Lift<N, Level> for Offer<Carrier, Choices>
@@ -69,5 +69,5 @@ where
     Carrier: 'static,
 {
     type Lifted =
-        Offer<<<Choices::AsList as EachLift<N, Level>>::Lifted as List>::AsTuple, Carrier>;
+        Offer<Carrier, <<Choices::AsList as EachLift<N, Level>>::Lifted as List>::AsTuple>;
 }

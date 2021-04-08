@@ -315,15 +315,21 @@ mod tests {
     fn complex_session_zero_size() {
         type P = Loop<
             Loop<
-                Choose<(
-                    Send<usize, Continue<0>>,
-                    Recv<String, Continue<0>>,
-                    Offer<(
-                        Send<bool, Continue<0>>,
-                        Continue<1>,
-                        Split<Send<isize, Continue<0>>, Recv<isize, Continue<0>>, Done>,
-                    )>,
-                )>,
+                Choose<
+                    Choice<3>,
+                    (
+                        Send<usize, Continue<0>>,
+                        Recv<String, Continue<0>>,
+                        Offer<
+                            Choice<3>,
+                            (
+                                Send<bool, Continue<0>>,
+                                Continue<1>,
+                                Split<Send<isize, Continue<0>>, Recv<isize, Continue<0>>, Done>,
+                            ),
+                        >,
+                    ),
+                >,
             >,
         >;
         assert_eq!(std::mem::size_of::<P>(), 0);
