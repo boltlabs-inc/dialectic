@@ -967,7 +967,7 @@ where
     type Range = Exhaustive<LENGTH>;
 
     fn tag(&self) -> Option<usize> {
-        self.variant.tag()
+        self.variant.as_ref().unwrap().tag()
     }
 }
 
@@ -990,7 +990,7 @@ where
 
     unsafe fn case(mut this: Self) -> Self::Case {
         // FIXME(sleffy): unwrap necessary?
-        let carrier_case = Case::case(this.variant.take().unwrap());
+        let carrier_case = Case::<N>::case(this.variant.take().unwrap());
         let tx = this.tx.take();
         let rx = this.rx.take();
         let drop_tx = this.drop_tx.clone();
