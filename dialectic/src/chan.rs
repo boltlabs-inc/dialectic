@@ -300,8 +300,8 @@ where
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
-    /// other end of the connection, alerting the other party to this choice by sending the number
-    /// `N` over the channel.
+    /// other end of the connection, alerting the other party to this choice by sending
+    /// corresponding `N`th case of the "carrier type" ([`Choice`] by default) over the channel.
     ///
     /// The choice `N` is specified as a `const` generic `usize`.
     ///
@@ -357,7 +357,7 @@ where
     /// let (c1, c2) = OnlyTwoChoices::channel(|| mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
-    /// c1.choose::<2>().await?;
+    /// c1.choose::<2>(()).await?;
     ///
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
@@ -382,6 +382,8 @@ where
         Ok(self.unchecked_cast())
     }
 
+    /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by reference.
+    /// Useful for custom carrier types.
     pub async fn choose_ref<const N: usize>(
         mut self,
         choice: &<Carrier as Case<N>>::Case,
@@ -400,6 +402,8 @@ where
         Ok(self.unchecked_cast())
     }
 
+    /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by mutable
+    /// reference. Useful for custom carrier types.
     pub async fn choose_mut<const N: usize>(
         mut self,
         choice: &mut <Carrier as Case<N>>::Case,
@@ -427,11 +431,12 @@ where
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
     Tx: marker::Send + 'static,
     Rx: Receiver + ReceiveCase<Carrier> + marker::Send + 'static,
+    Carrier: Match,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
-    /// all the possible channel types which could be returned, which must be eliminated using
-    /// [`case`](Branches::case).
+    /// all the possible channel types which could be returned, which must be eliminated through the
+    /// [`Match`] and [`Case<N>`] traits.
     ///
     ///💡 **Where possible, prefer the [`offer!`](crate::offer) macro**. This has the benefit of
     /// ensuring at compile time that no case is left unhandled; it's also more succinct.

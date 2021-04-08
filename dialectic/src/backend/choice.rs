@@ -3,7 +3,10 @@ use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
 use vesta::{Case, Exhaustive, Match};
 
+/// A trait mapping a `Number<N>` to a `Choice<N>`, so that wrapped/calculated const generic
+/// parameters can be transformed to `Choice<N>`s without needing an extra parameter.
 pub trait ToChoice: Constant {
+    /// The resulting `Choice<N>`.
     type AsChoice;
 }
 
