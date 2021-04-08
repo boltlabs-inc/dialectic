@@ -67,7 +67,11 @@ impl fmt::Display for Target {
             Choose(carrier_type, cs) => {
                 let count = cs.len();
 
-                write!(f, "Choose<(")?;
+                match carrier_type {
+                    Some(carrier) => write!(f, "Choose<{}, (", carrier.to_token_stream())?,
+                    None => write!(f, "Choose<Choice<{}>, (", count)?,
+                }
+
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {
@@ -79,15 +83,16 @@ impl fmt::Display for Target {
                     write!(f, ",")?;
                 }
 
-                match carrier_type {
-                    Some(carrier) => write!(f, "), {}>", carrier.to_token_stream())?,
-                    None => write!(f, ")>")?,
-                }
+                write!(f, ")>")?;
             }
             Offer(carrier_type, cs) => {
                 let count = cs.len();
 
-                write!(f, "Offer<(")?;
+                match carrier_type {
+                    Some(carrier) => write!(f, "Offer<{}, (", carrier.to_token_stream())?,
+                    None => write!(f, "Offer<Choice<{}>, (", count)?,
+                }
+
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {
@@ -99,10 +104,7 @@ impl fmt::Display for Target {
                     write!(f, ",")?;
                 }
 
-                match carrier_type {
-                    Some(carrier) => write!(f, "), {}>", carrier.to_token_stream())?,
-                    None => write!(f, ")>")?,
-                }
+                write!(f, ")>")?;
             }
             Continue(n) => {
                 write!(f, "Continue<{}>", n)?;

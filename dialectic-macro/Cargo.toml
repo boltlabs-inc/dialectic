@@ -15,7 +15,7 @@ proc-macro = true
 
 [dependencies]
 dialectic-compiler = { version = "0.1", path = "../dialectic-compiler" }
-vesta-syntax = { version = "0.1", path = "../../vesta/vesta-syntax" }
+vesta-syntax = { version = "0.1" }
 syn = { version = "1.0", features = ["full", "parsing"] }
 proc-macro2 = "1.0"
 quote = "1.0"

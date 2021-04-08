@@ -406,7 +406,7 @@ mod tests {
         cfg[client].expr = Ir::Loop(Some(choose));
 
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
-        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue<0>>, Recv<i64, Continue<1>>)>>>)>>");
+        assert_eq!(s, "Loop<Choose<Choice<2>, (Done, Send<Operation, Loop<Choose<Choice<2>, (Send<i64, Continue<0>>, Recv<i64, Continue<1>>)>>>)>>");
     }
 
     #[test]
@@ -428,7 +428,7 @@ mod tests {
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
         assert_eq!(
             s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
+            "Loop<Choose<Choice<2>, (Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
         );
     }
 }
