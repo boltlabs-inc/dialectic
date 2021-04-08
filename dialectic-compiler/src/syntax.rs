@@ -438,8 +438,14 @@ mod tests {
                     "type" => Type(parse_quote!(())),
                     other => unreachable!("{}", other),
                 },
-                "choose" => Choose(Arbitrary::arbitrary(g)),
-                "offer" => Offer(Arbitrary::arbitrary(g)),
+                "choose" => Choose(
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
+                    Arbitrary::arbitrary(g),
+                ),
+                "offer" => Offer(
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
+                    Arbitrary::arbitrary(g),
+                ),
                 "split" => Split {
                     tx_only: Arbitrary::arbitrary(g),
                     rx_only: Arbitrary::arbitrary(g),
@@ -475,8 +481,8 @@ mod tests {
                         })
                     })
                     .collect(),
-                Choose(choices) => choices.shrink().map(Choose).collect(),
-                Offer(choices) => choices.shrink().map(Offer).collect(),
+                Choose(_, choices) => choices.shrink().map(|cs| Choose(None, cs)).collect(),
+                Offer(_, choices) => choices.shrink().map(|cs| Offer(None, cs)).collect(),
                 Loop(label, body) => body
                     .shrink()
                     .map(|body_shrunk| Loop(label.clone(), body_shrunk))
