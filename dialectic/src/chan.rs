@@ -446,6 +446,7 @@ where
     /// ```
     /// use dialectic::prelude::*;
     /// use dialectic_tokio_mpsc as mpsc;
+    /// use vesta::{Match, CaseExt, case};
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -461,17 +462,14 @@ where
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
     ///     let branches = c2.offer().await?;
-    ///     match branches.tag().unwrap() {
-    ///         0 => {
-    ///             let (c2, ()) = branches.try_case::<0>().unwrap();
-    ///             c2.recv().await()?;
+    ///     case!(branches {
+    ///         0(c2, ()) => {
+    ///             c2.recv().await?;
     ///         }
-    ///         1 => {
-    ///             let (c2, ()) = branches.try_case::<1>().unwrap();
+    ///         1(c2, ()) => {
     ///             c2.send("Hello!".to_string()).await?;
     ///         }
-    ///         _ => unreachable!(),
-    ///     }
+    ///     });
     ///     Ok::<_, mpsc::Error>(())
     /// });
     ///

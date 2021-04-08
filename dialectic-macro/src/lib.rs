@@ -318,6 +318,7 @@ pub fn offer(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 struct OfferInvocation {
     /// The identifier of the channel to be offered upon.
     chan: syn::Ident,
+    /// The brace token for the whole of the offer.
     brace_token: Brace,
     /// The syntactic branches of the invocation: this could be invalid, because [`Arm`] contains
     /// many variants for its patterns which are not legitimate in our context.
