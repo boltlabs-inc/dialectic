@@ -126,11 +126,11 @@ pub trait TransmitChoice: Transmitter {
 /// [`send_case`](TransmitCase::send_case) a message of type `T` by [`Val`], [`Ref`], or [`Mut`],
 /// depending on the calling convention specified by `C`. [`TransmitCase`] is highly similar to
 /// [`Transmit`], with a major difference: [`TransmitCase`] may be used to send only *part* of an
-/// `enum` datatype, as part of a [`Chan::choose`] call. This is because the discriminant is
-/// actually the constant `N: usize` parameter to the [`TransmitCase::send_case`] method. This
-/// matching/construction/deconstruction is done through the [`vesta`](https://docs.rs/vesta) crate
-/// and its `Match` and `Case` traits; implementation of these traits does not need to be done by
-/// hand as Vesta provides a derive macro for them.
+/// `enum` datatype, as part of a [`Chan::choose`](crate::Chan::choose) call. This is because the
+/// discriminant is actually the constant `N: usize` parameter to the [`TransmitCase::send_case`]
+/// method. This matching/construction/deconstruction is done through the
+/// [`vesta`](https://docs.rs/vesta) crate and its `Match` and `Case` traits; implementation of
+/// these traits does not need to be done by hand as Vesta provides a derive macro for them.
 ///
 /// If you are writing a backend for a new protocol, you almost certainly do not need to implement
 /// [`TransmitCase`] for your backend, and you can rely on an implementation of [`TransmitChoice`].
