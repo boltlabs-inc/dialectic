@@ -296,7 +296,7 @@ pub fn Session(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// });
 ///
 /// // Choose to send an integer
-/// c1.choose::<0>().await?.send(42).await?;
+/// c1.choose::<0>(()).await?.send(42).await?;
 ///
 /// // Wait for the offering thread to finish
 /// t1.await??;
