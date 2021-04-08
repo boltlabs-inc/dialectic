@@ -228,6 +228,12 @@ impl Parse for Spanned<Syntax> {
             let kw_span = input.parse::<kw::choose>()?.span();
             let choose_span = kw_span.join(input.span()).unwrap_or(kw_span);
 
+            let carrier_type = if input.peek(token::Brace) {
+                None
+            } else {
+                Some(input.parse()?)
+            };
+
             let content;
             braced!(content in input);
             let mut choice_arms = Vec::new();
@@ -251,13 +257,19 @@ impl Parse for Spanned<Syntax> {
             }
 
             Ok(Spanned {
-                inner: Syntax::Choose(arm_asts),
+                inner: Syntax::Choose(carrier_type, arm_asts),
                 span: choose_span,
             })
         } else if lookahead.peek(kw::offer) {
             // Ast::Offer: offer { 0 => <Ast>, 1 => <Ast>, ... }
             let kw_span = input.parse::<kw::offer>()?.span();
             let offer_span = kw_span.join(input.span()).unwrap_or(kw_span);
+
+            let carrier_type = if input.peek(token::Brace) {
+                None
+            } else {
+                Some(input.parse()?)
+            };
 
             let content;
             braced!(content in input);
@@ -282,7 +294,7 @@ impl Parse for Spanned<Syntax> {
             }
 
             Ok(Spanned {
-                inner: Syntax::Offer(arm_asts),
+                inner: Syntax::Offer(carrier_type, arm_asts),
                 span: offer_span,
             })
         } else if lookahead.peek(kw::split) {

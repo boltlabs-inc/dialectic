@@ -4,7 +4,7 @@ use {
     proc_macro2::TokenStream,
     quote::{quote_spanned, ToTokens},
     std::{fmt, rc::Rc},
-    syn::{Path, Type},
+    syn::{parse_quote, Path, Type},
 };
 
 use crate::Spanned;
@@ -24,10 +24,10 @@ pub enum Target {
     Recv(Type, Rc<Spanned<Target>>),
     /// Session type: `Send<T, P>`.
     Send(Type, Rc<Spanned<Target>>),
-    /// Session type: `Choose<(P, ...)>`.
-    Choose(Vec<Spanned<Target>>),
-    /// Session type: `Offer<(P, ...)>`.
-    Offer(Vec<Spanned<Target>>),
+    /// Session type: `Choose<(P, ...), Carrier>`.
+    Choose(Option<Type>, Vec<Spanned<Target>>),
+    /// Session type: `Offer<(P, ...), Carrier>`.
+    Offer(Option<Type>, Vec<Spanned<Target>>),
     /// Session type: `Loop<...>`.
     Loop(Rc<Spanned<Target>>),
     /// Session type: `Continue<N>`.
@@ -64,8 +64,9 @@ impl fmt::Display for Target {
             } => write!(f, "Split<{}, {}, {}>", s, p, q)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Then(s, p) => write!(f, "<{} as Then<{}>>::Combined", s, p)?,
-            Choose(cs) => {
+            Choose(carrier_type, cs) => {
                 let count = cs.len();
+
                 write!(f, "Choose<(")?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
@@ -73,13 +74,19 @@ impl fmt::Display for Target {
                         write!(f, ", ")?;
                     }
                 }
+
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+
+                match carrier_type {
+                    Some(carrier) => write!(f, "), {}>", carrier.to_token_stream())?,
+                    None => write!(f, ")>")?,
+                }
             }
-            Offer(cs) => {
+            Offer(carrier_type, cs) => {
                 let count = cs.len();
+
                 write!(f, "Offer<(")?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
@@ -87,10 +94,15 @@ impl fmt::Display for Target {
                         write!(f, ", ")?;
                     }
                 }
+
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+
+                match carrier_type {
+                    Some(carrier) => write!(f, "), {}>", carrier.to_token_stream())?,
+                    None => write!(f, ")>")?,
+                }
             }
             Continue(n) => {
                 write!(f, "Continue<{}>", n)?;
@@ -154,17 +166,33 @@ impl Spanned<Target> {
                 quote_spanned!(span=> <#s as #dialectic_crate::types::Then<#p>>::Combined)
                     .to_tokens(tokens);
             }
-            Choose(cs) => {
+            Choose(carrier_type, cs) => {
+                let carrier = match carrier_type {
+                    Some(ty) => ty.clone(),
+                    None => {
+                        let n = cs.len();
+                        parse_quote!(#dialectic_crate::backend::Choice<#n>)
+                    }
+                };
                 let cs = cs
                     .iter()
                     .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
-                quote_spanned!(span=> #dialectic_crate::types::Choose<(#(#cs,)*)>).to_tokens(tokens)
+                quote_spanned!(span=> #dialectic_crate::types::Choose<#carrier, (#(#cs,)*)>)
+                    .to_tokens(tokens)
             }
-            Offer(cs) => {
+            Offer(carrier_type, cs) => {
+                let carrier = match carrier_type {
+                    Some(ty) => ty.clone(),
+                    None => {
+                        let n = cs.len();
+                        parse_quote!(#dialectic_crate::backend::Choice<#n>)
+                    }
+                };
                 let cs = cs
                     .iter()
                     .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
-                quote_spanned!(span=> #dialectic_crate::types::Offer<(#(#cs,)*)>).to_tokens(tokens)
+                quote_spanned!(span=> #dialectic_crate::types::Offer<#carrier, (#(#cs,)*)>)
+                    .to_tokens(tokens)
             }
             Continue(n) => {
                 quote_spanned!(span=> #dialectic_crate::types::Continue<#n>).to_tokens(tokens)

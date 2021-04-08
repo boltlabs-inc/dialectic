@@ -490,7 +490,7 @@ impl Parse for Mutability {
 
 struct TransmitterSpec {
     name: syn::Type,
-    types: Punctuated<(Mutability, syn::Type), Token![,]>,
+    types: Punctuated<(Mutability, Option<Token![match]>, syn::Type), Token![,]>,
 }
 
 struct ReceiverSpec {
@@ -500,10 +500,10 @@ struct ReceiverSpec {
 
 impl Parse for TransmitterSpec {
     fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        fn parse_convention_type_pair(
+        fn parse_convention_type_triple(
             input: ParseStream,
-        ) -> Result<(Mutability, syn::Type), syn::Error> {
-            Ok((input.parse()?, input.parse()?))
+        ) -> Result<(Mutability, Option<Token![match]>, syn::Type), syn::Error> {
+            Ok((input.parse()?, input.parse()?, input.parse()?))
         }
 
         let name: syn::Type = input.parse()?;
@@ -517,7 +517,7 @@ impl Parse for TransmitterSpec {
             let types = if input.is_empty() {
                 Punctuated::new()
             } else {
-                input.parse_terminated(parse_convention_type_pair)?
+                input.parse_terminated(parse_convention_type_triple)?
             };
             Ok(TransmitterSpec { name, types })
         }
@@ -624,7 +624,7 @@ fn where_predicates_mut(
 /// # fn e<Tx>() {}
 /// #[Transmitter(Tx for bool, i64, Vec<String>)]
 /// # fn f<Tx>() {}
-/// #[Transmitter(Tx for bool, ref i64, ref mut Vec<String>)]
+/// #[Transmitter(Tx for bool, match Option<String>, ref i64, ref mut Vec<String>)]
 /// # fn g<Tx>() {}
 /// ```
 ///
@@ -637,7 +637,7 @@ fn where_predicates_mut(
 /// or `mut`), and types `T1`, `T2`, `...`, the invocation:
 ///
 /// ```ignore
-/// #[Transmitter(Tx for C1? T1, C2? T2, ...)]
+/// #[Transmitter(Tx for C1? T1, C2? match T2, ...)]
 /// fn f<Tx>() {}
 /// ```
 ///
@@ -659,7 +659,7 @@ fn where_predicates_mut(
 ///     // otherwise, we translate into `call_by` conventions using
 ///     // `move` => `Val`, `ref` => `Ref`, and `mut` => `Mut`
 ///     Tx: Transmit<T1, C1>,
-///     Tx: Transmit<T2, C2>,
+///     Tx: TransmitCase<T2, C2>,
 ///     // ...
 /// {}
 /// ```
@@ -678,10 +678,16 @@ pub fn Transmitter(
                 + #dialectic_path::backend::Transmitter
                 + 'static
         });
-        for (mutability, ty) in types {
-            predicates.push(syn::parse_quote! {
-                #name: #dialectic_path::backend::Transmit<#ty, #mutability>
-            });
+        for (mutability, match_kw, ty) in types {
+            if match_kw.is_none() {
+                predicates.push(syn::parse_quote! {
+                    #name: #dialectic_path::backend::Transmit<#ty, #mutability>
+                });
+            } else {
+                predicates.push(syn::parse_quote! {
+                    #name: #dialectic_path::backend::TransmitCase<#ty, #mutability>
+                });
+            }
         }
         item.into_token_stream().into()
     } else {

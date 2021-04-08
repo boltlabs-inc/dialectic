@@ -14,7 +14,12 @@
 
 #[doc(no_inline)]
 pub use call_by::{By, Convention, Mut, Ref, Val};
-use std::{future::Future, pin::Pin};
+use std::{
+    convert::{TryFrom, TryInto},
+    future::Future,
+    pin::Pin,
+};
+pub use vesta::{Case, Match};
 
 mod choice;
 pub use choice::*;
@@ -30,12 +35,6 @@ pub use choice::*;
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
-
-    /// Send any `Choice<N>` using the [`Convention`] specified by the trait implementation.
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// A marker trait indicating that some type `T` is transmittable as the associated type
@@ -112,6 +111,46 @@ where
         'a: 'async_lifetime;
 }
 
+pub trait TransmitChoice: Transmitter {
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
+}
+
+pub trait TransmitCase<T: ?Sized, C: Convention = Val>: Transmitter
+where
+    T: Transmittable + Match,
+{
+    fn send_case<'a, 'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        message: <<T as Case<N>>::Case as By<'a, C>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        T: Case<N>,
+        <T as Case<N>>::Case: By<'a, C>,
+        'a: 'async_lifetime;
+}
+
+impl<Tx: Transmitter + TransmitChoice, const LENGTH: usize> TransmitCase<Choice<LENGTH>, Val>
+    for Tx
+{
+    fn send_case<'a, 'async_lifetime, const N: usize>(
+        &'async_lifetime mut self,
+        _message: <<Choice<LENGTH> as Case<N>>::Case as By<'a, Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        Choice<LENGTH>: Case<N>,
+        <Choice<LENGTH> as Case<N>>::Case: By<'a, Val>,
+        'a: 'async_lifetime,
+    {
+        // FIXME(sleffy): no unwrap
+        self.send_choice::<LENGTH>(
+            TryFrom::<u8>::try_from(N.try_into().unwrap()).expect("N < LENGTH by trait properties"),
+        )
+    }
+}
+
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
 /// implement [`Receiver`], which specifies what type of errors it might return, as well as giving a
 /// method to send [`Choice`]s across the channel. This is a super-trait of [`Receive`], which is
@@ -122,12 +161,6 @@ where
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;
-
-    /// Receive any `Choice<N>`. It is impossible to construct a `Choice<0>`, so if `N = 0`, a
-    /// [`Receiver::Error`] must be returned.
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// If a transport is [`Receive<T>`](Receive), we can use it to [`recv`](Receive::recv) a message of
@@ -151,4 +184,31 @@ pub trait Receive<T>: Receiver {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+pub trait ReceiveChoice: Receiver {
+    /// Receive any `Choice<N>`. It is impossible to construct a `Choice<0>`, so if `N = 0`, a
+    /// [`Receiver::Error`] must be returned.
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+pub trait ReceiveCase<T>: Receiver {
+    /// Receive a choice. This may require type annotations for disambiguation.
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+impl<Rx: Receiver, const LENGTH: usize> ReceiveCase<Choice<LENGTH>> for Rx
+where
+    Rx: ReceiveChoice,
+{
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        self.recv_choice::<LENGTH>()
+    }
 }

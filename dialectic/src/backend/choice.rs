@@ -1,6 +1,15 @@
 use crate::unary::*;
 use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
+use vesta::{Case, Exhaustive, Match};
+
+pub trait ToChoice: Constant {
+    type AsChoice;
+}
+
+impl<const N: usize> ToChoice for Number<N> {
+    type AsChoice = Choice<N>;
+}
 
 /// A `Choice` represents a selection between several protocols offered by [`offer!`](crate::offer).
 ///
@@ -115,6 +124,31 @@ impl<const N: usize> TryFrom<u8> for Choice<N> {
 impl<const N: usize> From<Choice<N>> for u8 {
     fn from(Choice { choice, .. }: Choice<N>) -> u8 {
         choice
+    }
+}
+
+unsafe impl<const N: usize> Match for Choice<N> {
+    type Range = Exhaustive<N>;
+
+    fn tag(&self) -> Option<usize> {
+        Some(self.choice as usize)
+    }
+}
+
+impl<const M: usize, const N: usize> Case<M> for Choice<N>
+where
+    Number<N>: ToUnary,
+    Number<M>: ToUnary,
+    UnaryOf<M>: LessThan<UnaryOf<N>>,
+{
+    type Case = ();
+
+    unsafe fn case(self) -> Self::Case {
+        ()
+    }
+
+    fn uncase(_: ()) -> Self {
+        Choice { choice: M as u8 }
     }
 }
 
