@@ -15,7 +15,7 @@
 // Documentation configuration
 #![forbid(broken_intra_doc_links)]
 
-use dialectic::backend::{self, By, Choice, Val};
+use dialectic::backend::{self, By, Choice, Mut, Ref, Val};
 use std::{convert::TryInto, future::Future, pin::Pin};
 
 /// Shorthand for a [`Chan`](dialectic::Chan) using a null [`Sender`] and [`Receiver`].
@@ -73,7 +73,6 @@ impl std::error::Error for Error {}
 
 impl backend::Transmitter for Sender {
     type Error = Error;
-    type Convention = Val;
 
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
@@ -83,12 +82,39 @@ impl backend::Transmitter for Sender {
     }
 }
 
-impl backend::Transmit<()> for Sender {
+impl backend::Transmit<(), Val> for Sender {
     fn send<'a, 'async_lifetime>(
         &'async_lifetime mut self,
-        _message: <() as By<Val>>::Type,
+        _message: <() as By<'a, Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
     where
+        (): By<'a, Val>,
+        'a: 'async_lifetime,
+    {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl backend::Transmit<(), Ref> for Sender {
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        _message: <() as By<'a, Ref>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        (): By<'a, Ref>,
+        'a: 'async_lifetime,
+    {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+impl backend::Transmit<(), Mut> for Sender {
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        _message: <() as By<'a, Mut>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        (): By<'a, Mut>,
         'a: 'async_lifetime,
     {
         Box::pin(async { Ok(()) })

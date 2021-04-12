@@ -49,7 +49,7 @@ impl Serializer for Json {
     type Error = json::Error;
     type Output = String;
 
-    fn serialize<T: Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error> {
+    fn serialize<T: ?Sized + Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error> {
         json::to_string(item)
     }
 }

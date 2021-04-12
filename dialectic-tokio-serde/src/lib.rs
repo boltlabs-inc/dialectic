@@ -31,7 +31,7 @@
 use std::{future::Future, pin::Pin};
 
 use dialectic::{
-    backend::{self, By, Choice, Receive, Ref, Transmit},
+    backend::{self, By, Choice, Mut, Receive, Ref, Transmit, Transmittable, Val},
     Chan,
 };
 use futures::sink::SinkExt;
@@ -67,7 +67,7 @@ pub trait Serializer {
     type Output;
 
     /// Serialize a reference to any [`Serialize`] value.
-    fn serialize<T: Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error>;
+    fn serialize<T: ?Sized + Serialize>(&mut self, item: &T) -> Result<Self::Output, Self::Error>;
 }
 
 /// The deserialization end of a serialization format: an object which can deserialize to any
@@ -163,7 +163,6 @@ where
     W: AsyncWrite + Unpin + Send,
 {
     type Error = SendError<F, E>;
-    type Convention = Ref;
 
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
@@ -183,9 +182,39 @@ where
     }
 }
 
-impl<T, F, E, W> Transmit<T> for Sender<F, E, W>
+impl<T, F, E, W> Transmit<T, Val> for Sender<F, E, W>
 where
-    T: Serialize + Sync,
+    T: Serialize + Send + 'static,
+    F: Serializer + Unpin + Send,
+    F::Output: Send,
+    F::Error: Send,
+    E: Encoder<F::Output> + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as By<'a, Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        Box::pin(async move {
+            let serialized = self
+                .serializer
+                .serialize(&message)
+                .map_err(SendError::Serialize)?;
+            self.framed_write
+                .send(serialized)
+                .await
+                .map_err(SendError::Encode)?;
+            Ok(())
+        })
+    }
+}
+
+impl<T: ?Sized, F, E, W> Transmit<T, Ref> for Sender<F, E, W>
+where
+    T: Transmittable + Serialize + Sync,
     F: Serializer + Unpin + Send,
     F::Output: Send,
     F::Error: Send,
@@ -210,6 +239,26 @@ where
                 .map_err(SendError::Encode)?;
             Ok(())
         })
+    }
+}
+
+impl<T: ?Sized, F, E, W> Transmit<T, Mut> for Sender<F, E, W>
+where
+    T: Transmittable + Serialize + Sync,
+    F: Serializer + Unpin + Send,
+    F::Output: Send,
+    F::Error: Send,
+    E: Encoder<F::Output> + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    fn send<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <T as By<'a, Mut>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        'a: 'async_lifetime,
+    {
+        <Self as Transmit<T, Ref>>::send(self, &*message)
     }
 }
 

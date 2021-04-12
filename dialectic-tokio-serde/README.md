@@ -1,3 +1,8 @@
+[![Rust](https://github.com/boltlabs-inc/dialectic/actions/workflows/rust.yml/badge.svg)](https://github.com/boltlabs-inc/dialectic/actions/workflows/rust.yml)
+![license: MIT](https://img.shields.io/github/license/boltlabs-inc/dialectic)
+[![crates.io](https://img.shields.io/crates/v/dialectic-tokio-serde)](https://crates.io/crates/dialectic-tokio-serde)
+[![docs.rs documentation](https://docs.rs/dialectic-tokio-serde/badge.svg)](https://docs.rs/dialectic-tokio-serde)
+
 The `dialectic-tokio-serde` crate provides [Dialectic](https://crates.io/crates/dialectic)
 `Transmitter` and `Receiver` types which are capable of sending/receiving any
 serde-`Serialize`/`Deserialize` type. These are generic over their transport, and require three

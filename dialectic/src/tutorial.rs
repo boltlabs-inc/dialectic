@@ -5,11 +5,11 @@
 The first step to communicating is figuring out what you mean to say.
 
 This crate provides a concise domain specific language for expressing session types: the
-[`Session!`](crate::Session@macro) macro. The session type attached to a wrapped communications
+[`Session!`](macro@crate::Session) macro. The session type attached to a wrapped communications
 channel indicates precisely which actions are available for each end of the channel. Internally,
 Dialectic uses a set of [ordinary Rust types](crate::types) to represent session types, but it's
 much easier to understand a protocol (especially a larger one) described in terms of the
-[`Session!](crate::Session@macro) macro.
+[`Session!`](macro@crate::Session) macro.
 
 Let's write our first session type:
 
@@ -187,7 +187,7 @@ type JustSendOneString = Session! { send String };
 
 Trying to do any of the below things results in a compile-time type error (edited below for
 brevity). Note that the errors below are in terms of the underlying [session types](crate::types)
-to which the [`Session!`](crate::Session@macro) macro compiles its input. The types in these error
+to which the [`Session!`](macro@crate::Session) macro compiles its input. The types in these error
 messages can be quite long, as they contain the full session type describing the channel. Debugging
 such errors, you usually don't have to understand the whole verbose session type, though. You just
 need to see which part doesn't match. Like so:
@@ -277,7 +277,7 @@ Most interesting protocols don't just consist of linear sequences of `send`s and
 Sometimes, one party offers the other a choice of different ways to proceed, and the other
 chooses which path to take.
 
-In Dialectic, this possibility is represented by the [`Session!`](crate::Session@macro) macro's
+In Dialectic, this possibility is represented by the [`Session!`](macro@crate::Session) macro's
 `offer` and `choose` keywords. Each is parameterized by an ordered list of session types, each
 corresponding to one possible next session.
 
@@ -369,7 +369,7 @@ these can be modeled with session types by introducing *iteration*.
 
 Suppose we want to send a stream of as many integers as desired, then receive back their sum. We
 could describe this protocol using the `loop` and `break` keywords in the
-[`Session!`](crate::Session@macro) macro:
+[`Session!`](macro@crate::Session) macro:
 
 ```
 # use dialectic::prelude::*;
@@ -386,7 +386,7 @@ type QuerySum = Session! {
 };
 ```
 
-**Notice:** in the [`Session!`](crate::Session@macro) macro, `loop`s repeat themselves by default,
+**Notice:** in the [`Session!`](macro@crate::Session) macro, `loop`s repeat themselves by default,
 unless explicitly broken by a `break` statement (just like in Rust!).
 
 By taking the dual of each part of the session type, we know the other end of this channel
@@ -783,7 +783,7 @@ type S = Session! {
 # struct T4;
 # struct T5;
 
-#[Transmitter(Tx move for T1, T3, T5)]
+#[Transmitter(Tx for T1, T3, T5)]
 #[Receiver(Rx for T2, T4)]
 async fn run<Tx, Rx>(
     chan: Chan<S, Tx, Rx>,

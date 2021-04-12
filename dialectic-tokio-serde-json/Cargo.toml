@@ -3,9 +3,11 @@ name = "dialectic-tokio-serde-json"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@boltlabs.io>", "Shea Leffler <shea@errno.com>"]
 edition = "2018"
+license = "MIT"
 description = "A backend for the Dialectic crate using JSON serialization over Tokio transport"
 repository = "https://github.com/boltlabs-inc/dialectic"
 homepage = "https://github.com/boltlabs-inc/dialectic"
+categories = ["asynchronous", "concurrency", "encoding", "network-programming"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -13,7 +15,7 @@ serde_json = { version = "1" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 dialectic = { version = "0.4", path = "../dialectic", optional = true }
-dialectic-tokio-serde = { path = "../dialectic-tokio-serde" }
+dialectic-tokio-serde = { version = "0.1", path = "../dialectic-tokio-serde" }
 
 [package.metadata.docs.rs]
 all-features = true
