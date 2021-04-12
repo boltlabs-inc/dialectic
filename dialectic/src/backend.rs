@@ -132,22 +132,15 @@ pub trait TransmitChoice: Transmitter {
 /// [`vesta`](https://docs.rs/vesta) crate and its `Match` and `Case` traits; implementation of
 /// these traits does not need to be done by hand as Vesta provides a derive macro for them.
 ///
-/// If you are writing a backend for a new protocol, you almost certainly do not need to implement
-/// [`TransmitCase`] for your backend, and you can rely on an implementation of [`TransmitChoice`].
-/// If you are writing a backend for an existing protocol which you are reimplementing using
-/// Dialectic, however, then [`TransmitCase`] is necessary to allow you to branch on a custom type.
-/// Without it, you would be limited to [`Choice<N>`](Choice), which is represented as a single byte
-/// and is insufficient to represent "choosing" operations in existing protocols.
-///
-/// If you're writing a function and need a lot of different `TransmitCase<T, C>` bounds, the
-/// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
-/// succinctly.
-pub trait TransmitCase<T: ?Sized, C: Convention = Val>: Transmitter
+/// You do not need to ever implement `TransmitCase`. It has blanket implementations for all types
+/// that matter.
+pub trait TransmitCase<T: ?Sized, C: Convention, const N: usize>:
+    Transmitter + sealed::TransmitCase<T, C>
 where
     T: Transmittable + Match,
 {
     /// Send a "case" of a [`Match`]-able type.
-    fn send_case<'a, 'async_lifetime, const N: usize>(
+    fn send_case<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         message: <<T as Case<N>>::Case as By<'a, C>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
@@ -157,10 +150,35 @@ where
         'a: 'async_lifetime;
 }
 
-impl<Tx: Transmitter + TransmitChoice, const LENGTH: usize> TransmitCase<Choice<LENGTH>, Val>
-    for Tx
+/// This is a wrapper type which disambiguates, at the type level, "custom" choice types, and makes
+/// sure Rust sees them as a different type from `Choice<N>`.
+#[derive(Debug)]
+pub struct CustomChoice<T>(pub T);
+
+unsafe impl<T: Match> Match for CustomChoice<T> {
+    type Range = T::Range;
+
+    fn tag(&self) -> Option<usize> {
+        self.0.tag()
+    }
+}
+
+impl<T: Match + Case<N>, const N: usize> Case<N> for CustomChoice<T> {
+    type Case = T::Case;
+
+    unsafe fn case(this: Self) -> Self::Case {
+        T::case(this.0)
+    }
+
+    fn uncase(case: Self::Case) -> Self {
+        CustomChoice(T::uncase(case))
+    }
+}
+
+impl<Tx: Transmitter + TransmitChoice, const LENGTH: usize, const N: usize>
+    TransmitCase<Choice<LENGTH>, Val, N> for Tx
 {
-    fn send_case<'a, 'async_lifetime, const N: usize>(
+    fn send_case<'a, 'async_lifetime>(
         &'async_lifetime mut self,
         _message: <<Choice<LENGTH> as Case<N>>::Case as By<'a, Val>>::Type,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
@@ -173,6 +191,22 @@ impl<Tx: Transmitter + TransmitChoice, const LENGTH: usize> TransmitCase<Choice<
         self.send_choice::<LENGTH>(
             TryFrom::<u8>::try_from(N.try_into().unwrap()).expect("N < LENGTH by trait properties"),
         )
+    }
+}
+
+impl<Tx: Transmitter + Transmit<T>, T: Match + Transmittable, const N: usize>
+    TransmitCase<CustomChoice<T>, Val, N> for Tx
+{
+    fn send_case<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <<CustomChoice<T> as Case<N>>::Case as By<'a, Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        CustomChoice<T>: Case<N>,
+        <CustomChoice<T> as Case<N>>::Case: By<'a, Val>,
+        'a: 'async_lifetime,
+    {
+        self.send(<CustomChoice<T> as Case<N>>::uncase(call_by::coerce_move(message)).0)
     }
 }
 
@@ -258,4 +292,33 @@ where
     {
         self.recv_choice::<LENGTH>()
     }
+}
+
+impl<Rx: Receiver, T: Match> ReceiveCase<CustomChoice<T>> for Rx
+where
+    Rx: Receive<T> + Send,
+{
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<CustomChoice<T>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async move {
+            let t = self.recv().await?;
+            Ok(CustomChoice(t))
+        })
+    }
+}
+
+mod sealed {
+    use super::*;
+
+    pub trait TransmitCase<T: ?Sized, C> {}
+
+    impl<Tx: Transmitter + Transmit<T>, T: Transmittable> TransmitCase<CustomChoice<T>, Val> for Tx {}
+    impl<Tx: Transmitter + TransmitChoice, const N: usize> TransmitCase<Choice<N>, Val> for Tx {}
+
+    pub trait ReceiveCase<T: ?Sized> {}
+
+    impl<Rx: Receiver + Receive<T>, T> ReceiveCase<CustomChoice<T>> for Rx {}
+    impl<Rx: Receiver + ReceiveChoice, const N: usize> ReceiveCase<Choice<N>> for Rx {}
 }

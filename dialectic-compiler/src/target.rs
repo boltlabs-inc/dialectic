@@ -68,7 +68,9 @@ impl fmt::Display for Target {
                 let count = cs.len();
 
                 match carrier_type {
-                    Some(carrier) => write!(f, "Choose<{}, (", carrier.to_token_stream())?,
+                    Some(carrier) => {
+                        write!(f, "Choose<CustomChoice<{}>, (", carrier.to_token_stream())?
+                    }
                     None => write!(f, "Choose<Choice<{}>, (", count)?,
                 }
 
@@ -89,7 +91,9 @@ impl fmt::Display for Target {
                 let count = cs.len();
 
                 match carrier_type {
-                    Some(carrier) => write!(f, "Offer<{}, (", carrier.to_token_stream())?,
+                    Some(carrier) => {
+                        write!(f, "Offer<CustomChoice<{}>, (", carrier.to_token_stream())?
+                    }
                     None => write!(f, "Offer<Choice<{}>, (", count)?,
                 }
 
@@ -169,8 +173,8 @@ impl Spanned<Target> {
                     .to_tokens(tokens);
             }
             Choose(carrier_type, cs) => {
-                let carrier = match carrier_type {
-                    Some(ty) => ty.clone(),
+                let carrier: syn::Type = match carrier_type {
+                    Some(ty) => parse_quote!(#dialectic_crate::backend::CustomChoice<#ty>),
                     None => {
                         let n = cs.len();
                         parse_quote!(#dialectic_crate::backend::Choice<#n>)
@@ -183,8 +187,8 @@ impl Spanned<Target> {
                     .to_tokens(tokens)
             }
             Offer(carrier_type, cs) => {
-                let carrier = match carrier_type {
-                    Some(ty) => ty.clone(),
+                let carrier: syn::Type = match carrier_type {
+                    Some(ty) => parse_quote!(#dialectic_crate::backend::CustomChoice<#ty>),
                     None => {
                         let n = cs.len();
                         parse_quote!(#dialectic_crate::backend::Choice<#n>)

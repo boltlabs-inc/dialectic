@@ -376,51 +376,51 @@ where
         Number<N>: ToUnary,
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
-        Tx: TransmitCase<Carrier>,
+        Tx: TransmitCase<Carrier, Val, N>,
     {
-        self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
+        self.tx.as_mut().unwrap().send_case(choice).await?;
         Ok(self.unchecked_cast())
     }
 
-    /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by reference.
-    /// Useful for custom carrier types.
-    pub async fn choose_ref<const N: usize>(
-        mut self,
-        choice: &<Carrier as Case<N>>::Case,
-    ) -> Result<
-        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
-        Tx::Error,
-    >
-    where
-        Carrier: Case<N>,
-        Number<N>: ToUnary,
-        Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
-        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
-        Tx: TransmitCase<Carrier, Ref>,
-    {
-        self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
-        Ok(self.unchecked_cast())
-    }
+    // /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by reference.
+    // /// Useful for custom carrier types.
+    // pub async fn choose_ref<const N: usize>(
+    //     mut self,
+    //     choice: &<Carrier as Case<N>>::Case,
+    // ) -> Result<
+    //     Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+    //     Tx::Error,
+    // >
+    // where
+    //     Carrier: Case<N>,
+    //     Number<N>: ToUnary,
+    //     Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+    //     <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+    //     Tx: TransmitCase<Carrier, Ref>,
+    // {
+    //     self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
+    //     Ok(self.unchecked_cast())
+    // }
 
-    /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by mutable
-    /// reference. Useful for custom carrier types.
-    pub async fn choose_mut<const N: usize>(
-        mut self,
-        choice: &mut <Carrier as Case<N>>::Case,
-    ) -> Result<
-        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
-        Tx::Error,
-    >
-    where
-        Carrier: Case<N>,
-        Number<N>: ToUnary,
-        Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
-        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
-        Tx: TransmitCase<Carrier, Mut>,
-    {
-        self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
-        Ok(self.unchecked_cast())
-    }
+    // /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by mutable
+    // /// reference. Useful for custom carrier types.
+    // pub async fn choose_mut<const N: usize>(
+    //     mut self,
+    //     choice: &mut <Carrier as Case<N>>::Case,
+    // ) -> Result<
+    //     Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+    //     Tx::Error,
+    // >
+    // where
+    //     Carrier: Case<N>,
+    //     Number<N>: ToUnary,
+    //     Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+    //     <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+    //     Tx: TransmitCase<Carrier, Mut>,
+    // {
+    //     self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
+    //     Ok(self.unchecked_cast())
+    // }
 }
 
 impl<Tx, Rx, S, Choices, Carrier> Chan<S, Tx, Rx>

@@ -436,7 +436,6 @@ impl Parse for Mutability {
 
 enum TransmitterBound {
     Send(Mutability, syn::Type),
-    Case(Mutability, Token![match], syn::Type),
     Choice(Token![match]),
 }
 
@@ -462,10 +461,7 @@ impl Parse for TransmitterSpec {
             let match_token = input.parse::<Option<Token![match]>>()?;
 
             match match_token {
-                Some(token) if input.peek(Token![,]) || input.is_empty() => {
-                    Ok(TransmitterBound::Choice(token))
-                }
-                Some(token) => Ok(TransmitterBound::Case(mutability, token, input.parse()?)),
+                Some(token) => Ok(TransmitterBound::Choice(token)),
                 None => Ok(TransmitterBound::Send(mutability, input.parse()?)),
             }
         }
@@ -600,7 +596,7 @@ fn where_predicates_mut(
 /// # fn e<Tx>() {}
 /// #[Transmitter(Tx for bool, i64, Vec<String>)]
 /// # fn f<Tx>() {}
-/// #[Transmitter(Tx for bool, match Option<String>, ref i64, ref mut Vec<String>)]
+/// #[Transmitter(Tx for match, bool, Option<String>, ref i64, ref mut Vec<String>)]
 /// # fn g<Tx>() {}
 /// ```
 ///
@@ -613,7 +609,7 @@ fn where_predicates_mut(
 /// or `mut`), and types `T1`, `T2`, `...`, the invocation:
 ///
 /// ```ignore
-/// #[Transmitter(Tx for C1? T1, C2? match T2, ...)]
+/// #[Transmitter(Tx for (match,)? C1? T1, C2? T2, ...)]
 /// fn f<Tx>() {}
 /// ```
 ///
@@ -632,12 +628,14 @@ fn where_predicates_mut(
 /// fn f<Tx>()
 /// where
 ///     Tx: Transmitter + Send + 'static,
+///     // If `match` is specified, a `TransmitChoice` bound is emitted:
+///     Tx: TransmitChoice,
 ///     // For each of the types `T1`, `T2`, ...
 ///     // If the convention is unspecified, `C` is left unspecified;
 ///     // otherwise, we translate into `call_by` conventions using
 ///     // `move` => `Val`, `ref` => `Ref`, and `mut` => `Mut`
 ///     Tx: Transmit<T1, C1>,
-///     Tx: TransmitCase<T2, C2>,
+///     Tx: Transmit<T2, C2>,
 ///     // ...
 /// {}
 /// ```
@@ -663,9 +661,6 @@ pub fn Transmitter(
             match bound {
                 TransmitterBound::Send(mutability, ty) => predicates.push(syn::parse_quote! {
                     #name: #dialectic_path::backend::Transmit<#ty, #mutability>
-                }),
-                TransmitterBound::Case(mutability, _, ty) => predicates.push(syn::parse_quote! {
-                    #name: #dialectic_path::backend::TransmitCase<#ty, #mutability>
                 }),
                 TransmitterBound::Choice(_) => predicates.push(syn::parse_quote! {
                     #name: #dialectic_path::backend::TransmitChoice
@@ -723,7 +718,7 @@ pub fn Transmitter(
 /// # fn a<Rx>() {}
 /// #[Receiver(Rx for bool)]
 /// # fn b<Rx>() {}
-/// #[Receiver(Rx for bool, i64, Vec<String>)]
+/// #[Receiver(Rx for match, bool, i64, Vec<String>)]
 /// # fn c<Rx>() {}
 /// ```
 ///
@@ -735,7 +730,7 @@ pub fn Transmitter(
 /// For a transmitter type `Rx`, and types `T1`, `T2`, `...`, the invocation:
 ///
 /// ```ignore
-/// #[Receiver(Rx for T1, T2, ...)]
+/// #[Receiver(Rx for (match,)? T1, T2, ...)]
 /// fn f<Rx>() {}
 /// ```
 ///
@@ -750,6 +745,8 @@ pub fn Transmitter(
 /// fn f<Rx>()
 /// where
 ///     Rx: Receiver + Send + 'static,
+///     // If `match` is present in the list, a `ReceiveChoice` bound is generated:
+///     Rx: ReceiveChoice,
 ///     // For each of the types `T1`, `T2`, ...
 ///     Rx: Receive<T1>,
 ///     Rx: Receive<T2>,
