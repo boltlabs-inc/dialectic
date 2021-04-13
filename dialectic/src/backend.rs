@@ -273,7 +273,7 @@ pub trait ReceiveChoice: Receiver {
 /// more associated "cases". [`ReceiveCase`] is highly similar to
 /// [`Receive`], with a major difference: [`ReceiveCase`] may be used to send only *part* of an
 /// `enum` datatype, as part of a [`Chan::choose`](crate::Chan::choose) call. This is because the
-/// discriminant is actually the constant `N: usize` parameter to the [`ReceiveCase::send_case`]
+/// discriminant is actually the constant `N: usize` parameter to the [`ReceiveCase::recv_case`]
 /// method. This matching/construction/deconstruction is done through the
 /// [`vesta`](https://docs.rs/vesta) crate and its `Match` and `Case` traits; implementation of
 /// these traits does not need to be done by hand as Vesta provides a derive macro for them.
