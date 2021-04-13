@@ -4,7 +4,11 @@
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmitter`] and [`Receiver`], as well as [`Transmit<T>`](Transmit)
 //! and [`Receive<T>`](Receive) for at least the types `T` used in those capacities in any given
-//! session.
+//! session. If you want to use [`Choice<N>`] to carry your branching messages, you will also need
+//! [`TransmitChoice`] and [`ReceiveChoice`]. These two pairs of traits are what need to be
+//! implemented for a transport backend to function with Dialectic; if a custom backend for an
+//! existing protocol is being implemented, [`TransmitChoice`] and [`ReceiveChoice`] do not
+//! necessarily need to be implemented and can be left out as necessary/desired.
 //!
 //! Functions which are generic over their backend will in turn need to specify the bounds
 //! [`Transmit<T>`](Transmit) and [`Receive<T>`](Receive) for all `T`s they send and receive,
@@ -26,8 +30,9 @@ pub use choice::*;
 
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
 /// must implement [`Transmitter`], which specifies what type of errors it might return, as well as
-/// giving a method to send [`Choice`]s across the channel. This is a super-trait of [`Transmit`],
-/// which is what's actually needed to receive particular values over a [`Chan`](crate::Chan).
+/// giving a method to send [`Choice`]s across the channel. This is a super-trait of [`Transmit`]
+/// and [`TransmitChoice`], which are what's actually needed to receive particular values over a
+/// [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Transmit<T>`](Transmit) bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
@@ -212,8 +217,8 @@ impl<Tx: Transmitter + Transmit<T>, T: Match + Transmittable, const N: usize>
 
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
 /// implement [`Receiver`], which specifies what type of errors it might return. This is a
-/// super-trait of [`Receive`] and [`ReceiveCase`], which are the traits that are actually needed to
-/// receive particular values over a [`Chan`](crate::Chan).
+/// super-trait of [`Receive`] and [`ReceiveChoice`], which are the traits that are actually needed
+/// to receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
@@ -264,13 +269,11 @@ pub trait ReceiveChoice: Receiver {
 /// [`vesta`](https://docs.rs/vesta) crate's [`Match`] and [`Case`] traits, which can be derived for
 /// some types through Vesta's `Match` derive macro.
 ///
-/// If you are writing a backend for a new protocol, you almost certainly do not need to implement
-/// [`ReceiveCase`] for your backend, and you can rely on an implementation of [`ReceiveChoice`]. If
-/// you are writing a backend for an existing protocol which you are reimplementing using Dialectic,
-/// however, then [`ReceiveCase`] is necessary to allow you to branch on a custom type.
-///
 /// If you're writing a function and need a lot of different `ReceiveCase<T, C>` bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
+///
+/// You do not ever need to implement `ReceiveCase` yourself. Blanket implementations are provided
+/// for all types that matter, and rely on `ReceiveChoice` and `Receive<T>`.
 pub trait ReceiveCase<T>: Receiver
 where
     T: Match,

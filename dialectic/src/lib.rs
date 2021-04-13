@@ -185,4 +185,6 @@ pub mod prelude {
     pub use call_by::{Mut, Ref, Val};
     #[doc(no_inline)]
     pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
+    #[doc(no_inline)]
+    pub use vesta::Match;
 }
