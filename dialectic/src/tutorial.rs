@@ -815,9 +815,9 @@ constructs using a special type called `Choice<N>`. Usually, this entails sendin
 single byte; however, if you're implementing an existing protocol, you may want to branch on
 something else and sending/receiving a single byte may not make any sense at all. This is where the
 Vesta crate and its `Match` derive trait and macro come in; the [`offer!`] macro is implemented
-under the hood using Vesta's `case!` macro, and accepts the same syntax for pattern matching. This
-is mostly useful for when you're writing your own backend and need specific behavior for
-transmitting/receiving messages.
+under the hood using Vesta's `case!` macro, and accepts the same syntax for pattern matching. *This
+is most useful when you're writing your own backend and need **message-for-message parity with
+an existing protocol.***
 
 As a *very* contrived example, we could rewrite the `QuerySum` example from the branching example
 using `Option` to carry our decisions:
@@ -872,17 +872,15 @@ assert_eq!(sum, 55);
 # }
 ```
 
-In real code you probably wouldn't want to do this since using something other than `Option` or
-just using the default `Choice<N>` type would be fine and way more explicit; `Match` depends on the
-order in which you define enum fields, so it can get a bit messy if it's not well-defined which
-index is which. However, defining your own `Match` instance for a type is as simple as `#[derive
-(Match)]`, and `Match` is re-exported from the Dialectic prelude module, streamlining as much of
-the process as possible.
-
-Unfortunately, using actual enum identifiers for indices is highly nontrivial. This construct is
-roughly equivalent to a dependent type, and while we'd like to eventually have named indices in the
-future, it's sufficient for now to just be able to do this kind of dependent pattern matching at
-all.
+In general, if you are not looking for message-for-message parity with an existing protocol, there
+is no reason to use custom carrier types. They give no other extra functionality over the default
+`Choice<N>`, which is more ergonomic in terms of writing bounds and also shows all of the sent data
+as part of the session type when written out; none of it is implicit, like the `i64` value which is
+implicitly sometimes sent by the `choose` in the above example. To show just how identical they
+are, you can actually write out `Session! { choose Choice<1> { 0 => {}, } }` and it will work fine.
+*But*, if you are writing a protocol implementation which is generic over its backend types, you
+would have to write `Choice<1>` as an explicit bound on the transmitter type, rather than using the
+universally quantified `match` keyword in the `Transmitter` macro.
 
 # Wrapping up
 
