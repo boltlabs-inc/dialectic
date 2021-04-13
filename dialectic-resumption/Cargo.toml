@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 dialectic = { version = "0.4", path = "../dialectic" }
+async-trait = "0.1"
