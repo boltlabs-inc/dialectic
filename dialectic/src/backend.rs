@@ -211,7 +211,7 @@ impl<Tx: Transmitter + Transmit<T>, T: Match + Transmittable, const N: usize>
         <CustomChoice<T> as Case<N>>::Case: By<'a, Val>,
         'a: 'async_lifetime,
     {
-        self.send(<CustomChoice<T> as Case<N>>::uncase(call_by::coerce_move(message)).0)
+        self.send(<CustomChoice<T> as Case<N>>::uncase(call_by::to_val(message)).0)
     }
 }
 
