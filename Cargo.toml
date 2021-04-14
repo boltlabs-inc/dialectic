@@ -4,6 +4,7 @@ members = [
     "dialectic-compiler",
     "dialectic-macro",
     "dialectic-null",
+    "dialectic-retry",
     "dialectic-tokio-mpsc",
     "dialectic-tokio-serde",
     "dialectic-tokio-serde-bincode",
