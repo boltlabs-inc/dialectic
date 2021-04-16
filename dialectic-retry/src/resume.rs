@@ -207,21 +207,18 @@ where
     }
 }
 
-async fn retry_loop<'a, C, Fut, T, E>(
-    end: &'a mut C,
-    next: &mut mpsc::Receiver<C>,
+async fn retry_loop<'c, 'i: 'c, 'r, C, I, T, E>(
+    end: &'c mut C,
+    input: &'i I,
+    next: &'r mut mpsc::Receiver<C>,
     timeout: Option<Duration>,
-    recover: impl Fn(&E, usize) -> ErrorStrategy,
-    action: impl Fn(&'a mut C) -> Fut,
-) -> Result<T, E>
-where
-    Fut: Future<Output = Result<T, E>> + 'a,
-{
+    recover: impl for<'e> Fn(&'e E, usize) -> ErrorStrategy,
+    action: impl for<'a> Fn(&'a mut C, &'i I) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>,
+) -> Result<T, E> {
     let mut count = 0;
     let mut deadline: Option<Instant> = None;
     loop {
-        let result = action(end).await;
-        match result {
+        match action(end, input).await {
             Ok(t) => break Ok(t),
             Err(error) => {
                 // Compute the deadline for any retries as the timeout duration after the time
@@ -303,6 +300,7 @@ where
 impl<Key, Tx, Rx> Transmitter for Sender<Key, Tx, Rx>
 where
     Key: Sync + Send + Eq + Hash,
+    Tx: Sync,
     Tx::Error: Send + Sync,
 {
     type Error = Tx::Error;
@@ -311,13 +309,17 @@ where
         &'async_lifetime mut self,
         choice: Choice<LENGTH>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(retry_loop(
-            &mut self.tx,
-            &mut self.next_tx,
-            self.timeout,
-            self.recover_tx,
-            |tx| tx.send_choice(choice),
-        ))
+        Box::pin(async move {
+            retry_loop(
+                &mut self.tx,
+                &choice,
+                &mut self.next_tx,
+                self.timeout,
+                self.recover_tx,
+                |tx, choice| tx.send_choice(*choice),
+            )
+            .await
+        })
     }
 }
 
@@ -327,6 +329,7 @@ impl<T, Key, Tx, Rx> Transmit<T, Val> for Sender<Key, Tx, Rx>
 where
     T: Sync + Send + 'static,
     Key: Sync + Send + Eq + Hash,
+    Tx: Sync,
     Tx::Error: Send + Sync,
 {
     fn send<'a, 'async_lifetime>(
@@ -337,31 +340,17 @@ where
         T: By<'a, Val>,
         'a: 'async_lifetime,
     {
-        let message = call_by::to_val(message);
+        let message: T = call_by::to_val(message);
         Box::pin(async move {
-            let mut count = 0;
-            loop {
-                if let Err(error) = self.tx.send(&message).await {
-                    match (self.recover_tx)(&error, count) {
-                        ErrorStrategy::Retry(after) => {
-                            tokio::time::sleep(after).await;
-                        }
-                        ErrorStrategy::RetryAfterReconnect => {
-                            if let Some(tx) = self.next_tx.recv().await {
-                                self.tx = tx;
-                            } else {
-                                break Err(error);
-                            }
-                        }
-                        ErrorStrategy::Fail => {
-                            break Err(error);
-                        }
-                    }
-                    count += 1;
-                } else {
-                    break Ok(());
-                }
-            }
+            retry_loop(
+                &mut self.tx,
+                &message,
+                &mut self.next_tx,
+                self.timeout,
+                self.recover_tx,
+                |tx, message| tx.send(message),
+            )
+            .await
         })
     }
 }
@@ -373,6 +362,7 @@ where
     for<'a> <T as By<'a, Ref>>::Type: Send,
     T: Sync + Send + 'static,
     Key: Sync + Send + Eq + Hash,
+    Tx: Sync,
     Tx::Error: Send + Sync,
 {
     fn send<'a, 'async_lifetime>(
@@ -385,29 +375,15 @@ where
     {
         let message: &'a T = call_by::to_ref::<T>(message);
         Box::pin(async move {
-            let mut count = 0;
-            loop {
-                if let Err(error) = self.tx.send(call_by::from_ref::<T>(message)).await {
-                    match (self.recover_tx)(&error, count) {
-                        ErrorStrategy::Retry(after) => {
-                            tokio::time::sleep(after).await;
-                        }
-                        ErrorStrategy::RetryAfterReconnect => {
-                            if let Some(tx) = self.next_tx.recv().await {
-                                self.tx = tx;
-                            } else {
-                                break Err(error);
-                            }
-                        }
-                        ErrorStrategy::Fail => {
-                            break Err(error);
-                        }
-                    }
-                    count += 1;
-                } else {
-                    break Ok(());
-                }
-            }
+            retry_loop(
+                &mut self.tx,
+                message,
+                &mut self.next_tx,
+                self.timeout,
+                self.recover_tx,
+                |tx, message: &'a T| self.tx.send(call_by::from_ref::<T>(message)),
+            )
+            .await
         })
     }
 }
@@ -454,30 +430,15 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
     {
         Box::pin(async move {
-            let mut count = 0;
-            loop {
-                match self.rx.recv_choice().await {
-                    Err(error) => {
-                        match (self.recover_rx)(&error, count) {
-                            ErrorStrategy::Retry(after) => {
-                                tokio::time::sleep(after).await;
-                            }
-                            ErrorStrategy::RetryAfterReconnect => {
-                                if let Some(rx) = self.next_rx.recv().await {
-                                    self.rx = rx;
-                                } else {
-                                    break Err(error);
-                                }
-                            }
-                            ErrorStrategy::Fail => {
-                                break Err(error);
-                            }
-                        }
-                        count += 1;
-                    }
-                    Ok(choice) => break Ok(choice),
-                }
-            }
+            retry_loop(
+                &mut self.rx,
+                &(),
+                &mut self.next_rx,
+                self.timeout,
+                self.recover_rx,
+                |rx, ()| rx.recv_choice(),
+            )
+            .await
         })
     }
 }
@@ -494,30 +455,15 @@ where
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async move {
-            let mut count = 0;
-            loop {
-                match self.rx.recv().await {
-                    Err(error) => {
-                        match (self.recover_rx)(&error, count) {
-                            ErrorStrategy::Retry(after) => {
-                                tokio::time::sleep(after).await;
-                            }
-                            ErrorStrategy::RetryAfterReconnect => {
-                                if let Some(rx) = self.next_rx.recv().await {
-                                    self.rx = rx;
-                                } else {
-                                    break Err(error);
-                                }
-                            }
-                            ErrorStrategy::Fail => {
-                                break Err(error);
-                            }
-                        }
-                        count += 1;
-                    }
-                    Ok(t) => break Ok(t),
-                }
-            }
+            retry_loop(
+                &mut self.rx,
+                &(),
+                &mut self.next_rx,
+                self.timeout,
+                self.recover_rx,
+                |rx, ()| rx.recv(),
+            )
+            .await
         })
     }
 }
