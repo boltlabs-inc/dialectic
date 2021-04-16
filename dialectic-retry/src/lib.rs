@@ -3,30 +3,12 @@ pub mod resume;
 pub mod retry;
 
 use dialectic::prelude::*;
-use std::time::Duration;
+use std::{future::Future, pin::Pin};
 
-#[async_trait::async_trait]
-pub trait Handshake<Key, Tx, Rx>
-where
-    Tx: Send + 'static,
-    Rx: Send + 'static,
-{
-    type Session: Session;
-    type Error;
-
-    async fn handshake(
-        &self,
-        chan: Chan<Self::Session, Tx, Rx>,
-    ) -> Result<(ConnectKind, Key), Self::Error>;
-}
+type Handshake<H, Key, E, Tx, Rx> =
+    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
 
 pub enum ConnectKind {
     New,
     Existing,
-}
-
-pub enum ErrorStrategy {
-    Retry(Duration),
-    RetryAfterReconnect,
-    Fail,
 }
