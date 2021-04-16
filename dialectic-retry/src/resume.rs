@@ -9,23 +9,41 @@ use std::{
     hash::Hash,
     marker::PhantomData,
     pin::Pin,
-    sync::{Arc, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Weak,
+    },
     time::Duration,
 };
 use tokio::{pin, select, sync::mpsc, time::Instant};
 
 use crate::{
     error::{ResumeError, ResumeIncomplete},
-    ConnectKind, ErrorStrategy, Handshake,
+    ConnectKind, Handshake,
 };
 
-type Managed<Key, Tx, Rx> = DashMap<Key, (mpsc::Sender<Tx>, mpsc::Sender<Rx>)>;
+struct Waiting<Tx, Rx> {
+    send_tx: mpsc::Sender<Tx>,
+    send_rx: mpsc::Sender<Rx>,
+    half_dropped: AtomicBool,
+}
+
+type Managed<Key, Tx, Rx> = DashMap<Key, Waiting<Tx, Rx>>;
+
+pub enum ErrorStrategy {
+    Retry(Duration),
+    RetryAfterReconnect,
+    Fail,
+}
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-#[derive(Clone)]
-pub struct Resumer<H, Key, S, Tx, Rx> {
-    handshake: H,
+pub struct Acceptor<H, S, Key, E, Tx, Rx>
+where
+    H: Session,
+    S: Session,
+{
+    handshake: Box<Handshake<H, Key, E, Tx, Rx>>,
     managed: Arc<Managed<Key, Tx, Rx>>,
     recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ErrorStrategy + Sync + Send>,
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ErrorStrategy + Sync + Send>,
@@ -36,21 +54,21 @@ pub struct Resumer<H, Key, S, Tx, Rx> {
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<H, Key, S, Tx, Rx> Resumer<H, Key, S, Tx, Rx>
+impl<Key, H, E, S, Tx, Rx> Acceptor<H, S, Key, E, Tx, Rx>
 where
-    H: Handshake<Key, Tx, Rx>,
     Key: Clone + Eq + Hash + Send + Sync + 'static,
+    H: Session,
     S: Session,
 {
-    pub fn new(
-        handshake: H,
+    pub fn new<Fut: Future<Output = Result<(ConnectKind, Key), E>> + 'static>(
+        handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static,
         recover_tx: impl Fn(usize, &Tx::Error) -> ErrorStrategy + Sync + Send + 'static,
         recover_rx: impl Fn(usize, &Rx::Error) -> ErrorStrategy + Sync + Send + 'static,
         timeout: Option<Duration>,
         buffer_size: usize,
     ) -> Self {
         Self {
-            handshake,
+            handshake: Box::new(move |chan| Box::pin(handshake(chan))),
             managed: Arc::new(DashMap::new()),
             recover_tx: Arc::new(recover_tx),
             recover_rx: Arc::new(recover_rx),
@@ -60,16 +78,15 @@ where
         }
     }
 
-    pub async fn resume(
+    pub async fn accept(
         &self,
         tx: Tx,
         rx: Rx,
     ) -> Result<
         Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>,
-        ResumeError<H, Key, Tx, Rx>,
+        ResumeError<E, Key, Tx, Rx>,
     > {
-        let (result, ends) =
-            <H::Session>::over(tx, rx, |chan| self.handshake.handshake(chan)).await;
+        let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
         let (connect_kind, key) = match result {
             Ok(key) => key,
             Err(error) => {
@@ -101,8 +118,8 @@ where
                         // either we are currently paused, or we're about to discover the issue and
                         // pause. Sending the tx/rx will un-pause us and allow us to resume on those
                         // fresh channels.
-                        let send_tx = &map_ref.0;
-                        let send_rx = &map_ref.1;
+                        let send_tx = &map_ref.send_tx;
+                        let send_rx = &map_ref.send_rx;
                         match (send_tx.try_send(tx), send_rx.try_send(rx)) {
                             (Ok(()), Ok(())) => Ok(None),
                             (Err(tx_error), Err(rx_error)) => Err(ResumeError::ResumeIncomplete(
@@ -124,10 +141,16 @@ where
                         // If there was no entry by this key, then this represents a fresh session,
                         // and we should return a channel for the caller to do with what they like
                         // (usually, run a session in a separate task).
-                        let (send_next_tx, next_tx) = mpsc::channel(self.buffer_size);
-                        let (send_next_rx, next_rx) = mpsc::channel(self.buffer_size);
-                        self.managed
-                            .insert(key.clone(), (send_next_tx, send_next_rx));
+                        let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
+                        let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
+                        self.managed.insert(
+                            key.clone(),
+                            Waiting {
+                                send_tx,
+                                send_rx,
+                                half_dropped: false.into(),
+                            },
+                        );
                         let tx = Sender {
                             key: key.clone(),
                             tx,
@@ -234,9 +257,11 @@ where
 {
     fn drop(&mut self) {
         // Remove the entire entry at this key if the other end has already dropped
-        self.managed
-            .upgrade()
-            .map(|managed| managed.remove_if(&self.key, |_, (_, send_rx)| send_rx.is_closed()));
+        self.managed.upgrade().map(|managed| {
+            managed.remove_if(&self.key, |_, waiting| {
+                waiting.half_dropped.swap(true, Ordering::SeqCst)
+            })
+        });
     }
 }
 
@@ -346,9 +371,11 @@ where
 {
     fn drop(&mut self) {
         // Remove the entire entry at this key if the other end has already dropped
-        self.managed
-            .upgrade()
-            .map(|managed| managed.remove_if(&self.key, |_, (send_tx, _)| send_tx.is_closed()));
+        self.managed.upgrade().map(|managed| {
+            managed.remove_if(&self.key, |_, waiting| {
+                waiting.half_dropped.swap(true, Ordering::SeqCst)
+            })
+        });
     }
 }
 
