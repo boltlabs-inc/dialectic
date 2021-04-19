@@ -1,14 +1,14 @@
 use dialectic::{prelude::*, IncompleteHalf, SessionIncomplete};
 use tokio::sync::mpsc::error::TrySendError;
 
-pub enum ResumeError<E, Key, Tx, Rx>
+pub enum ResumeError<Key, Err, Tx, Rx>
 where
     Tx: Send + 'static,
     Rx: Send + 'static,
 {
     HandshakeIncomplete(SessionIncomplete<Tx, Rx>),
     HandshakeError {
-        error: E,
+        error: Err,
         tx: Result<Tx, IncompleteHalf<Tx>>,
         rx: Result<Rx, IncompleteHalf<Rx>>,
     },
@@ -27,7 +27,7 @@ where
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<E, Key, Tx, Rx> ResumeError<E, Key, Tx, Rx> {
+impl<Key, Err, Tx, Rx> ResumeError<Key, Err, Tx, Rx> {
     pub fn into_halves(self) -> (Option<Tx>, Option<Rx>) {
         use ResumeError::*;
 
