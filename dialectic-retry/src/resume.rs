@@ -19,8 +19,11 @@ use tokio::{pin, select, sync::mpsc, time::Instant};
 
 use crate::{
     error::{ResumeError, ResumeIncomplete},
-    ConnectKind, Handshake,
+    ConnectKind,
 };
+
+type Handshake<H, Key, E, Tx, Rx> =
+    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
 
 struct Waiting<Tx, Rx> {
     send_tx: mpsc::Sender<Tx>,
@@ -30,8 +33,8 @@ struct Waiting<Tx, Rx> {
 
 type Managed<Key, Tx, Rx> = DashMap<Key, Waiting<Tx, Rx>>;
 
-pub enum ErrorStrategy {
-    Retry(Duration),
+pub enum ResumeStrategy {
+    RetryAfter(Duration),
     RetryAfterReconnect,
     Fail,
 }
@@ -45,8 +48,8 @@ where
 {
     handshake: Box<Handshake<H, Key, E, Tx, Rx>>,
     managed: Arc<Managed<Key, Tx, Rx>>,
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ErrorStrategy + Sync + Send>,
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ErrorStrategy + Sync + Send>,
+    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
+    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
     timeout: Option<Duration>,
     buffer_size: usize,
     session: PhantomData<fn() -> S>,
@@ -54,16 +57,16 @@ where
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<Key, H, E, S, Tx, Rx> Acceptor<H, S, Key, E, Tx, Rx>
+impl<Key, H, Err, S, Tx, Rx> Acceptor<H, S, Key, Err, Tx, Rx>
 where
     Key: Clone + Eq + Hash + Send + Sync + 'static,
     H: Session,
     S: Session,
 {
-    pub fn new<Fut: Future<Output = Result<(ConnectKind, Key), E>> + 'static>(
+    pub fn new<Fut: Future<Output = Result<(ConnectKind, Key), Err>> + 'static>(
         handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static,
-        recover_tx: impl Fn(usize, &Tx::Error) -> ErrorStrategy + Sync + Send + 'static,
-        recover_rx: impl Fn(usize, &Rx::Error) -> ErrorStrategy + Sync + Send + 'static,
+        recover_tx: impl Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send + 'static,
+        recover_rx: impl Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send + 'static,
         timeout: Option<Duration>,
         buffer_size: usize,
     ) -> Self {
@@ -84,7 +87,7 @@ where
         rx: Rx,
     ) -> Result<
         Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>,
-        ResumeError<E, Key, Tx, Rx>,
+        ResumeError<Key, Err, Tx, Rx>,
     > {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
         let (connect_kind, key) = match result {
@@ -187,20 +190,26 @@ macro_rules! retry_loop {
             match $action.await {
                 Ok(t) => break Ok(t),
                 Err(error) => {
-                    // Compute the deadline for any retries as the timeout duration after the time
-                    // of the first error (this never changes after this point)
-                    if let Some(duration) = $timeout {
-                        if count == 0 {
-                            deadline = Some(Instant::now() + duration);
+                    // Create a timeout future that will expire `timeout` duration after the first
+                    // error we encountered
+                    let timeout = $timeout;
+                    let timeout = async move {
+                        if let Some(duration) = timeout {
+                            if count == 0 {
+                                deadline = Some(Instant::now() + duration);
+                            }
+                            // If the timeout was specified, sleep until now plus that duration
+                            tokio::time::sleep_until(deadline.unwrap()).await
+                        } else {
+                            // If no timeout was specified, sleep forever
+                            std::future::pending().await
                         }
-                    }
+                    };
 
-                    // Create a timeout at the deadline
-                    let timeout = tokio::time::sleep_until(deadline.unwrap());
                     pin!(timeout);
 
                     match $recover(count, &error) {
-                        ErrorStrategy::Retry(after) => {
+                        ResumeStrategy::RetryAfter(after) => {
                             // If the retry interval happens before the deadline, retry
                             let sleep = tokio::time::sleep(after);
                             pin!(sleep);
@@ -209,7 +218,7 @@ macro_rules! retry_loop {
                                 () = timeout => break Err(error),
                             }
                         }
-                        ErrorStrategy::RetryAfterReconnect => {
+                        ResumeStrategy::RetryAfterReconnect => {
                             // If the connection is reconnected before the deadline, reconnect
                             // and retry
                             let recv = $next.recv();
@@ -222,7 +231,7 @@ macro_rules! retry_loop {
                                 () = timeout => break Err(error),
                             }
                         }
-                        ErrorStrategy::Fail => {
+                        ResumeStrategy::Fail => {
                             break Err(error);
                         }
                     }
@@ -244,7 +253,7 @@ where
     key: Key,
     tx: Tx,
     next_tx: mpsc::Receiver<Tx>,
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ErrorStrategy + Sync + Send>,
+    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
     managed: Weak<Managed<Key, Tx, Rx>>,
     timeout: Option<Duration>,
 }
@@ -358,7 +367,7 @@ where
     key: Key,
     rx: Rx,
     next_rx: mpsc::Receiver<Rx>,
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ErrorStrategy + Sync + Send>,
+    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
     managed: Weak<Managed<Key, Tx, Rx>>,
     timeout: Option<Duration>,
 }
