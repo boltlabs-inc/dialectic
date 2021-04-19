@@ -40,25 +40,42 @@ type Connect<Err, Tx, Rx> =
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub async fn channel<H: Session, S: Session, Key, Err, ConnectFut, HandshakeFut, Tx, Rx>(
+pub async fn channel<
+    H: Session,
+    S: Session,
+    Key,
+    ConnectErr,
+    HandshakeErr,
+    ConnectFut,
+    HandshakeFut,
+    Tx,
+    Rx,
+>(
     connect: impl Fn() -> ConnectFut + Sync + Send + 'static,
     handshake: impl Fn(Option<&Key>, Chan<H, Tx, Rx>) -> HandshakeFut + Sync + Send + 'static,
-    recover_connect: impl Fn(usize, &Err) -> ReconnectStrategy + Sync + Send + 'static,
+    recover_connect: impl Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send + 'static,
+    recover_handshake: impl Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send + 'static,
     recover_tx: impl Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send + 'static,
     recover_rx: impl Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send + 'static,
     timeout: Option<Duration>,
-) -> Chan<S, Sender<H, Key, Err, Tx, Rx>, Receiver<H, Key, Err, Tx, Rx>>
+) -> Chan<
+    S,
+    Sender<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+    Receiver<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+>
 where
     Key: Sync + Send + Clone + 'static,
-    ConnectFut: Future<Output = Result<(Tx, Rx), Err>> + 'static,
-    HandshakeFut: Future<Output = Result<Key, Err>> + 'static,
-    Err: 'static,
+    ConnectFut: Future<Output = Result<(Tx, Rx), ConnectErr>> + 'static,
+    HandshakeFut: Future<Output = Result<Key, HandshakeErr>> + 'static,
+    ConnectErr: 'static,
+    HandshakeErr: 'static,
 {
     // The shared closures for both sides
-    let handshake: Arc<Handshake<H, Key, Err, Tx, Rx>> =
+    let handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>> =
         Arc::new(move |key, chan| Box::pin(handshake(key, chan)));
-    let connect: Arc<Connect<Err, Tx, Rx>> = Arc::new(move || Box::pin(connect()));
+    let connect: Arc<Connect<ConnectErr, Tx, Rx>> = Arc::new(move || Box::pin(connect()));
     let recover_connect = Arc::new(recover_connect);
+    let recover_handshake = Arc::new(recover_handshake);
 
     // The shared mutable state for both sides
     let key = Arc::new(Mutex::new(None));
@@ -74,6 +91,7 @@ where
         connect: connect.clone(),
         recover_tx: Box::new(recover_tx),
         recover_connect: recover_connect.clone(),
+        recover_handshake: recover_handshake.clone(),
         timeout,
     };
 
@@ -86,6 +104,7 @@ where
         connect,
         recover_rx: Box::new(recover_rx),
         recover_connect,
+        recover_handshake,
         timeout,
     };
 
@@ -102,27 +121,33 @@ async fn lock_owned_weak<T>(weak: &Weak<Mutex<T>>) -> Option<OwnedMutexGuard<T>>
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct Sender<H: Session, Key, Err, Tx, Rx> {
+pub struct Sender<H: Session, Key, ConnectErr, HandshakeErr, Tx, Rx> {
     key: Arc<Mutex<Option<Key>>>,
     tx: Option<Tx>,
     next_tx: Arc<Mutex<VecDeque<Tx>>>,  // strong reference to `Tx`
     next_rx: Weak<Mutex<VecDeque<Rx>>>, // weak reference to `Rx` (disappears if `Receiver` drops)
-    handshake: Arc<Handshake<H, Key, Err, Tx, Rx>>,
-    connect: Arc<Connect<Err, Tx, Rx>>,
+    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
+    connect: Arc<Connect<ConnectErr, Tx, Rx>>,
     recover_tx: Box<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send + 'static>,
-    recover_connect: Arc<dyn Fn(usize, &Err) -> ReconnectStrategy + Sync + Send + 'static>,
+    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send + 'static>,
+    recover_handshake:
+        Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send + 'static>,
     timeout: Option<Duration>,
 }
 
-enum RetryError<Err> {
-    ConnectError(Err),
+pub enum RetryError<Err, ConnectError, HandshakeError> {
+    OriginalError(Err),
+    ConnectError(ConnectError),
+    HandshakeError(HandshakeError),
     HandshakeIncomplete,
 }
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<H: Session, Key, Err, Tx, Rx> Sender<H, Key, Err, Tx, Rx> {
-    async fn tx(&mut self) -> Result<&mut Tx, RetryError<Err>> {
+impl<H: Session, Key, ConnectErr, HandshakeErr, Tx, Rx>
+    Sender<H, Key, ConnectErr, HandshakeErr, Tx, Rx>
+{
+    async fn tx<Err>(&mut self) -> Result<&mut Tx, RetryError<Err, ConnectErr, HandshakeErr>> {
         // If there is no `tx` end currently in its slot, we need to acquire one
         if self.tx.is_none() {
             let mut retries = 0;
@@ -134,8 +159,8 @@ impl<H: Session, Key, Err, Tx, Rx> Sender<H, Key, Err, Tx, Rx> {
                     break tx;
                 } else {
                     // Try to reconnect, exiting the loop if successful, collecting the error if not
-                    let err: Err = match (self.connect)().await {
-                        Err(err) => err,
+                    let err: Result<HandshakeErr, ConnectErr> = match (self.connect)().await {
+                        Err(err) => Err(err),
                         Ok((tx, rx)) => {
                             // Take out a lock on the key (must come first to avoid deadlock)
                             let mut key = self.key.lock().await;
@@ -146,7 +171,7 @@ impl<H: Session, Key, Err, Tx, Rx> Sender<H, Key, Err, Tx, Rx> {
 
                             match (result, ends) {
                                 // Handshake session returned an error
-                                (Err(err), _) => err,
+                                (Err(err), _) => Ok(err),
                                 // Handshake session was incomplete
                                 (Ok(_), Err(_)) => return Err(RetryError::HandshakeIncomplete),
                                 // Handshake session succeeded
@@ -169,15 +194,26 @@ impl<H: Session, Key, Err, Tx, Rx> Sender<H, Key, Err, Tx, Rx> {
                         deadline = self.timeout.map(|delay| Instant::now() + delay);
                     }
 
-                    // Recover from this error, based on the strategy given by `recover_connect`
-                    match (self.recover_connect)(retries, &err) {
-                        ReconnectStrategy::Fail => return Err(RetryError::ConnectError(err)),
+                    // Recover from this error, based on the strategy given by
+                    // `recover_connect`/`recover_handshake` (whichever is applicable)
+                    let (strategy, err) = match err {
+                        Ok(err) => (
+                            (self.recover_handshake)(retries, &err),
+                            RetryError::HandshakeError(err),
+                        ),
+                        Err(err) => (
+                            (self.recover_connect)(retries, &err),
+                            RetryError::ConnectError(err),
+                        ),
+                    };
+                    match strategy {
+                        ReconnectStrategy::Fail => return Err(err),
                         ReconnectStrategy::ReconnectAfter(after) => {
                             let wakeup = Instant::now() + after;
                             if let Some(deadline) = deadline {
                                 // If we would exceed the deadline, don't wait at all
                                 if deadline < wakeup {
-                                    return Err(RetryError::ConnectError(err));
+                                    return Err(err);
                                 }
                             }
                             tokio::time::sleep_until(wakeup).await;
@@ -197,14 +233,16 @@ impl<H: Session, Key, Err, Tx, Rx> Sender<H, Key, Err, Tx, Rx> {
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct Receiver<H: Session, Key, Err, Tx, Rx> {
+pub struct Receiver<H: Session, Key, ConnectErr, HandshakeErr, Tx, Rx> {
     key: Arc<Mutex<Option<Key>>>,
     rx: Option<Rx>,
     next_tx: Weak<Mutex<VecDeque<Tx>>>, // weak reference to `Tx` (disappears if `Sender` drops)
     next_rx: Arc<Mutex<VecDeque<Rx>>>,  // strong reference to `Rx`
-    handshake: Arc<Handshake<H, Key, Err, Tx, Rx>>,
-    connect: Arc<Connect<Err, Tx, Rx>>,
+    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
+    connect: Arc<Connect<ConnectErr, Tx, Rx>>,
     recover_rx: Box<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send + 'static>,
-    recover_connect: Arc<dyn Fn(usize, &Err) -> ReconnectStrategy + Sync + Send + 'static>,
+    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send + 'static>,
+    recover_handshake:
+        Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send + 'static>,
     timeout: Option<Duration>,
 }
