@@ -2,7 +2,6 @@ use dashmap::DashMap;
 use dialectic::{
     backend::{self, By},
     prelude::*,
-    SessionIncomplete,
 };
 use std::{
     future::Future,
@@ -17,10 +16,18 @@ use std::{
 };
 use tokio::{pin, select, sync::mpsc, time::Instant};
 
-use crate::{
-    error::{ResumeError, ResumeIncomplete},
-    ConnectKind,
-};
+pub enum ResumeError<Key, Err> {
+    HandshakeIncomplete,
+    HandshakeError(Err),
+    NoSuchKey(Key),
+    KeyAlreadyExists(Key),
+    ResumeIncomplete,
+}
+
+pub enum ConnectKind {
+    New,
+    Existing,
+}
 
 type Handshake<H, Key, E, Tx, Rx> =
     dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
@@ -85,94 +92,78 @@ where
         &self,
         tx: Tx,
         rx: Rx,
-    ) -> Result<
-        Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>,
-        ResumeError<Key, Err, Tx, Rx>,
-    > {
+    ) -> Result<Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>, ResumeError<Key, Err>>
+    {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
         let (connect_kind, key) = match result {
             Ok(key) => key,
-            Err(error) => {
-                let (tx, rx) = ends
-                    .map(|(tx, rx)| (Ok(tx), Ok(rx)))
-                    .unwrap_or_else(SessionIncomplete::into_halves);
-                return Err(ResumeError::HandshakeError { error, tx, rx });
-            }
+            Err(error) => return Err(ResumeError::HandshakeError(error)),
         };
-        match ends {
-            Err(incomplete) => Err(ResumeError::HandshakeIncomplete(incomplete)),
-            Ok((tx, rx)) => {
-                match (connect_kind, self.managed.get(&key)) {
-                    (ConnectKind::Existing, None) => {
-                        // If the connection was supposed to be for an existing key but no key
-                        // existed yet, return an error instead of generating a new channel.
-                        Err(ResumeError::NoSuchKey { key, tx, rx })
-                    }
-                    (ConnectKind::New, Some(_)) => {
-                        // If the connection was supposed to be for a new key, but the key existed,
-                        // return an error instead of resuming on that key.
-                        Err(ResumeError::KeyAlreadyExists { key, tx, rx })
-                    }
-                    (ConnectKind::Existing, Some(map_ref)) => {
-                        // If there was already an entry by this key, there's a session, potentially
-                        // paused, by this key. If the handshake was properly implemented, we're
-                        // only receiving this tx/rx pair because the other end tried to reconnect,
-                        // which means that the connection broke in one direction or another, so
-                        // either we are currently paused, or we're about to discover the issue and
-                        // pause. Sending the tx/rx will un-pause us and allow us to resume on those
-                        // fresh channels.
-                        let send_tx = &map_ref.send_tx;
-                        let send_rx = &map_ref.send_rx;
-                        match (send_tx.try_send(tx), send_rx.try_send(rx)) {
-                            (Ok(()), Ok(())) => Ok(None),
-                            (Err(tx_error), Err(rx_error)) => Err(ResumeError::ResumeIncomplete(
-                                ResumeIncomplete::BothHalves { tx_error, rx_error },
-                            )),
-                            (Err(tx_error), Ok(())) => {
-                                Err(ResumeError::ResumeIncomplete(ResumeIncomplete::TxHalf {
-                                    tx_error,
-                                }))
-                            }
-                            (Ok(()), Err(rx_error)) => {
-                                Err(ResumeError::ResumeIncomplete(ResumeIncomplete::RxHalf {
-                                    rx_error,
-                                }))
-                            }
-                        }
-                    }
-                    (ConnectKind::New, None) => {
-                        // If there was no entry by this key, then this represents a fresh session,
-                        // and we should return a channel for the caller to do with what they like
-                        // (usually, run a session in a separate task).
-                        let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
-                        let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
-                        self.managed.insert(
-                            key.clone(),
-                            Waiting {
-                                send_tx,
-                                send_rx,
-                                half_dropped: false.into(),
-                            },
-                        );
-                        let tx = Sender {
-                            key: key.clone(),
-                            tx,
-                            next_tx,
-                            recover_tx: self.recover_tx.clone(),
-                            managed: Arc::downgrade(&self.managed),
-                            timeout: self.timeout,
-                        };
-                        let rx = Receiver {
-                            key,
-                            rx,
-                            next_rx,
-                            recover_rx: self.recover_rx.clone(),
-                            managed: Arc::downgrade(&self.managed),
-                            timeout: self.timeout,
-                        };
-                        Ok(Some(S::wrap(tx, rx)))
-                    }
+        let (tx, rx) = match ends {
+            Ok(ends) => ends,
+            Err(_) => return Err(ResumeError::HandshakeIncomplete),
+        };
+        match (connect_kind, self.managed.get(&key)) {
+            (ConnectKind::Existing, None) => {
+                // If the connection was supposed to be for an existing key but no key
+                // existed yet, return an error instead of generating a new channel.
+                Err(ResumeError::NoSuchKey(key))
+            }
+            (ConnectKind::New, Some(_)) => {
+                // If the connection was supposed to be for a new key, but the key existed,
+                // return an error instead of resuming on that key.
+                Err(ResumeError::KeyAlreadyExists(key))
+            }
+            (ConnectKind::Existing, Some(map_ref)) => {
+                // If there was already an entry by this key, there's a session, potentially
+                // paused, by this key. If the handshake was properly implemented, we're
+                // only receiving this tx/rx pair because the other end tried to reconnect,
+                // which means that the connection broke in one direction or another, so
+                // either we are currently paused, or we're about to discover the issue and
+                // pause. Sending the tx/rx will un-pause us and allow us to resume on those
+                // fresh channels.
+                let send_tx = &map_ref.send_tx;
+                let send_rx = &map_ref.send_rx;
+
+                use mpsc::error::TrySendError::Full;
+                match (send_tx.try_send(tx), send_rx.try_send(rx)) {
+                    // If either side bounced on send due to the channel being full, return an error
+                    (Err(Full(_)), _) | (_, Err(Full(_))) => Err(ResumeError::ResumeIncomplete),
+                    // Otherwise, indicate success (this is inclusive of when a receiver is closed)
+                    _ => Ok(None),
                 }
+            }
+            (ConnectKind::New, None) => {
+                // If there was no entry by this key, then this represents a fresh session,
+                // and we should return a channel for the caller to do with what they like
+                // (usually, run a session in a separate task).
+                let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
+                let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
+                self.managed.insert(
+                    key.clone(),
+                    Waiting {
+                        send_tx,
+                        send_rx,
+                        half_dropped: false.into(),
+                    },
+                );
+                let tx = Sender {
+                    key: key.clone(),
+                    tx,
+                    next_tx,
+                    recover_tx: self.recover_tx.clone(),
+                    managed: Arc::downgrade(&self.managed),
+                    timeout: self.timeout,
+                };
+                let rx = Receiver {
+                    key,
+                    rx,
+                    next_rx,
+                    recover_rx: self.recover_rx.clone(),
+                    managed: Arc::downgrade(&self.managed),
+                    timeout: self.timeout,
+                };
+                Ok(Some(S::wrap(tx, rx)))
             }
         }
     }
@@ -221,6 +212,7 @@ macro_rules! retry_loop {
                         ResumeStrategy::RetryAfterReconnect => {
                             // If the connection is reconnected before the deadline, reconnect
                             // and retry
+                            // TODO: drop the connection immediately here!
                             let recv = $next.recv();
                             pin!(recv);
                             select! {
