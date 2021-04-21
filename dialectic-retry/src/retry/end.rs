@@ -1,8 +1,6 @@
 use dialectic::prelude::*;
 use std::{
     collections::VecDeque,
-    future::Future,
-    pin::Pin,
     sync::{Arc, Weak},
     time::Duration,
 };
@@ -12,16 +10,9 @@ use tokio::{
 };
 
 use crate::{
-    retry::{ReconnectStrategy, RetryError, RetryStrategy},
+    retry::{Connect, Handshake, ReconnectStrategy, RetryError, RetryStrategy},
     util::{sleep_until_or_deadline, timeout_at_option},
 };
-
-type Handshake<H, Key, Err, Tx, Rx> = dyn Fn(Option<&Key>, Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<Key, Err>> + Send>>
-    + Send
-    + Sync;
-
-type Connect<Err, Tx, Rx> =
-    dyn Fn() -> Pin<Box<dyn Future<Output = Result<(Tx, Rx), Err>> + Send>> + Send + Sync;
 
 /// The insides of the [`Sender`] and [`Receiver`] are almost identical, and the functionality we
 /// need is almost the same. The `End` struct is the insides of both `Sender` and `Receiver`: all
@@ -43,7 +34,7 @@ pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx,
     /// key or an error.
     handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
     /// A function describing the desired retry strategy for errors in the underlying connection.
-    recover: Box<dyn Fn(usize, &Err) -> RetryStrategy + Sync + Send>,
+    recover: Arc<dyn Fn(usize, &Err) -> RetryStrategy + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to establish a
     /// connection.
     recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
@@ -63,13 +54,13 @@ pub type ReceiverEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx> =
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 #[allow(clippy::type_complexity)]
-pub fn channel<H, Key, ConnectErr, HandshakeErr, ConnectFut, HandshakeFut, Tx, Rx>(
-    connect: impl Fn() -> ConnectFut + Sync + Send + 'static,
-    handshake: impl Fn(Option<&Key>, Chan<H, Tx, Rx>) -> HandshakeFut + Sync + Send + 'static,
-    recover_connect: impl Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send + 'static,
-    recover_handshake: impl Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send + 'static,
-    recover_tx: impl Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send + 'static,
-    recover_rx: impl Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send + 'static,
+pub fn channel<H, Key, ConnectErr, HandshakeErr, Tx, Rx>(
+    connect: Arc<Connect<ConnectErr, Tx, Rx>>,
+    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
+    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
+    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
+    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
+    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
     timeout: Option<Duration>,
 ) -> (
     SenderEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
@@ -78,18 +69,9 @@ pub fn channel<H, Key, ConnectErr, HandshakeErr, ConnectFut, HandshakeFut, Tx, R
 where
     H: Session,
     Key: Sync + Send + Clone + 'static,
-    ConnectFut: Future<Output = Result<(Tx, Rx), ConnectErr>> + Send + 'static,
-    HandshakeFut: Future<Output = Result<Key, HandshakeErr>> + Send + 'static,
     ConnectErr: 'static,
     HandshakeErr: 'static,
 {
-    // The shared closures for both sides
-    let handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>> =
-        Arc::new(move |key, chan| Box::pin(handshake(key, chan)));
-    let connect: Arc<Connect<ConnectErr, Tx, Rx>> = Arc::new(move || Box::pin(connect()));
-    let recover_connect = Arc::new(recover_connect);
-    let recover_handshake = Arc::new(recover_handshake);
-
     // The shared mutable state for both sides
     let key = Arc::new(Mutex::new(None));
     let next_tx = Arc::new(Mutex::new(VecDeque::new()));
@@ -102,7 +84,7 @@ where
         next_other: Arc::downgrade(&next_rx),
         handshake: handshake.clone(),
         connect: connect.clone(),
-        recover: Box::new(recover_tx),
+        recover: recover_tx,
         recover_connect: recover_connect.clone(),
         recover_handshake: recover_handshake.clone(),
         timeout,
@@ -115,7 +97,7 @@ where
         next_other: Arc::downgrade(&next_tx),
         handshake,
         connect,
-        recover: Box::new(recover_rx),
+        recover: recover_rx,
         recover_connect,
         recover_handshake,
         timeout,
