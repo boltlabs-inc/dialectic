@@ -8,20 +8,22 @@ use std::{
     hash::Hash,
     marker::PhantomData,
     pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Weak,
-    },
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-use tokio::{pin, select, sync::mpsc, time::Instant};
+use tokio::sync::mpsc;
 
-pub enum ResumeError<Key, Err> {
+pub enum AcceptError<Key, Err> {
     HandshakeIncomplete,
     HandshakeError(Err),
     NoSuchKey(Key),
     KeyAlreadyExists(Key),
-    ResumeIncomplete,
+    NoCapacity,
+}
+
+pub enum ResumeError<Err> {
+    OriginalError(Err),
+    ConnectTimeout,
 }
 
 pub enum ConnectKind {
@@ -32,7 +34,7 @@ pub enum ConnectKind {
 type Handshake<H, Key, E, Tx, Rx> =
     dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
 
-struct Waiting<Tx, Rx> {
+pub(crate) struct Waiting<Tx, Rx> {
     send_tx: mpsc::Sender<Tx>,
     send_rx: mpsc::Sender<Rx>,
     half_dropped: AtomicBool,
@@ -61,6 +63,9 @@ where
     buffer_size: usize,
     session: PhantomData<fn() -> S>,
 }
+
+mod end;
+use end::{End, ReceiverEnd, SenderEnd};
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
@@ -92,27 +97,27 @@ where
         &self,
         tx: Tx,
         rx: Rx,
-    ) -> Result<Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>, ResumeError<Key, Err>>
+    ) -> Result<Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>, AcceptError<Key, Err>>
     {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
         let (connect_kind, key) = match result {
             Ok(key) => key,
-            Err(error) => return Err(ResumeError::HandshakeError(error)),
+            Err(error) => return Err(AcceptError::HandshakeError(error)),
         };
         let (tx, rx) = match ends {
             Ok(ends) => ends,
-            Err(_) => return Err(ResumeError::HandshakeIncomplete),
+            Err(_) => return Err(AcceptError::HandshakeIncomplete),
         };
-        match (connect_kind, self.managed.get(&key)) {
+        match (connect_kind, self.managed.get_mut(&key)) {
             (ConnectKind::Existing, None) => {
                 // If the connection was supposed to be for an existing key but no key
                 // existed yet, return an error instead of generating a new channel.
-                Err(ResumeError::NoSuchKey(key))
+                Err(AcceptError::NoSuchKey(key))
             }
             (ConnectKind::New, Some(_)) => {
                 // If the connection was supposed to be for a new key, but the key existed,
                 // return an error instead of resuming on that key.
-                Err(ResumeError::KeyAlreadyExists(key))
+                Err(AcceptError::KeyAlreadyExists(key))
             }
             (ConnectKind::Existing, Some(map_ref)) => {
                 // If there was already an entry by this key, there's a session, potentially
@@ -125,12 +130,31 @@ where
                 let send_tx = &map_ref.send_tx;
                 let send_rx = &map_ref.send_rx;
 
-                use mpsc::error::TrySendError::Full;
-                match (send_tx.try_send(tx), send_rx.try_send(rx)) {
-                    // If either side bounced on send due to the channel being full, return an error
-                    (Err(Full(_)), _) | (_, Err(Full(_))) => Err(ResumeError::ResumeIncomplete),
-                    // Otherwise, indicate success (this is inclusive of when a receiver is closed)
-                    _ => Ok(None),
+                use mpsc::error::TrySendError::{Closed, Full};
+                if (send_tx.capacity() > 0 || send_tx.is_closed())
+                    && (send_rx.capacity() > 0 || send_rx.is_closed())
+                {
+                    match (send_tx.try_send(tx), send_rx.try_send(rx)) {
+                        // This should be impossible, because we have exclusive access due to the
+                        // map reference, and nobody else ever sends, so capacity can only increase:
+                        (Err(Full(_)), Ok(())) | (Ok(()), Err(Full(_))) => {
+                            panic!("partial resumption after capacity check")
+                        }
+                        // This should also be impossible, but it's less bad if it happens because
+                        // if the other side is also full/closed, there's no mismatch that would
+                        // lead to the `Sender` having a `tx` that doesn't correspond to the
+                        // `Receiver`'s `rx`
+                        (Err(Full(_)), Err(Closed(_)))
+                        | (Err(Closed(_)), Err(Full(_)))
+                        | (Err(Full(_)), Err(Full(_)))
+                        // If both are successful, or closed, then everything's fine
+                        | (Ok(()), Ok(()))
+                        | (Ok(()), Err(Closed(_)))
+                        | (Err(Closed(_)), Ok(()))
+                        | (Err(Closed(_)), Err(Closed(_))) => Ok(None),
+                    }
+                } else {
+                    Err(AcceptError::NoCapacity)
                 }
             }
             (ConnectKind::New, None) => {
@@ -148,20 +172,24 @@ where
                     },
                 );
                 let tx = Sender {
-                    key: key.clone(),
-                    tx,
-                    next_tx,
-                    recover_tx: self.recover_tx.clone(),
-                    managed: Arc::downgrade(&self.managed),
-                    timeout: self.timeout,
+                    end: End::new(
+                        key.clone(),
+                        tx,
+                        next_tx,
+                        self.recover_tx.clone(),
+                        self.managed.clone(),
+                        self.timeout,
+                    ),
                 };
                 let rx = Receiver {
-                    key,
-                    rx,
-                    next_rx,
-                    recover_rx: self.recover_rx.clone(),
-                    managed: Arc::downgrade(&self.managed),
-                    timeout: self.timeout,
+                    end: End::new(
+                        key,
+                        rx,
+                        next_rx,
+                        self.recover_rx.clone(),
+                        self.managed.clone(),
+                        self.timeout,
+                    ),
                 };
                 Ok(Some(S::wrap(tx, rx)))
             }
@@ -174,62 +202,29 @@ where
 // This is a macro because as far as I can tell it's not possible to express as a HRTB the bounds
 // necessary to quantify over the action to be performed, in the ref case.
 macro_rules! retry_loop {
-    ($end:expr, $next:expr, $timeout:expr, $recover:expr, $action:expr $(,)?) => {{
-        let mut count = 0;
-        let mut deadline: Option<Instant> = None;
+    ($this:tt . $($action:tt)*) => {{
+        let mut retries = 0;
+        let mut deadline = None;
+        let mut latest_error = None;
+
         loop {
-            match $action.await {
-                Ok(t) => break Ok(t),
+            let inner = match $this.end.inner(deadline).await {
+                Some(inner) => inner,
+                None => return Err(
+                    latest_error
+                        .map(ResumeError::OriginalError)
+                        .unwrap_or(ResumeError::ConnectTimeout)
+                ),
+            };
+
+            match inner.$($action)*.await {
+                Ok(output) => break Ok(output),
                 Err(error) => {
-                    // Create a timeout future that will expire `timeout` duration after the first
-                    // error we encountered
-                    let timeout = $timeout;
-                    let timeout = async move {
-                        if let Some(duration) = timeout {
-                            if count == 0 {
-                                deadline = Some(Instant::now() + duration);
-                            }
-                            // If the timeout was specified, sleep until now plus that duration
-                            tokio::time::sleep_until(deadline.unwrap()).await
-                        } else {
-                            // If no timeout was specified, sleep forever
-                            std::future::pending().await
-                        }
-                    };
-
-                    pin!(timeout);
-
-                    match $recover(count, &error) {
-                        ResumeStrategy::RetryAfter(after) => {
-                            // If the retry interval happens before the deadline, retry
-                            let sleep = tokio::time::sleep(after);
-                            pin!(sleep);
-                            select! {
-                                () = sleep => {},
-                                () = timeout => break Err(error),
-                            }
-                        }
-                        ResumeStrategy::RetryAfterReconnect => {
-                            // If the connection is reconnected before the deadline, reconnect
-                            // and retry
-                            // TODO: drop the connection immediately here!
-                            let recv = $next.recv();
-                            pin!(recv);
-                            select! {
-                                result = recv => match result {
-                                    Some(new_end) => $end = new_end,
-                                    None => break Err(error),
-                                },
-                                () = timeout => break Err(error),
-                            }
-                        }
-                        ResumeStrategy::Fail => {
-                            break Err(error);
-                        }
+                    if $this.end.recover(&mut retries, &mut deadline, &error).await {
+                        latest_error = Some(error);
+                    } else {
+                        break Err(ResumeError::OriginalError(error));
                     }
-
-                    // Increase the count, so next iteration we know how to recover differently
-                    count += 1;
                 }
             }
         }
@@ -242,28 +237,7 @@ pub struct Sender<Key, Tx, Rx>
 where
     Key: Eq + Hash,
 {
-    key: Key,
-    tx: Tx,
-    next_tx: mpsc::Receiver<Tx>,
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
-    managed: Weak<Managed<Key, Tx, Rx>>,
-    timeout: Option<Duration>,
-}
-
-#[Transmitter(Tx)]
-#[Receiver(Rx)]
-impl<Key, Tx, Rx> Drop for Sender<Key, Tx, Rx>
-where
-    Key: Eq + Hash,
-{
-    fn drop(&mut self) {
-        // Remove the entire entry at this key if the other end has already dropped
-        self.managed.upgrade().map(|managed| {
-            managed.remove_if(&self.key, |_, waiting| {
-                waiting.half_dropped.swap(true, Ordering::SeqCst)
-            })
-        });
-    }
+    end: SenderEnd<Key, Tx, Rx>,
 }
 
 #[Transmitter(Tx)]
@@ -273,21 +247,13 @@ where
     Key: Sync + Send + Eq + Hash,
     Tx::Error: Send + Sync,
 {
-    type Error = Tx::Error;
+    type Error = ResumeError<Tx::Error>;
 
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
         choice: Choice<LENGTH>,
     ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            retry_loop!(
-                self.tx,
-                self.next_tx,
-                self.timeout,
-                self.recover_tx,
-                self.tx.send_choice(choice),
-            )
-        })
+        Box::pin(async move { retry_loop!(self.send_choice(choice)) })
     }
 }
 
@@ -308,15 +274,7 @@ where
         'a: 'async_lifetime,
     {
         let message: T = call_by::to_val(message);
-        Box::pin(async move {
-            retry_loop!(
-                self.tx,
-                self.next_tx,
-                self.timeout,
-                self.recover_tx,
-                self.tx.send(&message),
-            )
-        })
+        Box::pin(async move { retry_loop!(self.send(&message)) })
     }
 }
 
@@ -338,15 +296,7 @@ where
         'a: 'async_lifetime,
     {
         let message: &'a T = call_by::to_ref::<T>(message);
-        Box::pin(async move {
-            retry_loop!(
-                self.tx,
-                self.next_tx,
-                self.timeout,
-                self.recover_tx,
-                self.tx.send(call_by::from_ref::<T>(message)),
-            )
-        })
+        Box::pin(async move { retry_loop!(self.send(call_by::from_ref::<T>(message))) })
     }
 }
 
@@ -356,28 +306,7 @@ pub struct Receiver<Key, Tx, Rx>
 where
     Key: Eq + Hash,
 {
-    key: Key,
-    rx: Rx,
-    next_rx: mpsc::Receiver<Rx>,
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
-    managed: Weak<Managed<Key, Tx, Rx>>,
-    timeout: Option<Duration>,
-}
-
-#[Transmitter(Tx)]
-#[Receiver(Rx)]
-impl<Key, Tx, Rx> Drop for Receiver<Key, Tx, Rx>
-where
-    Key: Eq + Hash,
-{
-    fn drop(&mut self) {
-        // Remove the entire entry at this key if the other end has already dropped
-        self.managed.upgrade().map(|managed| {
-            managed.remove_if(&self.key, |_, waiting| {
-                waiting.half_dropped.swap(true, Ordering::SeqCst)
-            })
-        });
-    }
+    end: ReceiverEnd<Key, Tx, Rx>,
 }
 
 #[Transmitter(Tx)]
@@ -387,21 +316,13 @@ where
     Key: Send + Sync + Eq + Hash,
     Rx::Error: Send + Sync,
 {
-    type Error = Rx::Error;
+    type Error = ResumeError<Rx::Error>;
 
     fn recv_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
     {
-        Box::pin(async move {
-            retry_loop!(
-                self.rx,
-                self.next_rx,
-                self.timeout,
-                self.recover_rx,
-                self.rx.recv_choice(),
-            )
-        })
+        Box::pin(async move { retry_loop!(self.recv_choice::<LENGTH>()) })
     }
 }
 
@@ -416,14 +337,6 @@ where
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move {
-            retry_loop!(
-                self.rx,
-                self.next_rx,
-                self.timeout,
-                self.recover_rx,
-                self.rx.recv(),
-            )
-        })
+        Box::pin(async move { retry_loop!(self.recv()) })
     }
 }

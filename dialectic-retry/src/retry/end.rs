@@ -8,10 +8,13 @@ use std::{
 };
 use tokio::{
     sync::{Mutex, OwnedMutexGuard},
-    time::{error::Elapsed, Instant},
+    time::Instant,
 };
 
-use crate::retry::{ReconnectStrategy, RetryError, RetryStrategy};
+use crate::{
+    retry::{ReconnectStrategy, RetryError, RetryStrategy},
+    util::{sleep_until_or_deadline, timeout_at_option},
+};
 
 type Handshake<H, Key, Err, Tx, Rx> = dyn Fn(Option<&Key>, Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<Key, Err>> + Send>>
     + Send
@@ -169,7 +172,7 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
     /// Disconnect the inner connection of this `End`, so that future calls will require a
     /// reconnection before anything happens.
     #[inline(always)]
-    pub fn disconnect(&mut self) {
+    fn disconnect(&mut self) {
         self.inner = None;
     }
 
@@ -273,32 +276,5 @@ async fn lock_weak<T>(weak: &Weak<Mutex<T>>) -> Option<OwnedMutexGuard<T>> {
         Some(arc.lock_owned().await)
     } else {
         None
-    }
-}
-
-/// Sleep for a given duration, or until a given deadline expires, returning `true` if the sleep
-/// completed before the deadline, or `false` if it did not.
-///
-/// This short-circuits and immediately returns `false` if it would exceed the deadline.
-async fn sleep_until_or_deadline(duration: Duration, deadline: Option<Instant>) -> bool {
-    let wakeup = Instant::now() + duration;
-    if let Some(deadline) = deadline {
-        // If we would exceed the deadline, don't wait at all
-        if deadline < wakeup {
-            return false;
-        }
-    }
-    tokio::time::sleep_until(wakeup).await;
-    true
-}
-
-async fn timeout_at_option<T>(
-    deadline: Option<Instant>,
-    future: impl Future<Output = T>,
-) -> Result<T, Elapsed> {
-    if let Some(deadline) = deadline {
-        tokio::time::timeout_at(deadline, future).await
-    } else {
-        Ok(future.await)
     }
 }
