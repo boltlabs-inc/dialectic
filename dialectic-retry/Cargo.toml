@@ -13,7 +13,7 @@ categories = ["asynchronous", "concurrency"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dialectic = { version = "0.4", path = "../dialectic" }
+dialectic = { version = "^0.4.1", path = "../dialectic" }
 call-by = "^0.2.3"
 tokio = { version = "^1.5", features = ["sync", "time"] }
 futures = { version = "0.3", features = ["std"], default-features = false }
@@ -23,6 +23,8 @@ pin-project = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}
+dialectic-tokio-serde = "0.1"
+dialectic-tokio-serde-json = "0.1"
 
 [package.metadata.docs.rs]
 all-features = true
