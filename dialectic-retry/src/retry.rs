@@ -2,7 +2,9 @@ use dialectic::{
     backend::{self, By},
     prelude::*,
 };
-use std::{future::Future, marker::PhantomData, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible, future::Future, marker::PhantomData, pin::Pin, sync::Arc, time::Duration,
+};
 use tokio::time::Instant;
 
 /// A description of what to do when an error happens that we might want to recover from.
@@ -23,22 +25,44 @@ pub enum ReconnectStrategy {
     Fail,
 }
 
+/// An error while trying or retrying to perform an operation over a retry-able connection.
 pub enum RetryError<Err, ConnectError, HandshakeError> {
+    /// An error occurred in the underlying connection.
     OriginalError(Err),
+    /// An error occurred while trying to connect.
     ConnectError(ConnectError),
+    /// The maximum reconnect timeout was exceeded while trying to connect.
     ConnectTimeout,
+    /// An error occurred while performing the session initialization handshake.
     HandshakeError(HandshakeError),
+    /// The maximum reconnect timeout was exceeded while trying to perform the session
+    /// initialization handshake.
     HandshakeTimeout,
+    /// The session initialization handshake did not appropriately complete its session type.
     HandshakeIncomplete,
 }
 
-type Handshake<H, Key, Err, Tx, Rx> = dyn Fn(Option<&Key>, Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<Key, Err>> + Send>>
+/// A function which executes a [`Connector`]-side handshake.
+type Init<H, Key, Err, Tx, Rx> =
+    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<Key, Err>> + Send>> + Send + Sync;
+
+type Retry<H, Key, Err, Tx, Rx> = dyn Fn(&Key, Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(), Err>> + Send>>
     + Send
     + Sync;
 
+/// A function which creates a new connection.
 type Connect<Err, Tx, Rx> =
     dyn Fn() -> Pin<Box<dyn Future<Output = Result<(Tx, Rx), Err>> + Send>> + Send + Sync;
 
+/// A [`Connector`] is a builder for retrying connections, which are parameterized by strategies
+/// describing how and when to recover from errors in the underlying transport. When a connection is
+/// created or re-created, a handshake occurs to indicate to the other side of the connection the
+/// identity of this session, so that the other side can pick up where it left off.
+///
+/// A [`Connector<Key, ConnectErr, HandshakeErr, Tx, Rx, H, S>`](Connector) is meant to be used as
+/// the counterpart to a [`Acceptor<Key, Err, Tx, Rx, H::Dual, S::Dual>`](crate::resume::Acceptor).
+/// If the handshake session type `H` and regular session type `S` are not both respectively duals
+/// between the [`Acceptor`](crate::resume::Acceptor) and the [`Connector`], errors will occur.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 #[derive(Clone)]
@@ -47,7 +71,8 @@ where
     S: Session,
     H: Session,
 {
-    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
+    init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
+    retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
     recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
     recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
@@ -66,19 +91,25 @@ where
     ConnectErr: 'static,
     HandshakeErr: 'static,
 {
-    /// Create a new [`Connector`] which connects using the specified handshake.
+    /// Create a new [`Connector`] which connects using the specified handshakes: it will use the
+    /// `init` handshake when first creating channels, and the `retry` handshake when retrying after
+    /// errors.
     ///
-    /// By default, a [`Connector`] produces channels with the empty session type, and will not
-    /// attempt to retry connections. Use its various builder methods to add recovery strategies and
-    /// alter the default session type.
-    pub fn new<HandshakeFut>(
-        handshake: impl Fn(Option<&Key>, Chan<H, Tx, Rx>) -> HandshakeFut + Sync + Send + 'static,
+    /// By default, a [`Connector`] produces channels with the empty session type, no timeout, and
+    /// will not attempt to retry connections (all errors will immediately propagate). Use its
+    /// various builder methods to add recovery strategies and alter the default session type and
+    /// timeout.
+    pub fn new<InitFut, RetryFut>(
+        init: impl Fn(Chan<H, Tx, Rx>) -> InitFut + Sync + Send + 'static,
+        retry: impl Fn(&Key, Chan<H, Tx, Rx>) -> RetryFut + Sync + Send + 'static,
     ) -> Self
     where
-        HandshakeFut: Future<Output = Result<Key, HandshakeErr>> + Send + 'static,
+        InitFut: Future<Output = Result<Key, HandshakeErr>> + Send + 'static,
+        RetryFut: Future<Output = Result<(), HandshakeErr>> + Send + 'static,
     {
         Self {
-            handshake: Arc::new(move |key, chan| Box::pin(handshake(key, chan))),
+            init: Arc::new(move |chan| Box::pin(init(chan))),
+            retry: Arc::new(move |key, chan| Box::pin(retry(key, chan))),
             recover_connect: Arc::new(|_, _| ReconnectStrategy::Fail),
             recover_handshake: Arc::new(|_, _| ReconnectStrategy::Fail),
             recover_tx: Arc::new(|_, _| RetryStrategy::Fail),
@@ -103,7 +134,8 @@ where
     /// Set the session type for all future [`Chan`]s produced by this [`Connector`].
     pub fn session<P: Session>(self) -> Connector<Key, ConnectErr, HandshakeErr, Tx, Rx, H, P> {
         let Connector {
-            handshake,
+            init,
+            retry,
             recover_connect,
             recover_handshake,
             recover_tx,
@@ -112,7 +144,8 @@ where
             ..
         } = self;
         Connector {
-            handshake,
+            init,
+            retry,
             recover_connect,
             recover_handshake,
             recover_tx,
@@ -180,17 +213,19 @@ where
 
     /// Create a new [`Chan`] which will connect to some underlying transport `(Tx, Rx)` using the
     /// specified closure, using the current configuration of this [`Connector`].
-    ///
-    /// This will not immediately call the connection closure; instead, this closure is called, and
-    /// the connection established, when the first [`send`](Transmit::send) or
-    /// [`recv`](Receive::recv) operation is performed on the [`Chan`].
     pub async fn connect<ConnectFut>(
         &self,
         connect: impl Fn() -> ConnectFut + Sync + Send + 'static,
-    ) -> Chan<
-        S,
-        Sender<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
-        Receiver<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+    ) -> Result<
+        (
+            Key,
+            Chan<
+                S,
+                Sender<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+                Receiver<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+            >,
+        ),
+        RetryError<Infallible, ConnectErr, HandshakeErr>,
     >
     where
         ConnectFut: Future<Output = Result<(Tx, Rx), ConnectErr>> + Send + 'static,
@@ -200,29 +235,42 @@ where
 
         let (sender, receiver) = end::channel(
             connect,
-            self.handshake.clone(),
-            self.recover_connect.clone(),
-            self.recover_handshake.clone(),
-            self.recover_tx.clone(),
-            self.recover_rx.clone(),
+            self.init.clone(),
+            self.retry.clone(),
+            Recoveries {
+                connect: self.recover_connect.clone(),
+                handshake: self.recover_handshake.clone(),
+                tx: self.recover_tx.clone(),
+                rx: self.recover_rx.clone(),
+            },
             self.timeout,
         );
 
-        S::wrap(Sender { end: sender }, Receiver { end: receiver })
+        let mut tx = Sender { end: sender };
+        let rx = Receiver { end: receiver };
+        let key = tx.end.key(|tx, rx| (tx, rx)).await?;
+
+        Ok((key, S::wrap(tx, rx)))
     }
 }
 
 mod end;
-use end::{ReceiverEnd, SenderEnd};
+use end::{ReceiverEnd, Recoveries, SenderEnd};
 
-/// The transmitting end of a retrying connection.
+/// The transmitting end of a retrying connection, wrapping a transmitter from some underlying
+/// transport backend.
+///
+/// The only way to create a [`Sender`] is to use [`Connector::connect`].
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct Sender<H: Session, Key, ConnectErr, HandshakeErr, Tx, Rx> {
     end: SenderEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
 }
 
-/// The receiving end of a retrying connection.
+/// The receiving end of a retrying connection, wrapping a receiver from some underlying transport
+/// backend.
+///
+/// The only way to create a [`struct@Receiver`] is to use [`Connector::connect`].
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct Receiver<H: Session, Key, ConnectErr, HandshakeErr, Tx, Rx> {
