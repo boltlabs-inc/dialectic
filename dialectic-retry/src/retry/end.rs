@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use crate::{
-    retry::{Connect, Handshake, ReconnectStrategy, RetryError, RetryStrategy},
+    retry::{Connect, Init, ReconnectStrategy, Retry, RetryError, RetryStrategy},
     util::{sleep_until_or_deadline, timeout_at_option},
 };
 
@@ -20,7 +20,7 @@ use crate::{
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx> {
-    /// The current key for this session, if one has been assigned.
+    /// The key for this session, if one has been assigned.
     key: Arc<Mutex<Option<Key>>>,
     /// The current inner thing (a `tx` or `rx` connection end).
     inner: Option<Inner>,
@@ -30,9 +30,10 @@ pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx,
     next_other: Weak<Mutex<VecDeque<Other>>>,
     /// An async function to create a new connection, or return an error.
     connect: Arc<Connect<ConnectErr, Tx, Rx>>,
-    /// An async function to perform a handshake, starting with an optional key and returning a new
-    /// key or an error.
-    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
+    /// An async function to perform an initial handshake.
+    init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
+    /// An async function to perform an initial handshake.
+    retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     /// A function describing the desired retry strategy for errors in the underlying connection.
     recover: Arc<dyn Fn(usize, &Err) -> RetryStrategy + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to establish a
@@ -53,14 +54,21 @@ pub type ReceiverEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx> =
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+pub struct Recoveries<ConnectErr, HandshakeErr, Tx, Rx> {
+    pub connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
+    pub handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
+    pub tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
+    pub rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
+}
+
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 #[allow(clippy::type_complexity)]
 pub fn channel<H, Key, ConnectErr, HandshakeErr, Tx, Rx>(
     connect: Arc<Connect<ConnectErr, Tx, Rx>>,
-    handshake: Arc<Handshake<H, Key, HandshakeErr, Tx, Rx>>,
-    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
-    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
+    init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
+    retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
+    recoveries: Recoveries<ConnectErr, HandshakeErr, Tx, Rx>,
     timeout: Option<Duration>,
 ) -> (
     SenderEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
@@ -82,11 +90,12 @@ where
         inner: None,
         next_inner: next_tx.clone(),
         next_other: Arc::downgrade(&next_rx),
-        handshake: handshake.clone(),
+        init: init.clone(),
+        retry: retry.clone(),
         connect: connect.clone(),
-        recover: recover_tx,
-        recover_connect: recover_connect.clone(),
-        recover_handshake: recover_handshake.clone(),
+        recover: recoveries.tx,
+        recover_connect: recoveries.connect.clone(),
+        recover_handshake: recoveries.handshake.clone(),
         timeout,
     };
 
@@ -95,11 +104,12 @@ where
         inner: None,
         next_inner: next_rx,
         next_other: Arc::downgrade(&next_tx),
-        handshake,
+        init,
+        retry,
         connect,
-        recover: recover_rx,
-        recover_connect,
-        recover_handshake,
+        recover: recoveries.rx,
+        recover_connect: recoveries.connect,
+        recover_handshake: recoveries.handshake,
         timeout,
     };
 
@@ -158,6 +168,21 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
         self.inner = None;
     }
 
+    /// Initialize the connection if necessary, and return the session key.
+    pub async fn key<E>(
+        &mut self,
+        reorder: impl Fn(Tx, Rx) -> (Inner, Other),
+    ) -> Result<Key, RetryError<E, ConnectErr, HandshakeErr>>
+    where
+        Key: Clone,
+    {
+        if self.key.lock().await.is_none() {
+            self.inner(reorder, &mut 0, &mut None).await?;
+        }
+        let key = self.key.lock().await.clone().unwrap();
+        Ok(key)
+    }
+
     /// Mutably borrow the inner connection of this `End`, recreating the connection if necessary,
     /// or returning an error if it's not possible to do so within the bounds described by the
     /// reconnection strategies.
@@ -194,8 +219,19 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
                         // Reconnect successfully returned a connection for us to do a handshake on
                         Ok(Ok((tx, rx))) => {
                             // Execute the handshake
-                            let handshake =
-                                H::over(tx, rx, |chan| (self.handshake)(key.as_ref(), chan));
+                            let handshake = H::over(tx, rx, |chan| async {
+                                match *key {
+                                    // Initial handshake
+                                    None => {
+                                        let new_key = (self.init)(chan).await?;
+                                        // Set the key
+                                        *key = Some(new_key);
+                                        Ok(())
+                                    }
+                                    // Subsequent handshake
+                                    Some(ref key) => (self.retry)(key, chan).await,
+                                }
+                            });
                             match timeout_at_option(*deadline, handshake).await {
                                 // Deadline exceeded while waiting for handshake to finish
                                 Err(_) => return Err(RetryError::HandshakeTimeout),
@@ -208,7 +244,7 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
                                     RetryError::HandshakeError(err),
                                 ),
                                 // Handshake session succeeded
-                                Ok((Ok(new_key), Ok((tx, rx)))) => {
+                                Ok((Ok(()), Ok((tx, rx)))) => {
                                     // Depending on whether we're in a `Receiver` or `Sender`, swap
                                     // the tx/rx for each other to get an inner/other pair
                                     let (inner, other) = reorder(tx, rx);
@@ -216,8 +252,8 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
                                     if let Some(mut q) = lock_weak(&self.next_other).await {
                                         q.push_back(other);
                                     }
-                                    // Set the new key (must come last to avoid deadlock)
-                                    *key = Some(new_key);
+                                    // Drop the lock on key (must come last to avoid deadlock)
+                                    drop(key);
                                     // Set the new `inner`
                                     break inner;
                                 }

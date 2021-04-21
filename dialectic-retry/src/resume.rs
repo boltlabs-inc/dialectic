@@ -29,7 +29,7 @@ pub enum AcceptError<Key, Err> {
     /// session, but a session with this key already exists.
     SessionKeyAlreadyExists(Key),
     /// The buffer for this session key is full of resumed connections which have not yet been
-    /// processed by the connected [`Sender`]/[`Receiver`].
+    /// processed by the connected [`Sender`]/[`struct@Receiver`].
     ///
     /// This error usually only occurs if the retrying end is misbehaving.
     NoCapacity,
@@ -38,12 +38,12 @@ pub enum AcceptError<Key, Err> {
 /// An error within a resume-enabled connection.
 pub enum ResumeError<Err> {
     /// An error occurred in the underlying connection which was not able to be recovered by the
-    /// resumption strategy for this [`Sender`] or [`Receiver`].
+    /// resumption strategy for this [`Sender`] or [`struct@Receiver`].
     Error(Err),
     /// The timeout expired for the retrying end to reconnect.
     ///
-    /// This error usually only occurs if a method is called on a [`Sender`] or [`Receiver`] after
-    /// that [`Sender`] or [`Receiver`] returns an error.
+    /// This error usually only occurs if a method is called on a [`Sender`] or [`struct@Receiver`]
+    /// after that [`Sender`] or [`struct@Receiver`] returns an error.
     ConnectTimeout,
 }
 
@@ -59,40 +59,54 @@ pub enum ResumeStrategy {
 }
 
 /// The kind of a connection which a handshake session indicates should be created.
-pub enum ConnectKind {
+pub enum ResumeKind {
     /// Create a new [`Chan`] for this connection.
     New,
     /// Resume an existing session using this connection.
     Existing,
 }
 
-/// The "feed lines" to a matched pair of [`Sender`] and [`Receiver`] so that the [`Acceptor`] which
+/// The "feed lines" to a matched pair of [`Sender`] and [`struct@Receiver`] so that the [`Acceptor`] which
 /// controls them can supply them with newly accepted transmitter and receiver connections.
-pub(crate) struct Waiting<Tx, Rx> {
+pub(crate) struct FeedLine<Tx, Rx> {
     /// Sender for transmitter ends.
     send_tx: mpsc::Sender<Tx>,
     /// Sender for receiver ends.
     send_rx: mpsc::Sender<Rx>,
-    /// Indicator noting whether at least one of the [`Sender`] or [`Receiver`] is dropped.
+    /// Indicator noting whether at least one of the [`Sender`] or [`struct@Receiver`] is dropped.
     ///
     /// In the [`Drop`] impl, this is used to remove a key's entry from the managed map once both
-    /// its [`Sender`] and [`Receiver`] have dropped.
+    /// its [`Sender`] and [`struct@Receiver`] have dropped.
     half_dropped: AtomicBool,
 }
 
-type Managed<Key, Tx, Rx> = DashMap<Key, Waiting<Tx, Rx>>;
+/// A set of [`FeedLine`]s to [`Sender`]/[`struct@Receiver`] pairs, indexed by `Key` and accessible
+/// concurrently.
+type Managed<Key, Tx, Rx> = DashMap<Key, FeedLine<Tx, Rx>>;
 
+/// A function which executes an [`Acceptor`]-side handshake.
 type Handshake<H, Key, E, Tx, Rx> =
-    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
+    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ResumeKind, Key), E>>>>;
 
+/// An [`Acceptor`] knows how to accept an incoming pair of transmitter `Tx` and receiver `Rx` and
+/// perform a handshake to determine whether they intend to create a new connection or resume an
+/// existing one. It manages a set of [`Chan`]s, each created by a call to
+/// [`accept`](Acceptor::accept), so that if an error occurs in some [`Chan`] it manages, the other
+/// end of the connection can retry and be reconnected to the same [`Chan`], without the user of the
+/// [`Chan`] being aware that the retry/resume occurred.
+///
+/// An [`Acceptor<Key, Err, Tx, Rx, H, S>`](Acceptor) is meant to be used as the counterpart to a
+/// [`Connector<Key, ConnectErr, HandshakeErr, Tx, Rx, H::Dual, S::Dual>`](crate::retry::Connector).
+/// If the handshake session type `H` and regular session type `S` are not both respectively duals
+/// between the [`Acceptor`] and the [`Connector`](crate::retry::Connector), errors will occur.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct Acceptor<H, S, Key, E, Tx, Rx>
+pub struct Acceptor<Key, Err, Tx, Rx, H, S>
 where
     H: Session,
     S: Session,
 {
-    handshake: Box<Handshake<H, Key, E, Tx, Rx>>,
+    handshake: Box<Handshake<H, Key, Err, Tx, Rx>>,
     managed: Arc<Managed<Key, Tx, Rx>>,
     recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
@@ -106,34 +120,114 @@ use end::{End, ReceiverEnd, SenderEnd};
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<Key, H, Err, S, Tx, Rx> Acceptor<H, S, Key, Err, Tx, Rx>
+impl<Key, H, Err, Tx, Rx> Acceptor<Key, Err, Tx, Rx, H, Session! {}>
+where
+    Key: Clone + Eq + Hash + Send + Sync + 'static,
+    H: Session,
+{
+    /// Create a new [`Acceptor`] which accepts connections using the specified handshake.
+    ///
+    /// By default, an [`Acceptor`] produces channels with the empty session type, no timeout, a
+    /// buffer size of 1, and will not attempt to resume connections (all errors will immediately
+    /// propagate). Use its various builder methods to add recovery strategies and alter the default
+    /// session type, timeout, and buffer size.
+    pub fn new<Fut>(handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static) -> Self
+    where
+        Fut: Future<Output = Result<(ResumeKind, Key), Err>> + 'static,
+    {
+        Self {
+            handshake: Box::new(move |chan| Box::pin(handshake(chan))),
+            managed: Arc::new(DashMap::new()),
+            recover_tx: Arc::new(|_, _| ResumeStrategy::Fail),
+            recover_rx: Arc::new(|_, _| ResumeStrategy::Fail),
+            timeout: None,
+            buffer_size: 1,
+            session: PhantomData,
+        }
+    }
+}
+
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
+impl<Key, H, Err, S, Tx, Rx> Acceptor<Key, Err, Tx, Rx, H, S>
 where
     Key: Clone + Eq + Hash + Send + Sync + 'static,
     H: Session,
     S: Session,
 {
-    pub fn new<Fut: Future<Output = Result<(ConnectKind, Key), Err>> + 'static>(
-        handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static,
-        recover_tx: impl Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send + 'static,
-        recover_rx: impl Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send + 'static,
-        timeout: Option<Duration>,
-        buffer_size: usize,
-    ) -> Self {
-        Self {
-            handshake: Box::new(move |chan| Box::pin(handshake(chan))),
-            managed: Arc::new(DashMap::new()),
-            recover_tx: Arc::new(recover_tx),
-            recover_rx: Arc::new(recover_rx),
+    /// Set the session type for all future [`Chan`]s produced by this [`Acceptor`].
+    pub fn session<P: Session>(self) -> Acceptor<Key, Err, Tx, Rx, H, P> {
+        let Acceptor {
+            handshake,
+            managed,
+            recover_tx,
+            recover_rx,
+            timeout,
+            buffer_size,
+            ..
+        } = self;
+        Acceptor {
+            handshake,
+            managed,
+            recover_tx,
+            recover_rx,
             timeout,
             buffer_size,
             session: PhantomData,
         }
     }
 
+    /// Set the recovery method for transmitter errors within all future [`Chan`]s produced by this
+    /// [`Acceptor`].
+    pub fn recover_tx(
+        mut self,
+        recovery: impl Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send + 'static,
+    ) -> Self {
+        self.recover_tx = Arc::new(recovery);
+        self
+    }
+
+    /// Set the recovery method for receiver errors within all future [`Chan`]s produced by this
+    /// [`Acceptor`].
+    pub fn recover_rx(
+        mut self,
+        recovery: impl Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send + 'static,
+    ) -> Self {
+        self.recover_rx = Arc::new(recovery);
+        self
+    }
+
+    /// Set a timeout for recovery within all future [`Chan`]s produced by this [`Acceptor`].
+    ///
+    /// When there is a timeout, an error will be thrown if recovery from a previous error takes
+    /// longer than the given timeout, even if the error recovery strategy specifies trying again.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Clear the timeout for recovery within all future [`Chan`]s produced by this [`Acceptor`].
+    ///
+    /// When there is no timeout,  recovery attempts will continue indefinitely until the recovery
+    /// strategy indicates that they should stop.
+    pub fn clear_timeout(mut self) -> Self {
+        self.timeout = None;
+        self
+    }
+
+    /// Set the buffer size for all future [`Chan`]s produced by this [`Acceptor`].
+    ///
+    /// If on an [`accept`](Acceptor::accept), more than `buffer_size` number of successful retries
+    /// are waiting for a [`Chan`], an error will be thrown instead of a successful resumption.
+    pub fn buffer_size(mut self, buffer_size: usize) -> Self {
+        self.buffer_size = buffer_size.saturating_add(1);
+        self
+    }
+
     /// Attempt to accept a new connection using this [`Acceptor`].
     ///
     /// If this returns `Ok(None)`, the connection has been successfully forwarded to some existing
-    /// pair of [`Sender`] and [`Receiver`] because the handshake returned a matching key for that
+    /// pair of [`Sender`] and [`struct@Receiver`] because the handshake returned a matching key for that
     /// session. If this returns `Ok(Some((key, chan)))`, the handshake successfully indicated that
     /// a new session should be started for the returned key. Otherwise, an error occurred while
     /// trying to accept this connection, and is returned.
@@ -155,17 +249,17 @@ where
             Err(_) => return Err(AcceptError::HandshakeIncomplete),
         };
         match (connect_kind, self.managed.get_mut(&key)) {
-            (ConnectKind::Existing, None) => {
+            (ResumeKind::Existing, None) => {
                 // If the connection was supposed to be for an existing key but no key
                 // existed yet, return an error instead of generating a new channel.
                 Err(AcceptError::NoSuchSessionKey(key))
             }
-            (ConnectKind::New, Some(_)) => {
+            (ResumeKind::New, Some(_)) => {
                 // If the connection was supposed to be for a new key, but the key existed,
                 // return an error instead of resuming on that key.
                 Err(AcceptError::SessionKeyAlreadyExists(key))
             }
-            (ConnectKind::Existing, Some(map_ref)) => {
+            (ResumeKind::Existing, Some(map_ref)) => {
                 // If there was already an entry by this key, there's a session, potentially
                 // paused, by this key. If the handshake was properly implemented, we're
                 // only receiving this tx/rx pair because the other end tried to reconnect,
@@ -203,7 +297,7 @@ where
                     Err(AcceptError::NoCapacity)
                 }
             }
-            (ConnectKind::New, None) => {
+            (ResumeKind::New, None) => {
                 // If there was no entry by this key, then this represents a fresh session,
                 // and we should return a channel for the caller to do with what they like
                 // (usually, run a session in a separate task).
@@ -211,7 +305,7 @@ where
                 let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
                 self.managed.insert(
                     key.clone(),
-                    Waiting {
+                    FeedLine {
                         send_tx,
                         send_rx,
                         half_dropped: false.into(),
@@ -296,6 +390,15 @@ where
 /// connection to specify that it wants to initiate a new connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+pub struct Receiver<Key, Tx, Rx>
+where
+    Key: Eq + Hash,
+{
+    end: ReceiverEnd<Key, Tx, Rx>,
+}
+
+#[Transmitter(Tx)]
+#[Receiver(Rx)]
 impl<Key, Tx, Rx> Transmitter for Sender<Key, Tx, Rx>
 where
     Key: Sync + Send + Eq + Hash,
@@ -352,15 +455,6 @@ where
         let message: &'a T = call_by::to_ref::<T>(message);
         Box::pin(async move { retry_loop!(self.send(call_by::from_ref::<T>(message))) })
     }
-}
-
-#[Transmitter(Tx)]
-#[Receiver(Rx)]
-pub struct Receiver<Key, Tx, Rx>
-where
-    Key: Eq + Hash,
-{
-    end: ReceiverEnd<Key, Tx, Rx>,
 }
 
 #[Transmitter(Tx)]
