@@ -13,40 +13,77 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+/// An error while accepting a connection with an [`Acceptor`].
 pub enum AcceptError<Key, Err> {
-    HandshakeIncomplete,
+    /// An error was returned during the session initialization handshake.
     HandshakeError(Err),
-    NoSuchKey(Key),
-    KeyAlreadyExists(Key),
+    /// The session initialization handshake did not appropriately complete its session type.
+    HandshakeIncomplete,
+    /// The session initialization handshake returned a session key marked for resumption of an
+    /// existing session, but no corresponding session exists for this key.
+    ///
+    /// This error always indicates a programmer error in the session handshake with which the
+    /// [`Acceptor`] was created.
+    NoSuchSessionKey(Key),
+    /// The session initialization handshake returned a session key marked for creation of a new
+    /// session, but a session with this key already exists.
+    SessionKeyAlreadyExists(Key),
+    /// The buffer for this session key is full of resumed connections which have not yet been
+    /// processed by the connected [`Sender`]/[`Receiver`].
+    ///
+    /// This error usually only occurs if the retrying end is misbehaving.
     NoCapacity,
 }
 
+/// An error within a resume-enabled connection.
 pub enum ResumeError<Err> {
-    OriginalError(Err),
+    /// An error occurred in the underlying connection which was not able to be recovered by the
+    /// resumption strategy for this [`Sender`] or [`Receiver`].
+    Error(Err),
+    /// The timeout expired for the retrying end to reconnect.
+    ///
+    /// This error usually only occurs if a method is called on a [`Sender`] or [`Receiver`] after
+    /// that [`Sender`] or [`Receiver`] returns an error.
     ConnectTimeout,
 }
 
+/// A description of what to do when an error happens in a resume-enabled connection.
+pub enum ResumeStrategy {
+    /// Pause for this duration, then retry the operation on the same underlying connection.
+    RetryAfter(Duration),
+    /// Immediately discard the underlying connection and then retry the operation once a new
+    /// connection has been established.
+    RetryAfterReconnect,
+    /// Immediately fail, propagating the current error.
+    Fail,
+}
+
+/// The kind of a connection which a handshake session indicates should be created.
 pub enum ConnectKind {
+    /// Create a new [`Chan`] for this connection.
     New,
+    /// Resume an existing session using this connection.
     Existing,
 }
 
-type Handshake<H, Key, E, Tx, Rx> =
-    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
-
+/// The "feed lines" to a matched pair of [`Sender`] and [`Receiver`] so that the [`Acceptor`] which
+/// controls them can supply them with newly accepted transmitter and receiver connections.
 pub(crate) struct Waiting<Tx, Rx> {
+    /// Sender for transmitter ends.
     send_tx: mpsc::Sender<Tx>,
+    /// Sender for receiver ends.
     send_rx: mpsc::Sender<Rx>,
+    /// Indicator noting whether at least one of the [`Sender`] or [`Receiver`] is dropped.
+    ///
+    /// In the [`Drop`] impl, this is used to remove a key's entry from the managed map once both
+    /// its [`Sender`] and [`Receiver`] have dropped.
     half_dropped: AtomicBool,
 }
 
 type Managed<Key, Tx, Rx> = DashMap<Key, Waiting<Tx, Rx>>;
 
-pub enum ResumeStrategy {
-    RetryAfter(Duration),
-    RetryAfterReconnect,
-    Fail,
-}
+type Handshake<H, Key, E, Tx, Rx> =
+    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ConnectKind, Key), E>>>>;
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
@@ -93,12 +130,21 @@ where
         }
     }
 
+    /// Attempt to accept a new connection using this [`Acceptor`].
+    ///
+    /// If this returns `Ok(None)`, the connection has been successfully forwarded to some existing
+    /// pair of [`Sender`] and [`Receiver`] because the handshake returned a matching key for that
+    /// session. If this returns `Ok(Some((key, chan)))`, the handshake successfully indicated that
+    /// a new session should be started for the returned key. Otherwise, an error occurred while
+    /// trying to accept this connection, and is returned.
     pub async fn accept(
         &self,
         tx: Tx,
         rx: Rx,
-    ) -> Result<Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>, AcceptError<Key, Err>>
-    {
+    ) -> Result<
+        Option<(Key, Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>)>,
+        AcceptError<Key, Err>,
+    > {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
         let (connect_kind, key) = match result {
             Ok(key) => key,
@@ -112,12 +158,12 @@ where
             (ConnectKind::Existing, None) => {
                 // If the connection was supposed to be for an existing key but no key
                 // existed yet, return an error instead of generating a new channel.
-                Err(AcceptError::NoSuchKey(key))
+                Err(AcceptError::NoSuchSessionKey(key))
             }
             (ConnectKind::New, Some(_)) => {
                 // If the connection was supposed to be for a new key, but the key existed,
                 // return an error instead of resuming on that key.
-                Err(AcceptError::KeyAlreadyExists(key))
+                Err(AcceptError::SessionKeyAlreadyExists(key))
             }
             (ConnectKind::Existing, Some(map_ref)) => {
                 // If there was already an entry by this key, there's a session, potentially
@@ -183,7 +229,7 @@ where
                 };
                 let rx = Receiver {
                     end: End::new(
-                        key,
+                        key.clone(),
                         rx,
                         next_rx,
                         self.recover_rx.clone(),
@@ -191,7 +237,7 @@ where
                         self.timeout,
                     ),
                 };
-                Ok(Some(S::wrap(tx, rx)))
+                Ok(Some((key, S::wrap(tx, rx))))
             }
         }
     }
@@ -212,7 +258,7 @@ macro_rules! retry_loop {
                 Some(inner) => inner,
                 None => return Err(
                     latest_error
-                        .map(ResumeError::OriginalError)
+                        .map(ResumeError::Error)
                         .unwrap_or(ResumeError::ConnectTimeout)
                 ),
             };
@@ -223,7 +269,7 @@ macro_rules! retry_loop {
                     if $this.end.recover(&mut retries, &mut deadline, &error).await {
                         latest_error = Some(error);
                     } else {
-                        break Err(ResumeError::OriginalError(error));
+                        break Err(ResumeError::Error(error));
                     }
                 }
             }
@@ -231,6 +277,10 @@ macro_rules! retry_loop {
     }};
 }
 
+/// A resuming transmitter end, wrapping a transmitter from some underlying transport backend.
+///
+/// The only way to create a [`Sender`] is to use [`Acceptor::accept`] and for the accepted
+/// connection to specify that it wants to initiate a new connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct Sender<Key, Tx, Rx>
@@ -240,6 +290,10 @@ where
     end: SenderEnd<Key, Tx, Rx>,
 }
 
+/// A resuming receiver end, wrapping a receiver from some underlying transport backend.
+///
+/// The only way to create a [`Sender`] is to use [`Acceptor::accept`] and for the accepted
+/// connection to specify that it wants to initiate a new connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 impl<Key, Tx, Rx> Transmitter for Sender<Key, Tx, Rx>
