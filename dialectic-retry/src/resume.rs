@@ -263,17 +263,20 @@ where
 
     /// Attempt to accept a new connection using this [`Acceptor`].
     ///
-    /// If this returns `Ok(None)`, the connection has been successfully forwarded to some existing
-    /// pair of [`Sender`] and [`struct@Receiver`] because the handshake returned a matching key for that
-    /// session. If this returns `Ok(Some((key, chan)))`, the handshake successfully indicated that
-    /// a new session should be started for the returned key. Otherwise, an error occurred while
-    /// trying to accept this connection, and is returned.
+    /// If this returns `Ok((key, None))`, the connection has been successfully forwarded to some
+    /// existing pair of [`Sender`] and [`struct@Receiver`] because the handshake returned a
+    /// matching key for that session. If this returns `Ok((key, Some(chan)))`, the handshake
+    /// successfully indicated that a new session should be started for the returned key. Otherwise,
+    /// an error occurred while trying to accept this connection, and is returned.
     pub async fn accept(
         &self,
         tx: Tx,
         rx: Rx,
     ) -> Result<
-        Option<(Key, Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>)>,
+        (
+            Key,
+            Option<Chan<S, Sender<Key, Tx, Rx>, Receiver<Key, Tx, Rx>>>,
+        ),
         AcceptError<Key, Err>,
     > {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
@@ -328,7 +331,7 @@ where
                         | (Ok(()), Ok(()))
                         | (Ok(()), Err(Closed(_)))
                         | (Err(Closed(_)), Ok(()))
-                        | (Err(Closed(_)), Err(Closed(_))) => Ok(None),
+                        | (Err(Closed(_)), Err(Closed(_))) => Ok((key, None)),
                     }
                 } else {
                     Err(AcceptError::NoCapacity)
@@ -368,7 +371,7 @@ where
                         self.timeout,
                     ),
                 };
-                Ok(Some((key, S::wrap(tx, rx))))
+                Ok((key, Some(S::wrap(tx, rx))))
             }
         }
     }
