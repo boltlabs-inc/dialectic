@@ -48,11 +48,11 @@ async fn main() -> Result<(), Error> {
         .buffer_size(1000)
         .timeout(timeout)
         .recover_tx(|retries, error| {
-            eprintln!("[TX] retries: {}, error: {}", retries, error);
+            // eprintln!("[TX] retries: {}, error: {}", retries, error);
             ResumeStrategy::Reconnect
         })
         .recover_rx(|retries, error| {
-            eprintln!("[RX] retries: {}, error: {}", retries, error);
+            // eprintln!("[RX] retries: {}, error: {}", retries, error);
             ResumeStrategy::Reconnect
         });
 
@@ -65,12 +65,14 @@ async fn main() -> Result<(), Error> {
         if let Some((key, mut chan)) = acceptor.accept(tx, rx).await? {
             println!("session key: {}", key);
             tokio::spawn(async move {
+                let mut n = 0;
                 #[allow(unreachable_code)]
                 Ok::<_, Error>(loop {
                     let start = Instant::now();
-                    print!("pong ...");
+                    print!("{}: pong ...", n);
                     chan = chan.recv().await?.1.send(()).await?;
                     println!(" ping (elapsed: {:?})", start.elapsed());
+                    n += 1;
                 })
             });
         }

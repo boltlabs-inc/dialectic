@@ -49,8 +49,8 @@ async fn main() -> Result<(), Error> {
 
     let timeout = Duration::from_secs(10);
 
-    let backoff = Backoff::with_delay(Duration::from_millis(10))
-        .exponential(2.0)
+    let backoff = Backoff::with_delay(Duration::from_millis(100))
+        // .exponential(2.0)
         .jitter(Duration::from_millis(10))
         .max_delay(Duration::from_secs(1));
 
@@ -60,28 +60,28 @@ async fn main() -> Result<(), Error> {
         .recover_connect({
             let b = backoff.backoff(ReconnectStrategy::ReconnectAfter);
             move |retries, error| {
-                eprintln!("[reconnect] retries: {}, error: {}", retries, error);
+                // eprintln!("[reconnect] retries: {}, error: {}", retries, error);
                 b(retries, error)
             }
         })
         .recover_handshake({
             let b = backoff.backoff(ReconnectStrategy::ReconnectAfter);
             move |retries, error| {
-                eprintln!("[handshake] retries: {}, error: {}", retries, error);
+                // eprintln!("[handshake] retries: {}, error: {}", retries, error);
                 b(retries, error)
             }
         })
         .recover_tx({
             let b = backoff.backoff(RetryStrategy::ReconnectAfter);
             move |retries, error| {
-                eprintln!("[TX error] retries: {}, error: {}", retries, error);
+                // eprintln!("[TX error] retries: {}, error: {}", retries, error);
                 b(retries, error)
             }
         })
         .recover_rx({
             let b = backoff.backoff(RetryStrategy::ReconnectAfter);
             move |retries, error| {
-                eprintln!("[RX error] retries: {}, error: {}", retries, error);
+                // eprintln!("[RX error] retries: {}, error: {}", retries, error);
                 b(retries, error)
             }
         });
@@ -92,11 +92,13 @@ async fn main() -> Result<(), Error> {
 
     println!("session key: {}", key);
 
+    let mut n = 0;
     loop {
         let start = Instant::now();
-        print!("ping ...");
+        print!("{}: ping ...", n);
         chan = chan.send(()).await?.recv().await?.1;
         println!(" pong (elapsed: {:?})", start.elapsed());
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        n += 1;
     }
 }
