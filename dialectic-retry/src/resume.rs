@@ -4,6 +4,7 @@ use dialectic::{
     prelude::*,
 };
 use std::{
+    fmt::{Debug, Display},
     future::Future,
     hash::Hash,
     marker::PhantomData,
@@ -14,6 +15,7 @@ use std::{
 use tokio::sync::mpsc;
 
 /// An error while accepting a connection with an [`Acceptor`].
+#[derive(Debug, Clone)]
 pub enum AcceptError<Key, Err> {
     /// An error was returned during the session initialization handshake.
     HandshakeError(Err),
@@ -35,7 +37,23 @@ pub enum AcceptError<Key, Err> {
     NoCapacity,
 }
 
+impl<Key: Display, Err: Display> Display for AcceptError<Key, Err> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use AcceptError::*;
+        match self {
+            HandshakeError(e) => write!(f, "{}", e),
+            HandshakeIncomplete => write!(f, "handshake session incomplete"),
+            NoSuchSessionKey(key) => write!(f, "no session exists for key: {}", key),
+            SessionKeyAlreadyExists(key) => write!(f, "a session already exists for key: {}", key),
+            NoCapacity => write!(f, "no capacity to add pending session"),
+        }
+    }
+}
+
+impl<Key: Display + Debug, Err: Display + Debug> std::error::Error for AcceptError<Key, Err> {}
+
 /// An error within a resume-enabled connection.
+#[derive(Debug, Clone)]
 pub enum ResumeError<Err> {
     /// An error occurred in the underlying connection which was not able to be recovered by the
     /// resumption strategy for this [`Sender`] or [`struct@Receiver`].
@@ -47,15 +65,34 @@ pub enum ResumeError<Err> {
     ConnectTimeout,
 }
 
+impl<Err: Display> Display for ResumeError<Err> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        use ResumeError::*;
+        match self {
+            Error(e) => write!(f, "{}", e),
+            ConnectTimeout => write!(f, "timeout while connecting"),
+        }
+    }
+}
+
+impl<Err: Display + Debug> std::error::Error for ResumeError<Err> {}
+
 /// A description of what to do when an error happens in a resume-enabled connection.
+#[derive(Debug, Clone, Copy)]
 pub enum ResumeStrategy {
     /// Pause for this duration, then retry the operation on the same underlying connection.
     RetryAfter(Duration),
     /// Immediately discard the underlying connection and then retry the operation once a new
     /// connection has been established.
-    RetryAfterReconnect,
+    Reconnect,
     /// Immediately fail, propagating the current error.
     Fail,
+}
+
+impl Default for ResumeStrategy {
+    fn default() -> Self {
+        Self::Fail
+    }
 }
 
 /// The kind of a connection which a handshake session indicates should be created.
@@ -128,9 +165,9 @@ where
     /// Create a new [`Acceptor`] which accepts connections using the specified handshake.
     ///
     /// By default, an [`Acceptor`] produces channels with the empty session type, no timeout, a
-    /// buffer size of 1, and will not attempt to resume connections (all errors will immediately
-    /// propagate). Use its various builder methods to add recovery strategies and alter the default
-    /// session type, timeout, and buffer size.
+    /// buffer size of 1, and will attempt to resume connections indefinitely. Use its various
+    /// builder methods to add recovery strategies and alter the default session type, timeout, and
+    /// buffer size.
     pub fn new<Fut>(handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static) -> Self
     where
         Fut: Future<Output = Result<(ResumeKind, Key), Err>> + 'static,
@@ -138,8 +175,8 @@ where
         Self {
             handshake: Box::new(move |chan| Box::pin(handshake(chan))),
             managed: Arc::new(DashMap::new()),
-            recover_tx: Arc::new(|_, _| ResumeStrategy::Fail),
-            recover_rx: Arc::new(|_, _| ResumeStrategy::Fail),
+            recover_tx: Arc::new(|_, _| ResumeStrategy::Reconnect),
+            recover_rx: Arc::new(|_, _| ResumeStrategy::Reconnect),
             timeout: None,
             buffer_size: 1,
             session: PhantomData,

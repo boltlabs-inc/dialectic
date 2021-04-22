@@ -67,7 +67,7 @@ where
     ) -> bool {
         match (self.recover)(*retries, error) {
             ResumeStrategy::Fail => return false,
-            ResumeStrategy::RetryAfterReconnect => self.inner = None,
+            ResumeStrategy::Reconnect => self.inner = None,
             ResumeStrategy::RetryAfter(after) => {
                 if !sleep_until_or_deadline(after, *deadline).await {
                     return false;
