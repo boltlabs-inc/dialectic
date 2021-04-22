@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use crate::{
-    retry::{Connect, Init, ReconnectStrategy, Retry, RetryError, RetryStrategy},
+    retry::{ConnectTo, Init, ReconnectStrategy, Retry, RetryError, RetryStrategy},
     util::{sleep_until_or_deadline, timeout_at_option},
 };
 
@@ -19,7 +19,9 @@ use crate::{
 /// that  differs is the choice of type parameter.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx> {
+pub struct End<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx> {
+    /// The address to connect to
+    address: Arc<Address>,
     /// The key for this session, if one has been assigned.
     key: Arc<Mutex<Option<Key>>>,
     /// The current inner thing (a `tx` or `rx` connection end).
@@ -29,7 +31,7 @@ pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx,
     /// A queue of next other things, to which we will push when we create a new connection.
     next_other: Weak<Mutex<VecDeque<Other>>>,
     /// An async function to create a new connection, or return an error.
-    connect: Arc<Connect<ConnectErr, Tx, Rx>>,
+    connect: Arc<ConnectTo<Address, ConnectErr, Tx, Rx>>,
     /// An async function to perform an initial handshake.
     init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
     /// An async function to perform an initial handshake.
@@ -46,11 +48,11 @@ pub struct End<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx,
     timeout: Option<Duration>,
 }
 
-pub type SenderEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx> =
-    End<H, Key, <Tx as Transmitter>::Error, ConnectErr, HandshakeErr, Tx, Rx, Tx, Rx>;
+pub type SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
+    End<H, Address, Key, <Tx as Transmitter>::Error, ConnectErr, HandshakeErr, Tx, Rx, Tx, Rx>;
 
-pub type ReceiverEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx> =
-    End<H, Key, <Rx as Receiver>::Error, ConnectErr, HandshakeErr, Rx, Tx, Tx, Rx>;
+pub type ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
+    End<H, Address, Key, <Rx as Receiver>::Error, ConnectErr, HandshakeErr, Rx, Tx, Tx, Rx>;
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
@@ -64,15 +66,16 @@ pub struct Recoveries<ConnectErr, HandshakeErr, Tx, Rx> {
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 #[allow(clippy::type_complexity)]
-pub fn channel<H, Key, ConnectErr, HandshakeErr, Tx, Rx>(
-    connect: Arc<Connect<ConnectErr, Tx, Rx>>,
+pub fn channel<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>(
+    address: Address,
+    connect: Arc<ConnectTo<Address, ConnectErr, Tx, Rx>>,
     init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     recoveries: Recoveries<ConnectErr, HandshakeErr, Tx, Rx>,
     timeout: Option<Duration>,
 ) -> (
-    SenderEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
-    ReceiverEnd<H, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+    SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
+    ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
 )
 where
     H: Session,
@@ -80,12 +83,14 @@ where
     ConnectErr: 'static,
     HandshakeErr: 'static,
 {
-    // The shared mutable state for both sides
+    // The shared state for both sides
+    let address = Arc::new(address);
     let key = Arc::new(Mutex::new(None));
     let next_tx = Arc::new(Mutex::new(VecDeque::new()));
     let next_rx = Arc::new(Mutex::new(VecDeque::new()));
 
     let sender = End {
+        address: address.clone(),
         key: key.clone(),
         inner: None,
         next_inner: next_tx.clone(),
@@ -100,6 +105,7 @@ where
     };
 
     let receiver = End {
+        address,
         key,
         inner: None,
         next_inner: next_rx,
@@ -118,8 +124,8 @@ where
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
-    End<H, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
+impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
+    End<H, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
 {
     /// Try to recover from a given error according to the recovery strategy specified in this
     /// `End`, otherwise returning the same error if the strategy times out or reconnection is
@@ -174,6 +180,7 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
         reorder: impl Fn(Tx, Rx) -> (Inner, Other),
     ) -> Result<Key, RetryError<E, ConnectErr, HandshakeErr>>
     where
+        Address: Clone,
         Key: Clone,
     {
         if self.key.lock().await.is_none() {
@@ -192,7 +199,11 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
         reorder: impl Fn(Tx, Rx) -> (Inner, Other),
         retries: &mut usize,
         deadline: &mut Option<Instant>,
-    ) -> Result<&mut Inner, RetryError<E, ConnectErr, HandshakeErr>> {
+    ) -> Result<&mut Inner, RetryError<E, ConnectErr, HandshakeErr>>
+    where
+        Key: Clone,
+        Address: Clone,
+    {
         // If there is no `inner` end currently in its slot, we need to acquire one
         if self.inner.is_none() {
             self.inner = Some(loop {
@@ -206,60 +217,64 @@ impl<H: Session, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
                     break inner;
                 } else {
                     // Try to reconnect, exiting the loop if successful, collecting the error if not
-                    let (strategy, err) = match timeout_at_option(*deadline, (self.connect)()).await
-                    {
-                        // Deadline exceeded while waiting for reconnect to finish
-                        Err(_) => return Err(RetryError::ConnectTimeout),
-                        // Reconnect returned some error, so we should try to recover from that
-                        // error and try again
-                        Ok(Err(err)) => (
-                            (self.recover_connect)(*retries, &err),
-                            RetryError::ConnectError(err),
-                        ),
-                        // Reconnect successfully returned a connection for us to do a handshake on
-                        Ok(Ok((tx, rx))) => {
-                            // Execute the handshake
-                            let handshake = H::over(tx, rx, |chan| async {
-                                match *key {
-                                    // Initial handshake
-                                    None => {
-                                        let new_key = (self.init)(chan).await?;
-                                        // Set the key
-                                        *key = Some(new_key);
-                                        Ok(())
+                    let (strategy, err) =
+                        match timeout_at_option(*deadline, (self.connect)((*self.address).clone()))
+                            .await
+                        {
+                            // Deadline exceeded while waiting for reconnect to finish
+                            Err(_) => return Err(RetryError::ConnectTimeout),
+                            // Reconnect returned some error, so we should try to recover from that
+                            // error and try again
+                            Ok(Err(err)) => (
+                                (self.recover_connect)(*retries, &err),
+                                RetryError::ConnectError(err),
+                            ),
+                            // Reconnect successfully returned a connection for us to do a handshake on
+                            Ok(Ok((tx, rx))) => {
+                                // Execute the handshake
+                                let handshake = H::over(tx, rx, |chan| async {
+                                    match *key {
+                                        // Initial handshake
+                                        None => {
+                                            let new_key = (self.init)(chan).await?;
+                                            // Set the key
+                                            *key = Some(new_key);
+                                            Ok(())
+                                        }
+                                        // Subsequent handshake
+                                        Some(ref key) => (self.retry)(key.clone(), chan).await,
                                     }
-                                    // Subsequent handshake
-                                    Some(ref key) => (self.retry)(key, chan).await,
-                                }
-                            });
-                            match timeout_at_option(*deadline, handshake).await {
-                                // Deadline exceeded while waiting for handshake to finish
-                                Err(_) => return Err(RetryError::HandshakeTimeout),
-                                // Handshake session was incomplete
-                                Ok((Ok(_), Err(_))) => return Err(RetryError::HandshakeIncomplete),
-                                // Handshake session returned an error, from which we should try to
-                                // recover and try again
-                                Ok((Err(err), _)) => (
-                                    (self.recover_handshake)(*retries, &err),
-                                    RetryError::HandshakeError(err),
-                                ),
-                                // Handshake session succeeded
-                                Ok((Ok(()), Ok((tx, rx)))) => {
-                                    // Depending on whether we're in a `Receiver` or `Sender`, swap
-                                    // the tx/rx for each other to get an inner/other pair
-                                    let (inner, other) = reorder(tx, rx);
-                                    // Put the new `other` on the other's queue
-                                    if let Some(mut q) = lock_weak(&self.next_other).await {
-                                        q.push_back(other);
+                                });
+                                match timeout_at_option(*deadline, handshake).await {
+                                    // Deadline exceeded while waiting for handshake to finish
+                                    Err(_) => return Err(RetryError::HandshakeTimeout),
+                                    // Handshake session was incomplete
+                                    Ok((Ok(_), Err(_))) => {
+                                        return Err(RetryError::HandshakeIncomplete)
                                     }
-                                    // Drop the lock on key (must come last to avoid deadlock)
-                                    drop(key);
-                                    // Set the new `inner`
-                                    break inner;
+                                    // Handshake session returned an error, from which we should try to
+                                    // recover and try again
+                                    Ok((Err(err), _)) => (
+                                        (self.recover_handshake)(*retries, &err),
+                                        RetryError::HandshakeError(err),
+                                    ),
+                                    // Handshake session succeeded
+                                    Ok((Ok(()), Ok((tx, rx)))) => {
+                                        // Depending on whether we're in a `Receiver` or `Sender`, swap
+                                        // the tx/rx for each other to get an inner/other pair
+                                        let (inner, other) = reorder(tx, rx);
+                                        // Put the new `other` on the other's queue
+                                        if let Some(mut q) = lock_weak(&self.next_other).await {
+                                            q.push_back(other);
+                                        }
+                                        // Drop the lock on key (must come last to avoid deadlock)
+                                        drop(key);
+                                        // Set the new `inner`
+                                        break inner;
+                                    }
                                 }
                             }
-                        }
-                    };
+                        };
 
                     // Set the deadline after the first error occurs
                     if *retries == 0 && deadline.is_none() {
