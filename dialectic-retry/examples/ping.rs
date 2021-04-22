@@ -50,7 +50,7 @@ async fn main() -> Result<(), Error> {
     let timeout = Duration::from_secs(10);
 
     let backoff = Backoff::with_delay(Duration::from_millis(10))
-        .exponential(2)
+        .exponential(2.0)
         .jitter(Duration::from_millis(10))
         .max_delay(Duration::from_secs(1));
 
