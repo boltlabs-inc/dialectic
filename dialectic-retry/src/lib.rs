@@ -1,7 +1,10 @@
+mod backoff;
 mod resume;
 mod retry;
 mod util;
 
+#[doc(ineline)]
+pub use backoff::Backoff;
 #[doc(inline)]
 pub use resume::{AcceptError, Acceptor, ResumeError, ResumeKind, ResumeStrategy};
 #[doc(inline)]
