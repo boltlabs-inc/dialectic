@@ -126,12 +126,12 @@ async fn main() -> Result<(), Error> {
     println!("[{}] create session", key);
 
     // Loop forever measuring how long it takes for the server to respond
-    let mut n = 0;
+    let mut n: usize = 0;
     loop {
         let start = Instant::now();
-        print!("[{}] {}: ping ...", key, n);
+        println!("[{}] {}: ping ...", key, n);
         chan = chan.send(()).await?.recv().await?.1;
-        println!(" pong (elapsed: {:?})", start.elapsed());
+        println!("[{}] ... pong (elapsed: {:?})", key, start.elapsed());
         tokio::time::sleep(Duration::from_millis(100)).await;
         n += 1;
     }

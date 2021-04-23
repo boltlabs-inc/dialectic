@@ -59,6 +59,7 @@ async fn main() -> Result<(), Error> {
     // Create an acceptor for our protocol which times out at 10 seconds and logs errors
     let acceptor = Acceptor::new(handshake)
         .session::<PongPing>()
+        .buffer_size(10)
         .timeout(Duration::from_secs(10))
         .recover_tx({
             let log = log.clone();
@@ -94,17 +95,18 @@ async fn main() -> Result<(), Error> {
                 let (rx, tx) = tcp_stream.into_split();
                 let (tx, rx) = json::lines(tx, rx, 1024 * 8);
 
-                match acceptor.accept(tx, rx).await? {
-                    (key, None) => println!("[{}] resume session", key),
-                    (key, Some(mut chan)) => {
+                match acceptor.accept(tx, rx).await {
+                    Err(error) => eprintln!("[accept error] {}", error),
+                    Ok((key, None)) => println!("[{}] resume session", key),
+                    Ok((key, Some(mut chan))) => {
                         println!("[{}] create session", key);
                         tasks.push(tokio::spawn(async move {
                             let mut n: usize = 0;
                             loop {
                                 let start = Instant::now();
-                                print!("[{}] {}: pong ...", key, n);
+                                println!("[{}] {}: pong ...", key, n);
                                 chan = chan.recv().await?.1.send(()).await?;
-                                println!(" ping (elapsed: {:?})", start.elapsed());
+                                println!("[{}] ... ping (elapsed: {:?})", key, start.elapsed());
                                 n += 1;
                             }
                         }).map(move |result| (key, result)));
