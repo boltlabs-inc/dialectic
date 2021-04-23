@@ -157,7 +157,7 @@ where
         match self {
             RecvError::Deserialize(err) => write!(f, "{}", err),
             RecvError::Decode(err) => write!(f, "{}", err),
-            RecvError::Closed => write!(f, "connection closed"),
+            RecvError::Closed => write!(f, "Connection closed"),
         }
     }
 }
