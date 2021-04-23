@@ -109,7 +109,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Recv(e) => e.fmt(fmt),
-            Error::Send(_) => write!(fmt, "channel closed"),
+            Error::Send(_) => write!(fmt, "Channel closed"),
         }
     }
 }
@@ -132,12 +132,12 @@ impl<T: Any + Send> From<SendError<T>> for Error {
 #[derive(Debug, Error)]
 pub enum RecvError {
     /// The channel was explicitly closed, or all senders were dropped, implicitly closing it.
-    #[error("channel closed")]
+    #[error("Channel closed")]
     Closed,
     /// A value received from the channel could not be cast into the correct expected type. This is
     /// always resultant from the other end of a channel failing to follow the session type of the
     /// channel.
-    #[error("received value was not of desired type")]
+    #[error("Received value of unexpected type")]
     DowncastFailed(Box<dyn Any + Send>),
 }
 
