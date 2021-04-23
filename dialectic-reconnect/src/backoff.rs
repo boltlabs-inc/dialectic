@@ -3,7 +3,8 @@ use std::time::Duration;
 /// A description of a backoff strategy with optional exponential delay, random jitter, maximum
 /// delay, and maximum retries.
 ///
-/// This can be used to generate retry strategies for building [`Connector`](crate::Connector)s.
+/// This can be used to generate retry strategies for building
+/// [`Connector`](crate::retry::Connector)s.
 #[derive(Debug, Clone)]
 pub struct Backoff {
     initial_delay: Duration,
