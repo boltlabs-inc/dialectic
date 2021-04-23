@@ -1,3 +1,8 @@
+//! The *resume* end of a reconnectable backend consists of an [`Acceptor`] and the set of [`Chan`]s
+//! it manages. New or reconnecting pairs of transmitter/receiver can be
+//! [`accept`](Acceptor::accept)ed, and depending on the outcome of their handshake, either generate
+//! a new [`Chan`] or reconnect an existing [`Chan`] which has encountered an error.
+
 use dashmap::DashMap;
 use dialectic::{
     backend::{self, By},
@@ -420,7 +425,8 @@ macro_rules! retry_loop {
 /// A resuming transmitter end, wrapping a transmitter from some underlying transport backend.
 ///
 /// The only way to create a [`Sender`] is to use [`Acceptor::accept`] and for the accepted
-/// connection to specify that it wants to initiate a new connection.
+/// connection to specify as the outcome of its handshake that it wants to initiate a new
+/// connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct Sender<Key, Tx, Rx>
@@ -433,7 +439,8 @@ where
 /// A resuming receiver end, wrapping a receiver from some underlying transport backend.
 ///
 /// The only way to create a [`Sender`] is to use [`Acceptor::accept`] and for the accepted
-/// connection to specify that it wants to initiate a new connection.
+/// connection to specify as the outcome of its handshake that it wants to initiate a new
+/// connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 pub struct Receiver<Key, Tx, Rx>

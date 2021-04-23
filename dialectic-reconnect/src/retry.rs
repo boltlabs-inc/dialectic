@@ -1,3 +1,7 @@
+//! The *retry* end of a reconnectable backend consists of a [`Connector`] and the set of [`Chan`]s
+//! spawned from it with [`connect`](Connector::connect), which automatically reconnect to their
+//! other side when they encounter an error.
+
 use dialectic::{
     backend::{self, By},
     prelude::*,
