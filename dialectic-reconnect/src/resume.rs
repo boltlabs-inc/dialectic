@@ -42,10 +42,10 @@ impl<Key: Display, Err: Display> Display for AcceptError<Key, Err> {
         use AcceptError::*;
         match self {
             HandshakeError(e) => write!(f, "{}", e),
-            HandshakeIncomplete => write!(f, "handshake session incomplete"),
-            NoSuchSessionKey(key) => write!(f, "no session exists for key: {}", key),
-            SessionKeyAlreadyExists(key) => write!(f, "a session already exists for key: {}", key),
-            NoCapacity => write!(f, "no capacity to add pending session"),
+            HandshakeIncomplete => write!(f, "Handshake session incomplete"),
+            NoSuchSessionKey(key) => write!(f, "No session exists for key: {}", key),
+            SessionKeyAlreadyExists(key) => write!(f, "A session already exists for key: {}", key),
+            NoCapacity => write!(f, "No capacity to add pending session"),
         }
     }
 }
@@ -70,7 +70,7 @@ impl<Err: Display> Display for ResumeError<Err> {
         use ResumeError::*;
         match self {
             Error(e) => write!(f, "{}", e),
-            ConnectTimeout => write!(f, "timeout while connecting"),
+            ConnectTimeout => write!(f, "Timeout while connecting"),
         }
     }
 }
@@ -374,6 +374,12 @@ where
                 Ok((key, Some(S::wrap(tx, rx))))
             }
         }
+    }
+
+    /// Shrink the storage holding active sessions. This should likely be called periodically to
+    /// reduce memory consumption.
+    pub fn shrink_to_fit(&self) {
+        self.managed.shrink_to_fit();
     }
 }
 

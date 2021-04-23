@@ -12,7 +12,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::{net::TcpListener, pin, select, sync::mpsc};
+use tokio::{net::TcpListener, select, sync::mpsc};
 
 mod ping;
 type PongPing = <ping::PingPong as Session>::Dual;
@@ -49,13 +49,6 @@ async fn main() -> Result<(), Error> {
     // To prevent logging from interfering with retrying, we move logging to a separate task
     let (log, mut log_recv) = mpsc::unbounded_channel();
 
-    // Task to print all logged messages to stderr
-    tokio::spawn(async move {
-        while let Some(message) = log_recv.recv().await {
-            eprintln!("{}", message);
-        }
-    });
-
     // Create an acceptor for our protocol which times out at 10 seconds and logs errors
     let acceptor = Acceptor::new(handshake)
         .session::<PongPing>()
@@ -82,16 +75,27 @@ async fn main() -> Result<(), Error> {
     // Keep track of all the pending tasks
     let mut tasks = FuturesUnordered::new();
 
+    // A heartbeat interval at which point the underlying storage for the acceptor should be shrunk
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+
     // Loop forever accepting connections
     loop {
-        let task_complete = tasks.next();
-        let next_stream = async { Ok::<_, Error>(listener.accept().await?.0) };
-        pin!(task_complete, next_stream);
-
-        // Concurrently do both of:
+        // Concurrently do all of:
         select! {
+            // Every interval tick, shrink the backing storage for the acceptor
+            _ = interval.tick() => acceptor.shrink_to_fit(),
+            // Report on a completed server task
+            Some((key, result)) = tasks.next() => {
+                match result {
+                    Ok(Ok::<_, Error>(())) => println!("[{}] complete session", key),
+                    Ok(Err(error)) => eprintln!("[{}] unrecovered error: {}", key, error),
+                    Err(panic) => eprintln!("[{}] panic in task: {}", key, panic),
+                }
+            },
+            // Report a log message
+            Some(message) = log_recv.recv() => eprintln!("{}", message),
             // Accept a new connection to the server
-            Ok(tcp_stream) = next_stream => {
+            Ok((tcp_stream, _)) = listener.accept() => {
                 let (rx, tx) = tcp_stream.into_split();
                 let (tx, rx) = json::lines(tx, rx, 1024 * 8);
 
@@ -111,13 +115,6 @@ async fn main() -> Result<(), Error> {
                             }
                         }).map(move |result| (key, result)));
                     }
-                }
-            },
-            // Report on a completed server task
-            Some((key, result)) = task_complete => {
-                match result.unwrap() {
-                    Ok(()) => println!("[{}] complete session", key),
-                    Err::<_, Error>(error) => println!("[{}] unrecovered error: {}", key, error),
                 }
             },
         }

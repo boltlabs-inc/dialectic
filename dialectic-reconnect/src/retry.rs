@@ -70,10 +70,10 @@ impl<Err: Display, ConnectError: Display, HandshakeError: Display> Display
         match self {
             OriginalError(e) => write!(f, "{}", e),
             ConnectError(e) => write!(f, "{}", e),
-            ConnectTimeout => write!(f, "timeout during connection"),
+            ConnectTimeout => write!(f, "Timeout during connection"),
             HandshakeError(e) => write!(f, "{}", e),
-            HandshakeTimeout => write!(f, "timeout during handshake"),
-            HandshakeIncomplete => write!(f, "handshake incomplete"),
+            HandshakeTimeout => write!(f, "Timeout during handshake"),
+            HandshakeIncomplete => write!(f, "Handshake incomplete"),
         }
     }
 }
