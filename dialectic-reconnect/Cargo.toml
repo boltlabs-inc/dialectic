@@ -1,5 +1,5 @@
 [package]
-name = "dialectic-retry"
+name = "dialectic-reconnect"
 version = "0.1.0"
 authors = ["Kenny Foner <kwf@very.science>"]
 edition = "2018"

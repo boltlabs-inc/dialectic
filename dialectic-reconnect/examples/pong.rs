@@ -1,6 +1,6 @@
 use anyhow::Error;
 use dialectic::prelude::*;
-use dialectic_retry::{Acceptor, ResumeKind, ResumeStrategy};
+use dialectic_reconnect::resume::{Acceptor, ResumeKind, ResumeStrategy};
 use dialectic_tokio_serde_json as json;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use std::{

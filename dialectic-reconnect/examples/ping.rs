@@ -1,6 +1,9 @@
 use anyhow::Error;
 use dialectic::prelude::*;
-use dialectic_retry::{Backoff, Connector, ReconnectStrategy, RetryStrategy};
+use dialectic_reconnect::{
+    retry::{Connector, ReconnectStrategy, RetryStrategy},
+    Backoff,
+};
 use dialectic_tokio_serde::codec::LinesCodec;
 use dialectic_tokio_serde_json::{self as json, Json};
 use std::{
