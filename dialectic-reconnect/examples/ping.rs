@@ -1,3 +1,20 @@
+// This client is meant to be paired with the `pong` server. It implements a very simple protocol
+// where it sends a `()` and receives a `()`, at regularly spaced intervals. However, the connection
+// to the server can be interrupted and it will continue to function correctly, transparently
+// retrying the connection with no intervention from the code written in terms of the channel.
+//
+// To test this program, run `cargo run --example ping` and `cargo run --example pong`
+// simultaneously. You can then use the `tcpkill` program to perform a denial of service attack on
+// the port through which the two programs communicate, using this command:
+//
+// ```
+// sudo tcpkill -i lo -1 ip host 127.0.0.1 and port 5000
+// ```
+//
+// Notice that both the client and server log errors, but do not crash. Varying the degree of
+// aggressiveness in the call to `tcpkill` and the interval for `ping` may change the effectiveness
+// of the denial of service attack, which may result in no connections being able to succeed.
+
 use anyhow::Error;
 use dialectic::prelude::*;
 use dialectic_reconnect::{
