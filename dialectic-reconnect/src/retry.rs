@@ -136,9 +136,9 @@ where
     ConnectErr: 'static,
     HandshakeErr: 'static,
 {
-    /// Create a new [`Connector`] which connects using the specified handshakes: it will use the
-    /// `init` handshake when first creating channels, and the `retry` handshake when retrying after
-    /// errors.
+    /// Create a new [`Connector`] which connects using the `connect` closure and the specified
+    /// handshakes, using the `init` handshake when first creating channels, and the `retry`
+    /// handshake when retrying after errors.
     ///
     /// By default, a [`Connector`] produces channels with the empty session type, no timeout, and
     /// will not attempt to retry connections (all errors will immediately propagate). Use its
