@@ -294,18 +294,20 @@ where
             Ok(ends) => ends,
             Err(_) => return Err(AcceptError::HandshakeIncomplete),
         };
-        match (connect_kind, self.managed.get_mut(&key)) {
-            (ResumeKind::Existing, None) => {
+
+        use dashmap::mapref::entry::Entry;
+        match (connect_kind, self.managed.entry(key.clone())) {
+            (ResumeKind::Existing, Entry::Vacant(_)) => {
                 // If the connection was supposed to be for an existing key but no key
                 // existed yet, return an error instead of generating a new channel.
                 Err(AcceptError::NoSuchSessionKey(key))
             }
-            (ResumeKind::New, Some(_)) => {
+            (ResumeKind::New, Entry::Occupied(_)) => {
                 // If the connection was supposed to be for a new key, but the key existed,
                 // return an error instead of resuming on that key.
                 Err(AcceptError::SessionKeyAlreadyExists(key))
             }
-            (ResumeKind::Existing, Some(map_ref)) => {
+            (ResumeKind::Existing, Entry::Occupied(occupied)) => {
                 // If there was already an entry by this key, there's a session, potentially
                 // paused, by this key. If the handshake was properly implemented, we're
                 // only receiving this tx/rx pair because the other end tried to reconnect,
@@ -313,8 +315,8 @@ where
                 // either we are currently paused, or we're about to discover the issue and
                 // pause. Sending the tx/rx will un-pause us and allow us to resume on those
                 // fresh channels.
-                let send_tx = &map_ref.send_tx;
-                let send_rx = &map_ref.send_rx;
+                let send_tx = &occupied.get().send_tx;
+                let send_rx = &occupied.get().send_rx;
 
                 use mpsc::error::TrySendError::{Closed, Full};
                 if (send_tx.capacity() > 0 || send_tx.is_closed())
@@ -343,21 +345,17 @@ where
                     Err(AcceptError::NoCapacity)
                 }
             }
-            (ResumeKind::New, None) => {
+            (ResumeKind::New, Entry::Vacant(vacant)) => {
                 // If there was no entry by this key, then this represents a fresh session,
                 // and we should return a channel for the caller to do with what they like
                 // (usually, run a session in a separate task).
                 let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
                 let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
-                // TODO: fix this race condition!
-                self.managed.insert(
-                    key.clone(),
-                    FeedLine {
-                        send_tx,
-                        send_rx,
-                        half_dropped: false.into(),
-                    },
-                );
+                let _ = vacant.insert(FeedLine {
+                    send_tx,
+                    send_rx,
+                    half_dropped: false.into(),
+                });
                 let tx = Sender {
                     end: End::new(
                         key.clone(),
