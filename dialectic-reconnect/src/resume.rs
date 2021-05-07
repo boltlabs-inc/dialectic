@@ -71,7 +71,7 @@ pub enum ResumeError<Err> {
 }
 
 impl<Err: Display> Display for ResumeError<Err> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         use ResumeError::*;
         match self {
             Error(e) => write!(f, "{}", e),
@@ -101,6 +101,7 @@ impl Default for ResumeStrategy {
 }
 
 /// The kind of a connection which a handshake session indicates should be created.
+#[derive(Debug, Clone, Copy)]
 pub enum ResumeKind {
     /// Create a new [`Chan`] for this connection.
     New,
@@ -348,6 +349,7 @@ where
                 // (usually, run a session in a separate task).
                 let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
                 let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
+                // TODO: fix this race condition!
                 self.managed.insert(
                     key.clone(),
                     FeedLine {

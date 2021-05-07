@@ -101,7 +101,7 @@ async fn main() -> Result<(), Error> {
         .timeout(Duration::from_secs(10))
         .recover_connect({
             let log = log.clone();
-            let backoff = backoff.backoff(ReconnectStrategy::ReconnectAfter);
+            let backoff = backoff.build(ReconnectStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!(
                     "[reconnect error] retries: {}, error: {}",
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Error> {
         })
         .recover_handshake({
             let log = log.clone();
-            let backoff = backoff.backoff(ReconnectStrategy::ReconnectAfter);
+            let backoff = backoff.build(ReconnectStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!(
                     "[handshake error] retries: {}, error: {}",
@@ -123,7 +123,7 @@ async fn main() -> Result<(), Error> {
         })
         .recover_tx({
             let log = log.clone();
-            let backoff = backoff.backoff(RetryStrategy::ReconnectAfter);
+            let backoff = backoff.build(RetryStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!("[TX error] retries: {}, error: {}", tries, error));
                 backoff(tries, error)
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Error> {
         })
         .recover_rx({
             let log = log.clone();
-            let backoff = backoff.backoff(RetryStrategy::ReconnectAfter);
+            let backoff = backoff.build(RetryStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!("[RX error] retries: {}, error: {}", tries, error));
                 backoff(tries, error)
