@@ -184,7 +184,7 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
         Key: Clone,
     {
         if self.key.lock().await.is_none() {
-            self.inner(reorder, &mut 0, &mut None).await?;
+            let _ = self.inner(reorder, &mut 0, &mut None).await?;
         }
         let key = self.key.lock().await.clone().unwrap();
         Ok(key)

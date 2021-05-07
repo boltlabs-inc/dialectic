@@ -31,7 +31,7 @@ where
 {
     fn drop(&mut self) {
         // Remove the entire entry at this key if the other end has already dropped
-        self.managed.remove_if(&self.key, |_, waiting| {
+        let _ = self.managed.remove_if(&self.key, |_, waiting| {
             waiting.half_dropped.swap(true, Ordering::SeqCst)
         });
     }
