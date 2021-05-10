@@ -109,9 +109,10 @@ pub enum ResumeKind {
     Existing,
 }
 
-/// The "feed lines" to a matched pair of [`Sender`] and [`struct@Receiver`] so that the [`Acceptor`] which
+/// The sinks to a matched pair of [`Sender`] and [`struct@Receiver`] so that the [`Acceptor`] which
 /// controls them can supply them with newly accepted transmitter and receiver connections.
-pub(crate) struct FeedLine<Tx, Rx> {
+#[derive(Debug)]
+pub(crate) struct ConnectionSink<Tx, Rx> {
     /// Sender for transmitter ends.
     send_tx: mpsc::Sender<Tx>,
     /// Sender for receiver ends.
@@ -123,9 +124,9 @@ pub(crate) struct FeedLine<Tx, Rx> {
     half_dropped: AtomicBool,
 }
 
-/// A set of [`FeedLine`]s to [`Sender`]/[`struct@Receiver`] pairs, indexed by `Key` and accessible
-/// concurrently.
-type Managed<Key, Tx, Rx> = DashMap<Key, FeedLine<Tx, Rx>>;
+/// A set of [`ConnectionSink`]s to [`Sender`]/[`struct@Receiver`] pairs, indexed by `Key` and
+/// accessible concurrently.
+type Managed<Key, Tx, Rx> = DashMap<Key, ConnectionSink<Tx, Rx>>;
 
 /// A function which executes an [`Acceptor`]-side handshake.
 type Handshake<H, Key, E, Tx, Rx> =
@@ -144,14 +145,20 @@ type Handshake<H, Key, E, Tx, Rx> =
 /// between the [`Acceptor`] and the [`Connector`](crate::retry::Connector), errors will occur.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+#[derive(derivative::Derivative)]
+#[derivative(Debug)]
 pub struct Acceptor<Key, Err, Tx, Rx, H, S>
 where
+    Key: Eq + Hash,
     H: Session,
     S: Session,
 {
+    #[derivative(Debug = "ignore")]
     handshake: Box<Handshake<H, Key, Err, Tx, Rx>>,
     managed: Arc<Managed<Key, Tx, Rx>>,
+    #[derivative(Debug = "ignore")]
     recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
+    #[derivative(Debug = "ignore")]
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
     timeout: Option<Duration>,
     buffer_size: usize,
@@ -286,7 +293,7 @@ where
         AcceptError<Key, Err>,
     > {
         let (result, ends) = H::over(tx, rx, |chan| (self.handshake)(chan)).await;
-        let (connect_kind, key) = match result {
+        let (resume_kind, key) = match result {
             Ok(key) => key,
             Err(error) => return Err(AcceptError::HandshakeError(error)),
         };
@@ -296,7 +303,7 @@ where
         };
 
         use dashmap::mapref::entry::Entry;
-        match (connect_kind, self.managed.entry(key.clone())) {
+        match (resume_kind, self.managed.entry(key.clone())) {
             (ResumeKind::Existing, Entry::Vacant(_)) => {
                 // If the connection was supposed to be for an existing key but no key
                 // existed yet, return an error instead of generating a new channel.
@@ -351,7 +358,7 @@ where
                 // (usually, run a session in a separate task).
                 let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
                 let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
-                let _ = vacant.insert(FeedLine {
+                let _ = vacant.insert(ConnectionSink {
                     send_tx,
                     send_rx,
                     half_dropped: false.into(),
@@ -429,6 +436,7 @@ macro_rules! retry_loop {
 /// connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+#[derive(Debug)]
 pub struct Sender<Key, Tx, Rx>
 where
     Key: Eq + Hash,
@@ -443,6 +451,7 @@ where
 /// connection.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+#[derive(Debug)]
 pub struct Receiver<Key, Tx, Rx>
 where
     Key: Eq + Hash,

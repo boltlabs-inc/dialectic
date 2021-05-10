@@ -17,10 +17,28 @@ use crate::{
 /// The insides of the [`Sender`] and [`Receiver`] are almost identical, and the functionality we
 /// need is almost the same. The `End` struct is the insides of both `Sender` and `Receiver`: all
 /// that  differs is the choice of type parameter.
+///
+/// Ends come in linked pairs of sender/receiver, and each pair shares three mutexes: `key`,
+/// `next_inner`, and `next_other`. The `next_inner` of one half is the `next_other` of the other,
+/// and vice-versa. When either end encounters an error it needs to recover from, it tries to pull
+/// from the `next_inner` queue. If no next inner is available, it reconnects, thereby generating
+/// *both* a new `Tx` and `Rx`, and pushes the one which is not its own side onto the `next_other`
+/// queue. To avoid a reference cycle, `Weak` references are used for `next_other`.
+///
+/// There is an opportunity for a memory leak if one half of the pair is not used for an unbounded
+/// amount of time (i.e. in a loop where things are only sent, not received). Every error that
+/// occurs will result in another item being added to the queue of the other half, and the queue
+/// will only be popped-from when that half is next used. This is unavoidable, because we cannot
+/// know whether there is important information still to-be-sent or to-be-received in the buffer of
+/// the underlying `Tx` or `Rx`, so we cannot pre-emptively throw it away until the error is
+/// encountered by the other side.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct End<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx> {
-    /// The address to connect to
+#[derive(derivative::Derivative)]
+#[derivative(Debug)]
+pub(super) struct End<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
+{
+    /// The address to connect to.
     address: Arc<Address>,
     /// The key for this session, if one has been assigned.
     key: Arc<Mutex<Option<Key>>>,
@@ -30,43 +48,58 @@ pub struct End<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, O
     next_inner: Arc<Mutex<VecDeque<Inner>>>,
     /// A queue of next other things, to which we will push when we create a new connection.
     next_other: Weak<Mutex<VecDeque<Other>>>,
+    //
+    // ---------- Reconnect strategy closures below this point ----------
+    //
     /// An async function to create a new connection, or return an error.
+    #[derivative(Debug = "ignore")]
     connect: Arc<ConnectTo<Address, ConnectErr, Tx, Rx>>,
     /// An async function to perform an initial handshake.
+    #[derivative(Debug = "ignore")]
     init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
     /// An async function to perform an initial handshake.
+    #[derivative(Debug = "ignore")]
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     /// A function describing the desired retry strategy for errors in the underlying connection.
+    #[derivative(Debug = "ignore")]
     recover: Arc<dyn Fn(usize, &Err) -> RetryStrategy + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to establish a
     /// connection.
+    #[derivative(Debug = "ignore")]
     recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to perform a
     /// handshake.
+    #[derivative(Debug = "ignore")]
     recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
     /// An optional timeout, which bounds all retry attempts.
     timeout: Option<Duration>,
 }
 
-pub type SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
+/// A sending retry end is an [`End`] whose `Inner` is `Tx` and whose `Other` is `Rx`k.
+pub(super) type SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
     End<H, Address, Key, <Tx as Transmitter>::Error, ConnectErr, HandshakeErr, Tx, Rx, Tx, Rx>;
 
-pub type ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
+/// A receiving retry end is an [`End`] whose `Inner` is `Rx` and whose `Other` is `Tx`.
+pub(super) type ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
     End<H, Address, Key, <Rx as Receiver>::Error, ConnectErr, HandshakeErr, Rx, Tx, Tx, Rx>;
 
+/// A set of the four recovery strategies necessary to specify an `End`'s strategy.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-pub struct Recoveries<ConnectErr, HandshakeErr, Tx, Rx> {
+#[derive(Clone)]
+pub(super) struct Recoveries<ConnectErr, HandshakeErr, Tx, Rx> {
     pub connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
     pub handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
     pub tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
     pub rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
 }
 
+/// Create a [`SenderEnd`]/[`ReceiverEnd`] linked pair. This *does not* actually connect yet to the
+/// specified address.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 #[allow(clippy::type_complexity)]
-pub fn channel<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>(
+pub(super) fn channel<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>(
     address: Address,
     connect: Arc<ConnectTo<Address, ConnectErr, Tx, Rx>>,
     init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
@@ -131,7 +164,7 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
     /// `End`, otherwise returning the same error if the strategy times out or reconnection is
     /// unsuccessful.
     #[inline(always)]
-    pub async fn recover(
+    pub(super) async fn recover(
         &mut self,
         retries: &mut usize,
         deadline: &mut Option<Instant>,
@@ -175,7 +208,7 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
     }
 
     /// Initialize the connection if necessary, and return the session key.
-    pub async fn key<E>(
+    pub(super) async fn key<E>(
         &mut self,
         reorder: impl Fn(Tx, Rx) -> (Inner, Other),
     ) -> Result<Key, RetryError<E, ConnectErr, HandshakeErr>>
@@ -194,7 +227,7 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
     /// or returning an error if it's not possible to do so within the bounds described by the
     /// reconnection strategies.
     #[inline(always)]
-    pub async fn inner<E>(
+    pub(super) async fn inner<E>(
         &mut self,
         reorder: impl Fn(Tx, Rx) -> (Inner, Other),
         retries: &mut usize,
@@ -229,7 +262,7 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
                                 (self.recover_connect)(*retries, &err),
                                 RetryError::ConnectError(err),
                             ),
-                            // Reconnect successfully returned a connection for us to do a handshake on
+                            // Reconnect successfully returned a connection for us to do a handshake
                             Ok(Ok((tx, rx))) => {
                                 // Execute the handshake
                                 let handshake = H::over(tx, rx, |chan| async {
@@ -252,8 +285,8 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
                                     Ok((Ok(_), Err(_))) => {
                                         return Err(RetryError::HandshakeIncomplete)
                                     }
-                                    // Handshake session returned an error, from which we should try to
-                                    // recover and try again
+                                    // Handshake session returned an error, from which we should try
+                                    // to recover and try again
                                     Ok((Err(err), _)) => (
                                         (self.recover_handshake)(*retries, &err),
                                         RetryError::HandshakeError(err),
