@@ -17,6 +17,8 @@ pub async fn sleep_until_or_deadline(duration: Duration, deadline: Option<Instan
     true
 }
 
+/// If the future completes by the deadline or the deadline is `None`, return its result; otherwise,
+/// return the [`Elapsed`] time.
 pub async fn timeout_at_option<T>(
     deadline: Option<Instant>,
     future: impl Future<Output = T>,

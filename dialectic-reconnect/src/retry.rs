@@ -113,20 +113,37 @@ type ConnectTo<Addr, Err, Tx, Rx> =
 /// between the [`Acceptor`](crate::resume::Acceptor) and the [`Connector`], errors will occur.
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-#[derive(Clone)]
+#[derive(Clone, derivative::Derivative)]
+#[derivative(Debug)]
 pub struct Connector<Address, Key, ConnectErr, HandshakeErr, Tx, Rx, H, S>
 where
     S: Session,
     H: Session,
 {
+    /// An async function to create a new connection, or return an error.
+    #[derivative(Debug = "ignore")]
     connect: Arc<ConnectTo<Address, ConnectErr, Tx, Rx>>,
+    /// An async function to perform an initial handshake.
+    #[derivative(Debug = "ignore")]
     init: Arc<Init<H, Key, HandshakeErr, Tx, Rx>>,
+    /// An async function to perform an initial handshake.
+    #[derivative(Debug = "ignore")]
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
+    /// An async function to recover after a connection failure.
+    #[derivative(Debug = "ignore")]
     recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
+    /// An async function to recover after a handshake error.
+    #[derivative(Debug = "ignore")]
     recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
+    /// An async function to recover after a `Tx` error.
+    #[derivative(Debug = "ignore")]
     recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
+    /// An async function to recover after an `Rx` error.
+    #[derivative(Debug = "ignore")]
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
+    /// An optional timeout, which bounds all retry attempts.
     timeout: Option<Duration>,
+    /// The session type of all channels created by this connector.
     session: PhantomData<S>,
 }
 
@@ -317,6 +334,7 @@ use end::{ReceiverEnd, Recoveries, SenderEnd};
 /// The only way to create a [`Sender`] is to use [`Connector::connect`].
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+#[derive(Debug)]
 pub struct Sender<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> {
     end: SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
 }
@@ -327,6 +345,7 @@ pub struct Sender<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> {
 /// The only way to create a [`struct@Receiver`] is to use [`Connector::connect`].
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
+#[derive(Debug)]
 pub struct Receiver<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> {
     end: ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
 }
@@ -406,7 +425,7 @@ macro_rules! retry_loop {
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
-impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> backend::Transmitter
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> Transmitter
     for Sender<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
 where
     Tx: Sync,
@@ -428,7 +447,7 @@ where
 
 #[Transmitter(Tx for ref T)]
 #[Receiver(Rx)]
-impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> backend::Transmit<T, Val>
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> Transmit<T, Val>
     for Sender<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
 where
     T: Send + Sync + 'static,
@@ -454,7 +473,7 @@ where
 
 #[Transmitter(Tx for ref T)]
 #[Receiver(Rx)]
-impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> backend::Transmit<T, Ref>
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> Transmit<T, Ref>
     for Sender<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
 where
     for<'a> <T as By<'a, Ref>>::Type: Send,
@@ -503,7 +522,7 @@ where
 
 #[Transmitter(Tx)]
 #[Receiver(Rx for T)]
-impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> backend::Receive<T>
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx, T> Receive<T>
     for Receiver<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
 where
     T: Send + 'static,
