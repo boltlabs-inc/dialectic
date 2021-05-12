@@ -27,35 +27,28 @@ impl Backoff {
 
     /// Add an exponential factor to a [`Backoff`], so that every time it is invoked, it delays for
     /// that multiple of its previous delay time.
-    pub fn exponential(mut self, factor: f64) -> Self {
+    pub fn exponential(&mut self, factor: f64) -> &mut Self {
         self.factor = factor;
         self
     }
 
     /// Add random jitter to a [`Backoff`], so that every time it is invoked, it adds or subtracts a
     /// random duration from its delay within the range specified.
-    pub fn jitter(mut self, jitter: Duration) -> Self {
+    pub fn jitter(&mut self, jitter: Duration) -> &mut Self {
         self.jitter = jitter;
         self
     }
 
     /// Cap the maximum delay of a [`Backoff`] so that every time it is invoked, it will delay by at
     /// most `max_delay`, if otherwise it would delay more.
-    pub fn max_delay(mut self, max_delay: Duration) -> Self {
-        self.max_delay = Some(max_delay);
-        self
-    }
-
-    /// Clear the maximum delay of [`Backoff`] so that it will delay as long as its other parameters
-    /// specify.
-    pub fn clear_max_delay(mut self) -> Self {
-        self.max_delay = None;
+    pub fn max_delay(&mut self, max_delay: Option<Duration>) -> &mut Self {
+        self.max_delay = max_delay;
         self
     }
 
     /// Set the maximum number of retries for a [`Backoff`], so that it will not retry after the
     /// specified number of attempts.
-    pub fn max_retries(mut self, max_retries: usize) -> Self {
+    pub fn max_retries(&mut self, max_retries: usize) -> &mut Self {
         self.max_retries = max_retries;
         self
     }

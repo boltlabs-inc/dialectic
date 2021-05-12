@@ -6,7 +6,7 @@ use std::{
 };
 use tokio::time::Instant;
 
-use super::{Managed, ResumeStrategy};
+use super::{Managed, Recovery};
 use crate::maybe_bounded;
 use crate::util::timeout_at_option;
 
@@ -21,7 +21,7 @@ where
     inner: Option<Inner>,
     next: maybe_bounded::Receiver<Inner>,
     #[derivative(Debug = "ignore")]
-    recover: Arc<dyn Fn(usize, &Err) -> ResumeStrategy + Sync + Send>,
+    recover: Arc<dyn Fn(usize, &Err) -> Recovery + Sync + Send>,
     managed: Arc<Managed<Key, Tx, Rx>>,
     timeout: Option<Duration>,
 }
@@ -57,7 +57,7 @@ where
         key: Key,
         inner: Inner,
         next: maybe_bounded::Receiver<Inner>,
-        recover: Arc<dyn Fn(usize, &Err) -> ResumeStrategy + Sync + Send>,
+        recover: Arc<dyn Fn(usize, &Err) -> Recovery + Sync + Send>,
         managed: Arc<Managed<Key, Tx, Rx>>,
         timeout: Option<Duration>,
     ) -> Self {
@@ -82,8 +82,8 @@ where
         error: &Err,
     ) -> bool {
         match (self.recover)(*retries, error) {
-            ResumeStrategy::Fail => return false,
-            ResumeStrategy::Reconnect => self.inner = None,
+            Recovery::Fail => return false,
+            Recovery::Reconnect => self.inner = None,
         }
 
         // Set the deadline if it hasn't already been set and this is the first attempt

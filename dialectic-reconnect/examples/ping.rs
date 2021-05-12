@@ -18,7 +18,7 @@
 use anyhow::Error;
 use dialectic::prelude::*;
 use dialectic_reconnect::{
-    retry::{self, Connector},
+    retry::{self, Connector, Recovery},
     Backoff,
 };
 use dialectic_tokio_serde::codec::LinesCodec;
@@ -93,8 +93,8 @@ async fn main() -> Result<(), Error> {
         Backoff::with_delay(Duration::from_millis(100))
             // .exponential(2.0)
             .jitter(Duration::from_millis(10))
-            .max_delay(Duration::from_secs(1))
-            .build(retry::Recovery::ReconnectAfter)(retries, error)
+            .max_delay(Some(Duration::from_secs(1)))
+            .build(Recovery::ReconnectAfter)(retries, error)
     }
 
     // A connector for our protocol, with a 10 second timeout, which logs all errors and attempts to
