@@ -164,7 +164,7 @@
 //!     Backoff::with_delay(Duration::from_millis(100))
 //!         .exponential(2.0)
 //!         .jitter(Duration::from_millis(10))
-//!         .max_delay(Duration::from_secs(1))
+//!         .max_delay(Some(Duration::from_secs(1)))
 //!         .build(retry::Recovery::ReconnectAfter)(retries, error)
 //! }
 //!
