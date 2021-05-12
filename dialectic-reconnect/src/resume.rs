@@ -83,7 +83,7 @@ impl<Err: Display + Debug> std::error::Error for ResumeError<Err> {}
 
 /// A description of what to do when an error happens in a resume-enabled connection.
 #[derive(Debug, Clone, Copy)]
-pub enum ResumeStrategy {
+pub enum Recovery {
     /// Immediately discard the underlying connection and then retry the operation once a new
     /// connection has been established.
     Reconnect,
@@ -91,7 +91,7 @@ pub enum ResumeStrategy {
     Fail,
 }
 
-impl Default for ResumeStrategy {
+impl Default for Recovery {
     fn default() -> Self {
         Self::Fail
     }
@@ -154,9 +154,9 @@ where
     handshake: Box<Handshake<H, Key, Err, Tx, Rx>>,
     managed: Arc<Managed<Key, Tx, Rx>>,
     #[derivative(Debug = "ignore")]
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send>,
+    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> Recovery + Sync + Send>,
     #[derivative(Debug = "ignore")]
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
+    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> Recovery + Sync + Send>,
     timeout: Option<Duration>,
     max_pending_retries: Option<usize>,
     session: S,
@@ -189,8 +189,8 @@ where
         Self {
             handshake: Box::new(move |chan| Box::pin(handshake(chan))),
             managed: Arc::new(DashMap::new()),
-            recover_tx: Arc::new(|_, _| ResumeStrategy::Reconnect),
-            recover_rx: Arc::new(|_, _| ResumeStrategy::Reconnect),
+            recover_tx: Arc::new(|_, _| Recovery::Reconnect),
+            recover_rx: Arc::new(|_, _| Recovery::Reconnect),
             timeout: None,
             max_pending_retries: None,
             session,
@@ -201,7 +201,7 @@ where
     /// [`Acceptor`].
     pub fn recover_tx(
         &mut self,
-        recovery: impl Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send + 'static,
+        recovery: impl Fn(usize, &Tx::Error) -> Recovery + Sync + Send + 'static,
     ) -> &mut Self {
         self.recover_tx = Arc::new(recovery);
         self
@@ -211,7 +211,7 @@ where
     /// [`Acceptor`].
     pub fn recover_rx(
         &mut self,
-        recovery: impl Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send + 'static,
+        recovery: impl Fn(usize, &Rx::Error) -> Recovery + Sync + Send + 'static,
     ) -> &mut Self {
         self.recover_rx = Arc::new(recovery);
         self
