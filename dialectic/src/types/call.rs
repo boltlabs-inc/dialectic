@@ -19,7 +19,7 @@ impl<P: HasDual, Q: HasDual> HasDual for Call<P, Q> {
     type DualSession = Call<P::DualSession, Q::DualSession>;
 }
 
-impl<P: 'static, Q: 'static> Actionable for Call<P, Q> {
+impl<P: Default + 'static, Q: Default + 'static> Actionable for Call<P, Q> {
     type NextAction = Self;
 }
 
@@ -29,7 +29,7 @@ impl<N: Unary, P: Subst<R, N>, Q: Subst<R, N>, R> Subst<R, N> for Call<P, Q> {
     type Substituted = Call<P::Substituted, Q::Substituted>;
 }
 
-impl<N: Unary, P: 'static, Q: Then<R, N>, R> Then<R, N> for Call<P, Q> {
+impl<N: Unary, P: Default + 'static, Q: Then<R, N>, R> Then<R, N> for Call<P, Q> {
     type Combined = Call<P, Q::Combined>;
 }
 
