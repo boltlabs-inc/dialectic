@@ -5,7 +5,7 @@ use tokio::time::{error::Elapsed, Instant};
 /// completed before the deadline, or `false` if it did not.
 ///
 /// This short-circuits and immediately returns `false` if it would exceed the deadline.
-pub async fn sleep_until_or_deadline(duration: Duration, deadline: Option<Instant>) -> bool {
+pub(crate) async fn sleep_until_or_deadline(duration: Duration, deadline: Option<Instant>) -> bool {
     let wakeup = Instant::now() + duration;
     if let Some(deadline) = deadline {
         // If we would exceed the deadline, don't wait at all
@@ -19,7 +19,7 @@ pub async fn sleep_until_or_deadline(duration: Duration, deadline: Option<Instan
 
 /// If the future completes by the deadline or the deadline is `None`, return its result; otherwise,
 /// return the [`Elapsed`] time.
-pub async fn timeout_at_option<T>(
+pub(crate) async fn timeout_at_option<T>(
     deadline: Option<Instant>,
     future: impl Future<Output = T>,
 ) -> Result<T, Elapsed> {
