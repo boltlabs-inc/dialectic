@@ -9,7 +9,6 @@ use dialectic::{
 use std::{
     fmt::{Debug, Display},
     future::Future,
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     time::Duration,
@@ -18,31 +17,14 @@ use tokio::time::Instant;
 
 /// A description of what to do when an error happens that we might want to recover from.
 #[derive(Debug, Clone, Copy)]
-pub enum RetryStrategy {
-    /// Pause for this amount of time, then retry without discarding the current connection.
-    RetryAfter(Duration),
+pub enum Recovery {
     /// Discard the current connection, then retry after this amount of time.
     ReconnectAfter(Duration),
     /// Immediately fail, propagating the error.
     Fail,
 }
 
-impl Default for RetryStrategy {
-    fn default() -> Self {
-        Self::Fail
-    }
-}
-
-/// A description of what to do when an error happens during reconnection.
-#[derive(Debug, Clone, Copy)]
-pub enum ReconnectStrategy {
-    /// Pause for this amount of time, then attempt to reconnect again.
-    ReconnectAfter(Duration),
-    /// Immediately fail, propagating the error.
-    Fail,
-}
-
-impl Default for ReconnectStrategy {
+impl Default for Recovery {
     fn default() -> Self {
         Self::Fail
     }
@@ -64,6 +46,8 @@ pub enum RetryError<Err, ConnectError, HandshakeError> {
     HandshakeTimeout,
     /// The session initialization handshake did not appropriately complete its session type.
     HandshakeIncomplete,
+    /// The buffer of yet-to-be-handled `Tx` or `Rx` ends has exceeded its maxiumum capacity
+    NoCapacity,
 }
 
 impl<Err: Display, ConnectError: Display, HandshakeError: Display> Display
@@ -78,6 +62,7 @@ impl<Err: Display, ConnectError: Display, HandshakeError: Display> Display
             HandshakeError(e) => write!(f, "{}", e),
             HandshakeTimeout => write!(f, "Timeout during handshake"),
             HandshakeIncomplete => write!(f, "Handshake incomplete"),
+            NoCapacity => write!(f, "No capacity for new connection in other retrying half"),
         }
     }
 }
@@ -131,62 +116,22 @@ where
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     /// An async function to recover after a connection failure.
     #[derivative(Debug = "ignore")]
-    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
+    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> Recovery + Sync + Send>,
     /// An async function to recover after a handshake error.
     #[derivative(Debug = "ignore")]
-    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
+    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> Recovery + Sync + Send>,
     /// An async function to recover after a `Tx` error.
     #[derivative(Debug = "ignore")]
-    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
+    recover_tx: Arc<dyn Fn(usize, &Tx::Error) -> Recovery + Sync + Send>,
     /// An async function to recover after an `Rx` error.
     #[derivative(Debug = "ignore")]
-    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
+    recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> Recovery + Sync + Send>,
     /// An optional timeout, which bounds all retry attempts.
     timeout: Option<Duration>,
+    /// The maximum number of retry attempts which can be buffered at any given time.
+    max_pending_retries: usize,
     /// The session type of all channels created by this connector.
-    session: PhantomData<S>,
-}
-
-#[Transmitter(Tx)]
-#[Receiver(Rx)]
-impl<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
-    Connector<Address, Key, ConnectErr, HandshakeErr, Tx, Rx, H, Session! {}>
-where
-    H: Session,
-    Key: Clone + Sync + Send + 'static,
-    ConnectErr: 'static,
-    HandshakeErr: 'static,
-{
-    /// Create a new [`Connector`] which connects using the `connect` closure and the specified
-    /// handshakes, using the `init` handshake when first creating channels, and the `retry`
-    /// handshake when retrying after errors.
-    ///
-    /// By default, a [`Connector`] produces channels with the empty session type, no timeout, and
-    /// will not attempt to retry connections (all errors will immediately propagate). Use its
-    /// various builder methods to add recovery strategies and alter the default session type and
-    /// timeout.
-    pub fn new<ConnectFut, InitFut, RetryFut>(
-        connect: impl Fn(Address) -> ConnectFut + Sync + Send + 'static,
-        init: impl Fn(Chan<H, Tx, Rx>) -> InitFut + Sync + Send + 'static,
-        retry: impl Fn(Key, Chan<H, Tx, Rx>) -> RetryFut + Sync + Send + 'static,
-    ) -> Self
-    where
-        ConnectFut: Future<Output = Result<(Tx, Rx), ConnectErr>> + Send + 'static,
-        InitFut: Future<Output = Result<Key, HandshakeErr>> + Send + 'static,
-        RetryFut: Future<Output = Result<(), HandshakeErr>> + Send + 'static,
-    {
-        Self {
-            connect: Arc::new(move |addr| Box::pin(connect(addr))),
-            init: Arc::new(move |chan| Box::pin(init(chan))),
-            retry: Arc::new(move |key, chan| Box::pin(retry(key, chan))),
-            recover_connect: Arc::new(|_, _| ReconnectStrategy::Fail),
-            recover_handshake: Arc::new(|_, _| ReconnectStrategy::Fail),
-            recover_tx: Arc::new(|_, _| RetryStrategy::Fail),
-            recover_rx: Arc::new(|_, _| RetryStrategy::Fail),
-            timeout: None,
-            session: PhantomData,
-        }
-    }
+    session: S,
 }
 
 #[Transmitter(Tx)]
@@ -200,40 +145,48 @@ where
     ConnectErr: 'static,
     HandshakeErr: 'static,
 {
-    /// Set the session type for all future [`Chan`]s produced by this [`Connector`].
-    pub fn session<P: Session>(
-        self,
-    ) -> Connector<Address, Key, ConnectErr, HandshakeErr, Tx, Rx, H, P> {
-        let Connector {
-            connect,
-            init,
-            retry,
-            recover_connect,
-            recover_handshake,
-            recover_tx,
-            recover_rx,
-            timeout,
-            ..
-        } = self;
-        Connector {
-            connect,
-            init,
-            retry,
-            recover_connect,
-            recover_handshake,
-            recover_tx,
-            recover_rx,
-            timeout,
-            session: PhantomData,
+    /// Create a new [`Connector`] which connects using the `connect` closure and the specified
+    /// handshakes, using the `init` handshake when first creating channels, and the `retry`
+    /// handshake when retrying after errors. All [`Chan`]s returned by this [`Connector`] will have
+    /// the specified session type.
+    ///
+    /// All session types implement [`Default`], which means you can pass in a session type `S` to
+    /// this method by calling `S::default()`.
+    ///
+    /// By default, a [`Connector`] produces channels with no timeout, no maximum pending retry
+    /// limit, and will not attempt to retry connections (all errors will immediately propagate).
+    /// Use its various builder methods to alter these defaults.
+    pub fn new<ConnectFut, InitFut, RetryFut>(
+        connect: impl Fn(Address) -> ConnectFut + Sync + Send + 'static,
+        init: impl Fn(Chan<H, Tx, Rx>) -> InitFut + Sync + Send + 'static,
+        retry: impl Fn(Key, Chan<H, Tx, Rx>) -> RetryFut + Sync + Send + 'static,
+        session: S,
+    ) -> Self
+    where
+        ConnectFut: Future<Output = Result<(Tx, Rx), ConnectErr>> + Send + 'static,
+        InitFut: Future<Output = Result<Key, HandshakeErr>> + Send + 'static,
+        RetryFut: Future<Output = Result<(), HandshakeErr>> + Send + 'static,
+    {
+        Self {
+            connect: Arc::new(move |addr| Box::pin(connect(addr))),
+            init: Arc::new(move |chan| Box::pin(init(chan))),
+            retry: Arc::new(move |key, chan| Box::pin(retry(key, chan))),
+            recover_connect: Arc::new(|_, _| Recovery::Fail),
+            recover_handshake: Arc::new(|_, _| Recovery::Fail),
+            recover_tx: Arc::new(|_, _| Recovery::Fail),
+            recover_rx: Arc::new(|_, _| Recovery::Fail),
+            timeout: None,
+            max_pending_retries: usize::MAX,
+            session,
         }
     }
 
     /// Set the recovery method for connection errors within all future [`Chan`]s produced by this
     /// [`Connector`].
     pub fn recover_connect(
-        mut self,
-        recovery: impl Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send + 'static,
-    ) -> Self {
+        &mut self,
+        recovery: impl Fn(usize, &ConnectErr) -> Recovery + Sync + Send + 'static,
+    ) -> &mut Self {
         self.recover_connect = Arc::new(recovery);
         self
     }
@@ -241,9 +194,9 @@ where
     /// Set the recovery method for handshake errors within all future [`Chan`]s produced by this
     /// [`Connector`].
     pub fn recover_handshake(
-        mut self,
-        recovery: impl Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send + 'static,
-    ) -> Self {
+        &mut self,
+        recovery: impl Fn(usize, &HandshakeErr) -> Recovery + Sync + Send + 'static,
+    ) -> &mut Self {
         self.recover_handshake = Arc::new(recovery);
         self
     }
@@ -251,9 +204,9 @@ where
     /// Set the recovery method for transmitter errors within all future [`Chan`]s produced by this
     /// [`Connector`].
     pub fn recover_tx(
-        mut self,
-        recovery: impl Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send + 'static,
-    ) -> Self {
+        &mut self,
+        recovery: impl Fn(usize, &Tx::Error) -> Recovery + Sync + Send + 'static,
+    ) -> &mut Self {
         self.recover_tx = Arc::new(recovery);
         self
     }
@@ -261,26 +214,30 @@ where
     /// Set the recovery method for receiver errors within all future [`Chan`]s produced by this
     /// [`Connector`].
     pub fn recover_rx(
-        mut self,
-        recovery: impl Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send + 'static,
-    ) -> Self {
+        &mut self,
+        recovery: impl Fn(usize, &Rx::Error) -> Recovery + Sync + Send + 'static,
+    ) -> &mut Self {
         self.recover_rx = Arc::new(recovery);
+        self
+    }
+
+    /// Set a maximum number of pending retries for all future [`Chan`]s produced by this
+    /// [`Connector`]: an error will be thrown if the [`Sender`] retries more than this number of
+    /// times before the [`Receiver@struct`] retries at all (or vice-versa).
+    ///
+    /// Restricting this limit (the default is `usize::MAX`) prevents a potential unbounded memory
+    /// leak in the case where one end never takes action and the other encounters an unbounded
+    /// number of errors.
+    pub fn max_pending_retries(&mut self, max_pending_retries: usize) -> &mut Self {
+        self.max_pending_retries = max_pending_retries.saturating_add(1);
         self
     }
 
     /// Set a timeout for recovery within all future [`Chan`]s produced by this [`Connector`]: an
     /// error will be thrown if recovery from an error takes longer than the given timeout, even if
     /// the error recovery strategy specifies trying again.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
-    /// Clear the timeout for recovery within all future [`Chan`]s produced by this [`Connector`]:
-    /// recovery attempts will continue indefinitely until the recovery strategy indicates that they
-    /// should stop.
-    pub fn clear_timeout(mut self) -> Self {
-        self.timeout = None;
+    pub fn timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.timeout = timeout;
         self
     }
 
@@ -315,6 +272,7 @@ where
                 rx: self.recover_rx.clone(),
             },
             self.timeout,
+            self.max_pending_retries,
         );
 
         let mut tx = Sender { end: sender };
@@ -413,9 +371,9 @@ macro_rules! retry_loop {
             {
                 Ok(output) => return Ok(output),
                 Err(error) => {
-                    if let Err(error) = $this.end.recover(&mut retries, &mut deadline, error).await
+                    if !$this.end.recover(&mut retries, &mut deadline, &error).await
                     {
-                        return Err(error);
+                        return Err(RetryError::OriginalError(error));
                     }
                 }
             }
@@ -431,7 +389,7 @@ where
     Tx: Sync,
     Address: Clone + Sync + Send,
     Key: Clone + Sync + Send,
-    Tx::Error: Send,
+    Tx::Error: Sync + Send,
     ConnectErr: Send,
     HandshakeErr: Send,
 {
@@ -454,7 +412,7 @@ where
     Tx: Sync,
     Address: Clone + Sync + Send,
     Key: Clone + Sync + Send,
-    Tx::Error: Send,
+    Tx::Error: Sync + Send,
     ConnectErr: Send,
     HandshakeErr: Send,
 {
@@ -481,7 +439,7 @@ where
     Tx: Sync,
     Address: Clone + Sync + Send,
     Key: Clone + Sync + Send,
-    Tx::Error: Send,
+    Tx::Error: Sync + Send,
     ConnectErr: Send,
     HandshakeErr: Send,
 {
@@ -506,7 +464,7 @@ where
     Rx: Sync,
     Address: Clone + Sync + Send,
     Key: Clone + Sync + Send,
-    Rx::Error: Send,
+    Rx::Error: Sync + Send,
     ConnectErr: Send,
     HandshakeErr: Send,
 {
@@ -529,7 +487,7 @@ where
     Rx: Sync,
     Address: Clone + Sync + Send,
     Key: Clone + Sync + Send,
-    Rx::Error: Send,
+    Rx::Error: Sync + Send,
     ConnectErr: Send,
     HandshakeErr: Send,
 {
