@@ -18,7 +18,7 @@
 
 use anyhow::Error;
 use dialectic::prelude::*;
-use dialectic_reconnect::resume::{Acceptor, ResumeKind, ResumeStrategy};
+use dialectic_reconnect::resume::{Acceptor, Recovery, ResumeKind};
 use dialectic_tokio_serde_json as json;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use std::{
@@ -75,14 +75,14 @@ async fn main() -> Result<(), Error> {
             let log = log.clone();
             move |retries, error| {
                 let _ = log.send(format!("[TX error] retries: {}, error: {}", retries, error));
-                ResumeStrategy::Reconnect
+                Recovery::Reconnect
             }
         })
         .recover_rx({
             let log = log.clone();
             move |retries, error| {
                 let _ = log.send(format!("[RX error] retries: {}, error: {}", retries, error));
-                ResumeStrategy::Reconnect
+                Recovery::Reconnect
             }
         });
 
