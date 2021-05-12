@@ -68,10 +68,9 @@ async fn main() -> Result<(), Error> {
     let (log, mut log_recv) = mpsc::unbounded_channel();
 
     // Create an acceptor for our protocol which times out at 10 seconds and logs errors
-    let acceptor = Acceptor::new(handshake)
-        .session::<PongPing>()
-        .buffer_size(10)
-        .timeout(Duration::from_secs(10))
+    let mut acceptor = Acceptor::new(handshake, PongPing::default());
+    acceptor
+        .timeout(Some(Duration::from_secs(10)))
         .recover_tx({
             let log = log.clone();
             move |retries, error| {
@@ -93,15 +92,10 @@ async fn main() -> Result<(), Error> {
     // Keep track of all the pending tasks
     let mut tasks = FuturesUnordered::new();
 
-    // A heartbeat interval at which point the underlying storage for the acceptor should be shrunk
-    let mut interval = tokio::time::interval(Duration::from_millis(100));
-
     // Loop forever accepting connections
     loop {
         // Concurrently do all of:
         select! {
-            // Every interval tick, shrink the backing storage for the acceptor
-            _ = interval.tick() => acceptor.shrink_to_fit(),
             // Report on a completed server task
             Some((key, result)) = tasks.next() => {
                 match result {

@@ -4,10 +4,11 @@ use std::{
     sync::{atomic::Ordering, Arc},
     time::Duration,
 };
-use tokio::{sync::mpsc, time::Instant};
+use tokio::time::Instant;
 
 use super::{Managed, ResumeStrategy};
-use crate::util::{sleep_until_or_deadline, timeout_at_option};
+use crate::maybe_bounded;
+use crate::util::timeout_at_option;
 
 /// Both sending and receiving ends have shared recovery logic; this struct is used for both ends.
 #[derive(derivative::Derivative)]
@@ -18,7 +19,7 @@ where
 {
     key: Key,
     inner: Option<Inner>,
-    next: mpsc::Receiver<Inner>,
+    next: maybe_bounded::Receiver<Inner>,
     #[derivative(Debug = "ignore")]
     recover: Arc<dyn Fn(usize, &Err) -> ResumeStrategy + Sync + Send>,
     managed: Arc<Managed<Key, Tx, Rx>>,
@@ -40,6 +41,10 @@ where
         let _ = self.managed.remove_if(&self.key, |_, waiting| {
             waiting.half_dropped.swap(true, Ordering::SeqCst)
         });
+        // Resize the backing map if it's now smaller than 25% capacity
+        if self.managed.len().saturating_mul(4) < self.managed.capacity() {
+            self.managed.shrink_to_fit();
+        }
     }
 }
 
@@ -51,7 +56,7 @@ where
     pub(super) fn new(
         key: Key,
         inner: Inner,
-        next: mpsc::Receiver<Inner>,
+        next: maybe_bounded::Receiver<Inner>,
         recover: Arc<dyn Fn(usize, &Err) -> ResumeStrategy + Sync + Send>,
         managed: Arc<Managed<Key, Tx, Rx>>,
         timeout: Option<Duration>,
@@ -79,11 +84,6 @@ where
         match (self.recover)(*retries, error) {
             ResumeStrategy::Fail => return false,
             ResumeStrategy::Reconnect => self.inner = None,
-            ResumeStrategy::RetryAfter(after) => {
-                if !sleep_until_or_deadline(after, *deadline).await {
-                    return false;
-                }
-            }
         }
 
         // Set the deadline if it hasn't already been set and this is the first attempt
@@ -98,6 +98,10 @@ where
         true
     }
 
+    /// Attempt to acquire a mutable reference to the `Inner` thing in this end (this will be either
+    /// a `Tx` or an `Rx` in practice), waiting for a new connection to be accepted if necessary.
+    ///
+    /// If this operation last past the specified deadline, returns `None`.
     pub(super) async fn inner(&mut self, deadline: Option<Instant>) -> Option<&mut Inner> {
         if self.inner.is_none() {
             self.inner = Some(

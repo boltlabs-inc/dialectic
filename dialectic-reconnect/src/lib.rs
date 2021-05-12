@@ -155,24 +155,37 @@
 //! #     chan.send(key).await?.close();
 //! #    Ok(())
 //! # }
-//! use std::time::Duration;
-//! use dialectic_reconnect::{Backoff, retry::{Connector, ReconnectStrategy, RetryStrategy}};
+//! use std::{convert::TryFrom, time::Duration};
+//! use tokio::time::sleep;
+//! use dialectic_reconnect::{Backoff, retry::{self, Connector}};
 //!
 //! // This is a quick way to generate closures that implement various retry strategies.
-//! let backoff = Backoff::with_delay(Duration::from_millis(100))
-//!     .exponential(2.0)
-//!     .jitter(Duration::from_millis(10))
-//!     .max_delay(Duration::from_secs(1));
+//! fn backoff<E>(retries: usize, error: &E) -> retry::Recovery {
+//!     Backoff::with_delay(Duration::from_millis(100))
+//!         .exponential(2.0)
+//!         .jitter(Duration::from_millis(10))
+//!         .max_delay(Duration::from_secs(1))
+//!         .build(retry::Recovery::ReconnectAfter)(retries, error)
+//! }
 //!
-//! // A connector for our protocol, with a 10 second timeout, which attempts to recover using
-//! // the backoff strategy for every kind of error
-//! let connector = Connector::new(connect, init, retry)
-//!     .session::<PingPong>()
-//!     .timeout(Duration::from_secs(10))
-//!     .recover_connect(backoff.build(ReconnectStrategy::ReconnectAfter))
-//!     .recover_handshake(backoff.build(ReconnectStrategy::ReconnectAfter))
-//!     .recover_tx(backoff.build(RetryStrategy::ReconnectAfter))
-//!     .recover_rx(backoff.build(RetryStrategy::ReconnectAfter));
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), anyhow::Error> {
+//! // Connect, using our protocol, attempting to recover using the backoff strategy for each error
+//! let (key, mut chan) = Connector::new(connect, init, retry, PingPong::default())
+//!     .recover_connect(backoff)
+//!     .recover_handshake(backoff)
+//!     .recover_tx(backoff)
+//!     .recover_rx(backoff)
+//!     .connect((IpAddr::try_from([127, 0, 0, 1]).unwrap(), 5000))
+//!     .await?;
+//!
+//! // Run the ping protocol forever
+//! loop {
+//!     chan = chan.send(()).await?.recv().await?.1;
+//!     sleep(Duration::from_millis(100)).await;
+//! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## The [`resume`]-ing end
@@ -253,6 +266,7 @@
 //! # use dialectic_tokio_serde_json::{self as json, Json};
 //! # use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 //! # use anyhow::Error;
+//! # use std::net::IpAddr;
 //! #
 //! # pub type Tx = dialectic_tokio_serde::Sender<Json, LinesCodec, OwnedWriteHalf>;
 //! # pub type Rx = dialectic_tokio_serde::Receiver<Json, LinesCodec, OwnedReadHalf>;
@@ -273,9 +287,11 @@
 //! #    }
 //! # };
 //! # use dialectic_reconnect::resume::ResumeKind;
-//! # use std::time::Duration;
+//! # use std::{convert::TryFrom, time::Duration};
 //! # use std::sync::{atomic::{Ordering, AtomicUsize}, Arc};
 //! #
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), anyhow::Error> {
 //! # // We assign keys to sessions based on sequential ordering
 //! # let key = Arc::new(AtomicUsize::new(0));
 //! #
@@ -301,15 +317,34 @@
 //! #     }
 //! # };
 //! #
-//! use dialectic_reconnect::resume::{Acceptor, ResumeStrategy};
+//! use tokio::net::TcpListener;
+//! use dialectic_reconnect::resume::Acceptor;
+//! use dialectic_tokio_serde_json as json;
 //!
-//! // Create an acceptor for our protocol which times out at 10 seconds
-//! let acceptor = Acceptor::new(handshake)
-//!     .session::<<PingPong as Session>::Dual>()
-//!     .buffer_size(10)
-//!     .timeout(Duration::from_secs(10))
-//!     .recover_tx(|_, _| ResumeStrategy::Reconnect)
-//!     .recover_rx(|_, _| ResumeStrategy::Reconnect);
+//! // Create an acceptor for our handshake and the dual of the protocol
+//! let acceptor = Acceptor::new(handshake, <<PingPong as Session>::Dual>::default());
+//!
+//! // Accept connections, running the dual of the ping protocol on each, forever
+//! let listener = TcpListener::bind((IpAddr::try_from([127, 0, 0, 1]).unwrap(), 5000)).await?;
+//!
+//! loop {
+//!     // Accept a TCP connection and wrap it in a json-lines serialization layer
+//!     let (tcp_stream, _) = listener.accept().await?;
+//!     let (rx, tx) = tcp_stream.into_split();
+//!     let (tx, rx) = json::lines(tx, rx, 1024 * 8);
+//!
+//!     // Accept these `tx`/`rx` ends; if they generate a new channel, run the pong-ping protocol
+//!     if let (key, Some(mut chan)) = acceptor.accept(tx, rx).await? {
+//!         tokio::spawn(async move {
+//!             loop {
+//!                 chan = chan.recv().await?.1.send(()).await?;
+//!             }
+//!             Ok::<_, Error>(())
+//!         });
+//!     }
+//! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! To view the full working example of the `PingPong` protocol, see [the examples directory in the
@@ -325,6 +360,7 @@
 #![warn(unused)]
 #![forbid(broken_intra_doc_links)]
 mod backoff;
+mod maybe_bounded;
 pub mod resume;
 pub mod retry;
 mod util;

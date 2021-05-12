@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use crate::{
-    retry::{ConnectTo, Init, ReconnectStrategy, Retry, RetryError, RetryStrategy},
+    retry::{ConnectTo, Init, Recovery, Retry, RetryError},
     util::{sleep_until_or_deadline, timeout_at_option},
 };
 
@@ -62,17 +62,19 @@ pub(super) struct End<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, I
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     /// A function describing the desired retry strategy for errors in the underlying connection.
     #[derivative(Debug = "ignore")]
-    recover: Arc<dyn Fn(usize, &Err) -> RetryStrategy + Sync + Send>,
+    recover: Arc<dyn Fn(usize, &Err) -> Recovery + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to establish a
     /// connection.
     #[derivative(Debug = "ignore")]
-    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
+    recover_connect: Arc<dyn Fn(usize, &ConnectErr) -> Recovery + Sync + Send>,
     /// A function describing the desired retry strategy for errors while attempting to perform a
     /// handshake.
     #[derivative(Debug = "ignore")]
-    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
+    recover_handshake: Arc<dyn Fn(usize, &HandshakeErr) -> Recovery + Sync + Send>,
     /// An optional timeout, which bounds all retry attempts.
     timeout: Option<Duration>,
+    /// The maximum size for the queues.
+    max_pending_retries: usize,
 }
 
 /// A sending retry end is an [`End`] whose `Inner` is `Tx` and whose `Other` is `Rx`k.
@@ -88,10 +90,10 @@ pub(super) type ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> =
 #[Receiver(Rx)]
 #[derive(Clone)]
 pub(super) struct Recoveries<ConnectErr, HandshakeErr, Tx, Rx> {
-    pub connect: Arc<dyn Fn(usize, &ConnectErr) -> ReconnectStrategy + Sync + Send>,
-    pub handshake: Arc<dyn Fn(usize, &HandshakeErr) -> ReconnectStrategy + Sync + Send>,
-    pub tx: Arc<dyn Fn(usize, &Tx::Error) -> RetryStrategy + Sync + Send>,
-    pub rx: Arc<dyn Fn(usize, &Rx::Error) -> RetryStrategy + Sync + Send>,
+    pub connect: Arc<dyn Fn(usize, &ConnectErr) -> Recovery + Sync + Send>,
+    pub handshake: Arc<dyn Fn(usize, &HandshakeErr) -> Recovery + Sync + Send>,
+    pub tx: Arc<dyn Fn(usize, &Tx::Error) -> Recovery + Sync + Send>,
+    pub rx: Arc<dyn Fn(usize, &Rx::Error) -> Recovery + Sync + Send>,
 }
 
 /// Create a [`SenderEnd`]/[`ReceiverEnd`] linked pair. This *does not* actually connect yet to the
@@ -106,6 +108,7 @@ pub(super) fn channel<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>(
     retry: Arc<Retry<H, Key, HandshakeErr, Tx, Rx>>,
     recoveries: Recoveries<ConnectErr, HandshakeErr, Tx, Rx>,
     timeout: Option<Duration>,
+    max_pending_retries: usize,
 ) -> (
     SenderEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
     ReceiverEnd<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>,
@@ -135,6 +138,7 @@ where
         recover_connect: recoveries.connect.clone(),
         recover_handshake: recoveries.handshake.clone(),
         timeout,
+        max_pending_retries,
     };
 
     let receiver = End {
@@ -150,6 +154,7 @@ where
         recover_connect: recoveries.connect,
         recover_handshake: recoveries.handshake,
         timeout,
+        max_pending_retries,
     };
 
     (sender, receiver)
@@ -160,44 +165,42 @@ where
 impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
     End<H, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, Rx>
 {
-    /// Try to recover from a given error according to the recovery strategy specified in this
-    /// `End`, otherwise returning the same error if the strategy times out or reconnection is
-    /// unsuccessful.
+    /// Given an error, interpret the contained recovery strategy and return `true` if and only if
+    /// we should continue onwards. This function modifies `retries` and `deadline` to keep them
+    /// updated, with the assumption that they are initialized on the first occurrence of this error
+    /// at `0` and `None`, respectively.
     #[inline(always)]
     pub(super) async fn recover(
         &mut self,
         retries: &mut usize,
         deadline: &mut Option<Instant>,
-        error: Err,
-    ) -> Result<(), RetryError<Err, ConnectErr, HandshakeErr>> {
+        error: &Err,
+    ) -> bool {
         // Set the deadline if it hasn't been set already
         if *retries == 0 && deadline.is_none() {
             *deadline = self.timeout.map(|delay| Instant::now() + delay);
         }
 
         // Determine the error recovery strategy
-        let strategy = (self.recover)(*retries, &error);
-
-        // Drop the current `inner` if we're about to reconnect
-        if matches!(strategy, RetryStrategy::ReconnectAfter(_)) {
-            self.disconnect();
-        }
+        let strategy = (self.recover)(*retries, error);
 
         // Sleep until the correct deadline, or return an error if we would exceed the deadline or
         // the strategy is `Fail`
         match strategy {
-            RetryStrategy::RetryAfter(after) | RetryStrategy::ReconnectAfter(after) => {
+            Recovery::ReconnectAfter(after) => {
+                self.disconnect();
                 if !sleep_until_or_deadline(after, *deadline).await {
-                    return Err(RetryError::OriginalError(error));
+                    return false;
                 }
             }
-            RetryStrategy::Fail => return Err(RetryError::OriginalError(error)),
+            Recovery::Fail => return false,
         }
 
         // Increment retries, because we just did a recovery
         *retries += 1;
 
-        Ok(())
+        // We should continue now
+        true
     }
 
     /// Disconnect the inner connection of this `End`, so that future calls will require a
@@ -245,8 +248,15 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
                 // lock here means that we never try to concurrently connect!
                 let mut key = self.key.lock().await;
 
-                if let Some(inner) = self.next_inner.lock().await.pop_front() {
-                    // There was a waiting `inner` for us in the queue, so set it
+                // Lock the next inner queue, so nobody else will push to it during this operation
+                let mut next_inner = self.next_inner.lock().await;
+
+                if let Some(inner) = next_inner.pop_front() {
+                    // There was a waiting `inner` for us in the queue, so set it, shrinking the
+                    // queue if it's below 25% capacity
+                    if next_inner.len().saturating_mul(4) < next_inner.capacity() {
+                        next_inner.shrink_to_fit();
+                    }
                     break inner;
                 } else {
                     // Try to reconnect, exiting the loop if successful, collecting the error if not
@@ -293,21 +303,28 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
                                     ),
                                     // Handshake session succeeded
                                     Ok((Ok(()), Ok((tx, rx)))) => {
-                                        // Depending on whether we're in a `Receiver` or `Sender`, swap
-                                        // the tx/rx for each other to get an inner/other pair
+                                        // Depending on whether we're in a `Receiver` or `Sender`,
+                                        // swap the tx/rx for each other to get an inner/other pair
                                         let (inner, other) = reorder(tx, rx);
                                         // Put the new `other` on the other's queue
                                         if let Some(mut q) = lock_weak(&self.next_other).await {
-                                            q.push_back(other);
+                                            // If we would exceed the capacity of the other's queue,
+                                            // return an error instead of pushing onto it
+                                            if q.len() > self.max_pending_retries {
+                                                return Err(RetryError::NoCapacity);
+                                            } else {
+                                                q.push_back(other);
+                                            }
                                         }
-                                        // Drop the lock on key (must come last to avoid deadlock)
-                                        drop(key);
                                         // Set the new `inner`
                                         break inner;
                                     }
                                 }
                             }
                         };
+
+                    // Drop the lock on key (must come last to avoid deadlock)
+                    drop(key);
 
                     // Set the deadline after the first error occurs
                     if *retries == 0 && deadline.is_none() {
@@ -316,8 +333,8 @@ impl<H: Session, Address, Key, Err, ConnectErr, HandshakeErr, Inner, Other, Tx, 
 
                     // Depending on the strategy, either try again or bail with the error
                     match strategy {
-                        ReconnectStrategy::Fail => return Err(err),
-                        ReconnectStrategy::ReconnectAfter(after) => {
+                        Recovery::Fail => return Err(err),
+                        Recovery::ReconnectAfter(after) => {
                             if !sleep_until_or_deadline(after, *deadline).await {
                                 return Err(err);
                             }

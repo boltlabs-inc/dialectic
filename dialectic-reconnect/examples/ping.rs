@@ -18,7 +18,7 @@
 use anyhow::Error;
 use dialectic::prelude::*;
 use dialectic_reconnect::{
-    retry::{Connector, ReconnectStrategy, RetryStrategy},
+    retry::{self, Connector},
     Backoff,
 };
 use dialectic_tokio_serde::codec::LinesCodec;
@@ -89,19 +89,20 @@ async fn main() -> Result<(), Error> {
     });
 
     // The backoff strategy used during error recovery
-    let backoff = Backoff::with_delay(Duration::from_millis(100))
-        // .exponential(2.0)
-        .jitter(Duration::from_millis(10))
-        .max_delay(Duration::from_secs(1));
+    fn backoff<E>(retries: usize, error: &E) -> retry::Recovery {
+        Backoff::with_delay(Duration::from_millis(100))
+            // .exponential(2.0)
+            .jitter(Duration::from_millis(10))
+            .max_delay(Duration::from_secs(1))
+            .build(retry::Recovery::ReconnectAfter)(retries, error)
+    }
 
     // A connector for our protocol, with a 10 second timeout, which logs all errors and attempts to
     // recover using the backoff strategy for every kind of error
-    let connector = Connector::new(connect, init, retry)
-        .session::<PingPong>()
-        .timeout(Duration::from_secs(10))
+    let (key, mut chan) = Connector::new(connect, init, retry, PingPong::default())
+        .timeout(Some(Duration::from_secs(10)))
         .recover_connect({
             let log = log.clone();
-            let backoff = backoff.build(ReconnectStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!(
                     "[reconnect error] retries: {}, error: {}",
@@ -112,7 +113,6 @@ async fn main() -> Result<(), Error> {
         })
         .recover_handshake({
             let log = log.clone();
-            let backoff = backoff.build(ReconnectStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!(
                     "[handshake error] retries: {}, error: {}",
@@ -123,7 +123,6 @@ async fn main() -> Result<(), Error> {
         })
         .recover_tx({
             let log = log.clone();
-            let backoff = backoff.build(RetryStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!("[TX error] retries: {}, error: {}", tries, error));
                 backoff(tries, error)
@@ -131,15 +130,11 @@ async fn main() -> Result<(), Error> {
         })
         .recover_rx({
             let log = log.clone();
-            let backoff = backoff.build(RetryStrategy::ReconnectAfter);
             move |tries, error| {
                 let _ = log.send(format!("[RX error] retries: {}, error: {}", tries, error));
                 backoff(tries, error)
             }
-        });
-
-    // At program start, connect to the server
-    let (key, mut chan) = connector
+        })
         .connect((IpAddr::try_from([127, 0, 0, 1]).unwrap(), 5000))
         .await?;
 

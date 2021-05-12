@@ -12,12 +12,13 @@ use std::{
     fmt::{Debug, Display},
     future::Future,
     hash::Hash,
-    marker::PhantomData,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 use tokio::sync::mpsc;
+
+use crate::maybe_bounded;
 
 /// An error while accepting a connection with an [`Acceptor`].
 #[derive(Debug, Clone)]
@@ -37,8 +38,6 @@ pub enum AcceptError<Key, Err> {
     SessionKeyAlreadyExists(Key),
     /// The buffer for this session key is full of resumed connections which have not yet been
     /// processed by the connected [`Sender`]/[`struct@Receiver`].
-    ///
-    /// This error usually only occurs if the retrying end is misbehaving.
     NoCapacity,
 }
 
@@ -85,8 +84,6 @@ impl<Err: Display + Debug> std::error::Error for ResumeError<Err> {}
 /// A description of what to do when an error happens in a resume-enabled connection.
 #[derive(Debug, Clone, Copy)]
 pub enum ResumeStrategy {
-    /// Pause for this duration, then retry the operation on the same underlying connection.
-    RetryAfter(Duration),
     /// Immediately discard the underlying connection and then retry the operation once a new
     /// connection has been established.
     Reconnect,
@@ -114,9 +111,9 @@ pub enum ResumeKind {
 #[derive(Debug)]
 pub(crate) struct ConnectionSink<Tx, Rx> {
     /// Sender for transmitter ends.
-    send_tx: mpsc::Sender<Tx>,
+    send_tx: maybe_bounded::Sender<Tx>,
     /// Sender for receiver ends.
-    send_rx: mpsc::Sender<Rx>,
+    send_rx: maybe_bounded::Sender<Rx>,
     /// Indicator noting whether at least one of the [`Sender`] or [`struct@Receiver`] is dropped.
     ///
     /// In the [`Drop`] impl, this is used to remove a key's entry from the managed map once both
@@ -161,41 +158,12 @@ where
     #[derivative(Debug = "ignore")]
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send>,
     timeout: Option<Duration>,
-    buffer_size: usize,
-    session: PhantomData<fn() -> S>,
+    max_pending_retries: Option<usize>,
+    session: S,
 }
 
 mod end;
 use end::{End, ReceiverEnd, SenderEnd};
-
-#[Transmitter(Tx)]
-#[Receiver(Rx)]
-impl<Key, H, Err, Tx, Rx> Acceptor<Key, Err, Tx, Rx, H, Session! {}>
-where
-    Key: Clone + Eq + Hash + Send + Sync + 'static,
-    H: Session,
-{
-    /// Create a new [`Acceptor`] which accepts connections using the specified handshake.
-    ///
-    /// By default, an [`Acceptor`] produces channels with the empty session type, no timeout, a
-    /// buffer size of 1, and will attempt to resume connections indefinitely. Use its various
-    /// builder methods to add recovery strategies and alter the default session type, timeout, and
-    /// buffer size.
-    pub fn new<Fut>(handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static) -> Self
-    where
-        Fut: Future<Output = Result<(ResumeKind, Key), Err>> + 'static,
-    {
-        Self {
-            handshake: Box::new(move |chan| Box::pin(handshake(chan))),
-            managed: Arc::new(DashMap::new()),
-            recover_tx: Arc::new(|_, _| ResumeStrategy::Reconnect),
-            recover_rx: Arc::new(|_, _| ResumeStrategy::Reconnect),
-            timeout: None,
-            buffer_size: 1,
-            session: PhantomData,
-        }
-    }
-}
 
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
@@ -205,34 +173,36 @@ where
     H: Session,
     S: Session,
 {
-    /// Set the session type for all future [`Chan`]s produced by this [`Acceptor`].
-    pub fn session<P: Session>(self) -> Acceptor<Key, Err, Tx, Rx, H, P> {
-        let Acceptor {
-            handshake,
-            managed,
-            recover_tx,
-            recover_rx,
-            timeout,
-            buffer_size,
-            ..
-        } = self;
-        Acceptor {
-            handshake,
-            managed,
-            recover_tx,
-            recover_rx,
-            timeout,
-            buffer_size,
-            session: PhantomData,
+    /// Create a new [`Acceptor`] which accepts connections using the specified handshake and
+    /// produces [`Chan`]s with the specified session type.
+    ///
+    /// All session types implement [`Default`], which means you can pass in a session type `S` to
+    /// this method by calling `S::default()`.
+    ///
+    /// By default, an [`Acceptor`] produces channels with no timeout, an unbounded number of
+    /// maximum pending retries, and will attempt to resume connections indefinitely. Use its
+    /// various builder methods to alter these.
+    pub fn new<Fut>(handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static, session: S) -> Self
+    where
+        Fut: Future<Output = Result<(ResumeKind, Key), Err>> + 'static,
+    {
+        Self {
+            handshake: Box::new(move |chan| Box::pin(handshake(chan))),
+            managed: Arc::new(DashMap::new()),
+            recover_tx: Arc::new(|_, _| ResumeStrategy::Reconnect),
+            recover_rx: Arc::new(|_, _| ResumeStrategy::Reconnect),
+            timeout: None,
+            max_pending_retries: None,
+            session,
         }
     }
 
     /// Set the recovery method for transmitter errors within all future [`Chan`]s produced by this
     /// [`Acceptor`].
     pub fn recover_tx(
-        mut self,
+        &mut self,
         recovery: impl Fn(usize, &Tx::Error) -> ResumeStrategy + Sync + Send + 'static,
-    ) -> Self {
+    ) -> &mut Self {
         self.recover_tx = Arc::new(recovery);
         self
     }
@@ -240,9 +210,9 @@ where
     /// Set the recovery method for receiver errors within all future [`Chan`]s produced by this
     /// [`Acceptor`].
     pub fn recover_rx(
-        mut self,
+        &mut self,
         recovery: impl Fn(usize, &Rx::Error) -> ResumeStrategy + Sync + Send + 'static,
-    ) -> Self {
+    ) -> &mut Self {
         self.recover_rx = Arc::new(recovery);
         self
     }
@@ -251,26 +221,23 @@ where
     ///
     /// When there is a timeout, an error will be thrown if recovery from a previous error takes
     /// longer than the given timeout, even if the error recovery strategy specifies trying again.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
+    pub fn timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
+        self.timeout = timeout;
         self
     }
 
-    /// Clear the timeout for recovery within all future [`Chan`]s produced by this [`Acceptor`].
+    /// Set the maximum number of pending retries for all future [`Chan`]s produced by this
+    /// [`Acceptor`].
     ///
-    /// When there is no timeout,  recovery attempts will continue indefinitely until the recovery
-    /// strategy indicates that they should stop.
-    pub fn clear_timeout(mut self) -> Self {
-        self.timeout = None;
-        self
-    }
-
-    /// Set the buffer size for all future [`Chan`]s produced by this [`Acceptor`].
+    /// If on an [`accept`](Acceptor::accept), more than `max_pending_retries` number of successful
+    /// retries are waiting for a [`Chan`], an error will be thrown instead of a successful
+    /// resumption.
     ///
-    /// If on an [`accept`](Acceptor::accept), more than `buffer_size` number of successful retries
-    /// are waiting for a [`Chan`], an error will be thrown instead of a successful resumption.
-    pub fn buffer_size(mut self, buffer_size: usize) -> Self {
-        self.buffer_size = buffer_size.saturating_add(1);
+    /// Restricting this limit (the default is `None`) prevents a potential unbounded memory
+    /// leak in the case where a mis-behaving [`retry`](crate::retry) end attempts to reconnect many
+    /// times before either end of a channel encounters an error and attempts to reconnect.
+    pub fn max_pending_retries(&mut self, max_pending_retries: Option<usize>) -> &mut Self {
+        self.max_pending_retries = max_pending_retries;
         self
     }
 
@@ -356,8 +323,8 @@ where
                 // If there was no entry by this key, then this represents a fresh session,
                 // and we should return a channel for the caller to do with what they like
                 // (usually, run a session in a separate task).
-                let (send_tx, next_tx) = mpsc::channel(self.buffer_size);
-                let (send_rx, next_rx) = mpsc::channel(self.buffer_size);
+                let (send_tx, next_tx) = maybe_bounded::channel(self.max_pending_retries);
+                let (send_rx, next_rx) = maybe_bounded::channel(self.max_pending_retries);
                 let _ = vacant.insert(ConnectionSink {
                     send_tx,
                     send_rx,
@@ -388,8 +355,10 @@ where
         }
     }
 
-    /// Shrink the storage holding active sessions. This should likely be called periodically to
-    /// reduce memory consumption.
+    /// Shrink the storage holding active sessions.
+    ///
+    /// This is automatically called whenever the number of active sessions is less than 25% the
+    /// capacity of the backing hash-map, but can be called manually if desired.
     pub fn shrink_to_fit(&self) {
         self.managed.shrink_to_fit();
     }
