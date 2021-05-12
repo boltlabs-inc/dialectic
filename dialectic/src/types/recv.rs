@@ -4,9 +4,14 @@ use std::{any::Any, marker::PhantomData};
 
 /// Receive a message of type `T` using [`recv`](crate::Chan::recv), then continue with
 /// protocol `P`.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Recv<T, P>(pub PhantomData<T>, pub P);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Recv<T, P>(PhantomData<fn() -> T>, PhantomData<fn() -> P>);
+
+impl<T, P> Default for Recv<T, P> {
+    fn default() -> Self {
+        Recv(PhantomData, PhantomData)
+    }
+}
 
 impl<T: Any, P: Any> IsSession for Recv<T, P> {}
 

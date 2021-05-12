@@ -5,7 +5,7 @@ use crate::unary::{self, Compare, Number, ToConstant, ToUnary};
 /// Repeat a [`Loop`]. The type-level index points to the loop to be repeated, counted from the
 /// innermost starting at `0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Continue<const I: usize>;
+pub struct Continue<const I: usize>(());
 
 impl<const I: usize> IsSession for Continue<I> {}
 
