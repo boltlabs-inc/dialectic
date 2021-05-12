@@ -270,7 +270,7 @@ mod sealed {
     use super::*;
 
     /// Seal the [`Session`] trait so only types defined in this crate can be session types.
-    pub trait IsSession: Any {}
+    pub trait IsSession: Any + Default {}
 
     /// Seal the [`EachSession`] trait so it can't be extended in weird ways.
     pub trait EachSession {}

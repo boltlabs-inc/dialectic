@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, marker::PhantomData};
 
 use super::sealed::IsSession;
 use super::*;
@@ -9,9 +9,14 @@ use crate::tuple::{List, Tuple};
 ///
 /// At most 128 choices can be offered in a single `Offer` type; to supply more options, nest
 /// `Offer`s within each other.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Offer<Choices>(pub Choices);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Offer<Choices>(PhantomData<fn() -> Choices>);
+
+impl<Choices> Default for Offer<Choices> {
+    fn default() -> Self {
+        Offer(PhantomData)
+    }
+}
 
 impl<Choices: Any> IsSession for Offer<Choices> {}
 

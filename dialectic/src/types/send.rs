@@ -4,9 +4,14 @@ use std::{any::Any, marker::PhantomData};
 
 /// Send a message of type `T` using [`send`](crate::Chan::send), then continue with
 /// protocol `P`.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Send<T, P>(pub PhantomData<T>, pub P);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Send<T, P>(PhantomData<fn() -> T>, PhantomData<fn() -> P>);
+
+impl<T, P> Default for Send<T, P> {
+    fn default() -> Self {
+        Send(PhantomData, PhantomData)
+    }
+}
 
 impl<T: Any, P: Any> IsSession for Send<T, P> {}
 
