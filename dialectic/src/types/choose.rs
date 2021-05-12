@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, marker::PhantomData};
 
 use super::sealed::IsSession;
 use super::*;
@@ -10,9 +10,14 @@ use crate::tuple::{List, Tuple};
 ///
 /// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
 /// `Choose`s within each other.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Choose<Choices>(pub Choices);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Choose<Choices>(PhantomData<fn() -> Choices>);
+
+impl<Choices> Default for Choose<Choices> {
+    fn default() -> Self {
+        Choose(PhantomData)
+    }
+}
 
 impl<Choices: Any> IsSession for Choose<Choices> {}
 

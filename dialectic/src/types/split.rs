@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, marker::PhantomData};
 
 use super::sealed::IsSession;
 use super::*;
@@ -8,8 +8,18 @@ use super::*;
 /// The type `Split<P, Q, R>` means: do the [`Transmit`](crate::backend::Transmit)-only session `P`
 /// concurrently with the [`Receive`](crate::backend::Receive)-only session `Q`, running them both
 /// to [`Done`], and when they've completed, do the session `R`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Split<P, Q, R>(pub P, pub Q, pub R);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Split<P, Q, R>(
+    PhantomData<fn() -> P>,
+    PhantomData<fn() -> Q>,
+    PhantomData<fn() -> R>,
+);
+
+impl<P, Q, R> Default for Split<P, Q, R> {
+    fn default() -> Self {
+        Split(PhantomData, PhantomData, PhantomData)
+    }
+}
 
 impl<P: Any, Q: Any, R: Any> IsSession for Split<P, Q, R> {}
 

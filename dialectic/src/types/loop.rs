@@ -1,10 +1,17 @@
+use std::marker::PhantomData;
+
 use super::sealed::IsSession;
 use super::*;
 
 /// Label a loop point, which can be reiterated with [`Continue`].
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Loop<P>(pub P);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Loop<P>(PhantomData<fn() -> P>);
+
+impl<P> Default for Loop<P> {
+    fn default() -> Self {
+        Loop(PhantomData)
+    }
+}
 
 impl<P: IsSession> IsSession for Loop<P> {}
 
