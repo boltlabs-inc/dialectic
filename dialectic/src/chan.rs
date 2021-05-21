@@ -98,6 +98,80 @@ where
     }
 }
 
+impl<Tx, Rx, S, T, P> Chan<S, Tx, Rx>
+where
+    S: Session<Action = Recv<T, P>>,
+    P: Session,
+    Tx: marker::Send + 'static,
+    Rx: Receive<T> + marker::Send + 'static,
+{
+    /// Receive something of type `T` on the channel, returning the pair of the received object and
+    /// the channel.
+    ///
+    /// # Errors
+    ///
+    /// This function returns the [`Receiver::Error`] for the underlying `Rx` connection if there
+    /// was an error while receiving.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic_tokio_mpsc as mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Session! { recv String }>::channel(|| mpsc::channel(1));
+    /// c2.send("Hello, world!".to_string()).await?;
+    ///
+    /// let (s, c1) = c1.recv().await?;
+    /// assert_eq!(s, "Hello, world!");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn recv(mut self) -> Result<(T, Chan<P, Tx, Rx>), Rx::Error> {
+        let result = self.rx.as_mut().unwrap().recv().await?;
+        Ok((result, self.unchecked_cast()))
+    }
+}
+
+impl<Tx, Rx, S, T, P> Chan<S, Tx, Rx>
+where
+    T: marker::Send,
+    P: Session,
+    S: Session<Action = Send<T, P>>,
+    Tx: Transmit<T> + marker::Send + 'static,
+    Rx: marker::Send + 'static,
+{
+    /// Send something of type `T` on the channel *by value*, returning the channel.
+    ///
+    /// # Errors
+    ///
+    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
+    /// was an error while sending.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dialectic::prelude::*;
+    /// use dialectic_tokio_mpsc as mpsc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
+    /// c1.send("Hello, world!".to_string()).await?;
+    ///
+    /// let (s, c2) = c2.recv().await?;
+    /// assert_eq!(s, "Hello, world!");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send(mut self, message: T) -> Result<Chan<P, Tx, Rx>, Tx::Error> {
+        self.tx.as_mut().unwrap().send(message).await?;
+        Ok(self.unchecked_cast())
+    }
+}
+
 impl<Tx, Rx, S> Chan<S, Tx, Rx>
 where
     S: Session,
@@ -151,74 +225,6 @@ where
         S: Session<Action = Done>,
     {
         drop(self)
-    }
-
-    /// Receive something of type `T` on the channel, returning the pair of the received object and
-    /// the channel.
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Receiver::Error`] for the underlying `Rx` connection if there
-    /// was an error while receiving.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::prelude::*;
-    /// use dialectic_tokio_mpsc as mpsc;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Session! { recv String }>::channel(|| mpsc::channel(1));
-    /// c2.send("Hello, world!".to_string()).await?;
-    ///
-    /// let (s, c1) = c1.recv().await?;
-    /// assert_eq!(s, "Hello, world!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn recv<T, P>(mut self) -> Result<(T, Chan<P, Tx, Rx>), Rx::Error>
-    where
-        S: Session<Action = Recv<T, P>>,
-        P: Session,
-        Rx: Receive<T>,
-    {
-        let result = self.rx.as_mut().unwrap().recv().await?;
-        Ok((result, self.unchecked_cast()))
-    }
-
-    /// Send something of type `T` on the channel *by value*, returning the channel.
-    ///
-    /// # Errors
-    ///
-    /// This function returns the [`Transmitter::Error`] for the underlying `Tx` connection if there
-    /// was an error while sending.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dialectic::prelude::*;
-    /// use dialectic_tokio_mpsc as mpsc;
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let (c1, c2) = <Session! { send String }>::channel(|| mpsc::channel(1));
-    /// c1.send("Hello, world!".to_string()).await?;
-    ///
-    /// let (s, c2) = c2.recv().await?;
-    /// assert_eq!(s, "Hello, world!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send<T, P>(mut self, message: T) -> Result<Chan<P, Tx, Rx>, Tx::Error>
-    where
-        S: Session<Action = Send<T, P>>,
-        P: Session,
-        Tx: Transmit<T>,
-        T: marker::Send,
-    {
-        self.tx.as_mut().unwrap().send(message).await?;
-        Ok(self.unchecked_cast())
     }
 
     /// Send something of type `T` on the channel *by reference*, returning the channel.
