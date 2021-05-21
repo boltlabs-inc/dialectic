@@ -51,7 +51,7 @@ where
     Tx::Error: Error + Send,
     Rx::Error: Error + Send,
 {
-    let (name, chan) = chan.recv().await?;
+    let (name, chan) = chan.send("what").await?;
     let greeting = format!(
         "Hello, {}! Your name is {} characters long.",
         name,
