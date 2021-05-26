@@ -12,6 +12,7 @@ use std::{
     fmt::{Debug, Display},
     future::Future,
     hash::Hash,
+    marker::PhantomData,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
@@ -126,8 +127,9 @@ pub(crate) struct ConnectionSink<Tx, Rx> {
 type Managed<Key, Tx, Rx> = DashMap<Key, ConnectionSink<Tx, Rx>>;
 
 /// A function which executes an [`Acceptor`]-side handshake.
-type Handshake<H, Key, E, Tx, Rx> =
-    dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ResumeKind, Key), E>>>>;
+type Handshake<H, Key, E, Tx, Rx> = dyn Fn(Chan<H, Tx, Rx>) -> Pin<Box<dyn Future<Output = Result<(ResumeKind, Key), E>> + Send>>
+    + Sync
+    + Send;
 
 /// An [`Acceptor`] knows how to accept an incoming pair of transmitter `Tx` and receiver `Rx` and
 /// perform a handshake to determine whether they intend to create a new connection or resume an
@@ -159,7 +161,7 @@ where
     recover_rx: Arc<dyn Fn(usize, &Rx::Error) -> Recovery + Sync + Send>,
     timeout: Option<Duration>,
     max_pending_retries: Option<usize>,
-    session: S,
+    session: PhantomData<fn() -> S>,
 }
 
 mod end;
@@ -182,9 +184,12 @@ where
     /// By default, an [`Acceptor`] produces channels with no timeout, an unbounded number of
     /// maximum pending retries, and will attempt to resume connections indefinitely. Use its
     /// various builder methods to alter these.
-    pub fn new<Fut>(handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + 'static, session: S) -> Self
+    pub fn new<Fut>(
+        handshake: impl Fn(Chan<H, Tx, Rx>) -> Fut + Sync + Send + 'static,
+        #[allow(unused)] session: S,
+    ) -> Self
     where
-        Fut: Future<Output = Result<(ResumeKind, Key), Err>> + 'static,
+        Fut: Future<Output = Result<(ResumeKind, Key), Err>> + Send + 'static,
     {
         Self {
             handshake: Box::new(move |chan| Box::pin(handshake(chan))),
@@ -193,7 +198,7 @@ where
             recover_rx: Arc::new(|_, _| Recovery::Reconnect),
             timeout: None,
             max_pending_retries: None,
-            session,
+            session: PhantomData,
         }
     }
 
