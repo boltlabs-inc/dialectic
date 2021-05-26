@@ -16,18 +16,18 @@ categories = ["asynchronous", "concurrency"]
 dialectic = { version = "0.4", path = "../dialectic" }
 call-by = "^0.2.3"
 tokio = { version = "^1.5", features = ["sync", "time"] }
-futures = { version = "0.3", features = ["std"], default-features = false }
-async-trait = "0.1"
 dashmap = "4"
-pin-project = "1"
 rand = "0.8"
 derivative = "2"
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+humantime-serde = { version = "1", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"]}
 dialectic-tokio-serde = { version = "0.1", path = "../dialectic-tokio-serde" }
 dialectic-tokio-serde-json = { version = "0.1", path = "../dialectic-tokio-serde-json" }
 anyhow = "1"
+futures = { version = "0.3", features = ["std"], default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true
