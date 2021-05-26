@@ -58,6 +58,7 @@ pub type PingPong = Session! {
 pub type Tx = dialectic_tokio_serde::Sender<Json, LinesCodec, OwnedWriteHalf>;
 pub type Rx = dialectic_tokio_serde::Receiver<Json, LinesCodec, OwnedReadHalf>;
 
+#[allow(unused)]
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // How to connect to an address and generate a `Tx`/`Rx` pair
