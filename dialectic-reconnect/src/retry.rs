@@ -394,13 +394,6 @@ where
     HandshakeErr: Send,
 {
     type Error = RetryError<Tx::Error, ConnectErr, HandshakeErr>;
-
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
-        Box::pin(async move { retry_loop!(self.tx.send_choice(choice)) })
-    }
 }
 
 #[Transmitter(Tx for ref T)]
@@ -456,6 +449,26 @@ where
     }
 }
 
+#[Transmitter(Tx for match)]
+#[Receiver(Rx)]
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> TransmitChoice
+    for Sender<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
+where
+    Tx: Sync,
+    Address: Clone + Sync + Send,
+    Key: Clone + Sync + Send,
+    Tx::Error: Sync + Send,
+    ConnectErr: Send,
+    HandshakeErr: Send,
+{
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>> {
+        Box::pin(async move { retry_loop!(self.tx.send_choice(choice)) })
+    }
+}
+
 #[Transmitter(Tx)]
 #[Receiver(Rx)]
 impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> backend::Receiver
@@ -469,13 +482,6 @@ where
     HandshakeErr: Send,
 {
     type Error = RetryError<Rx::Error, ConnectErr, HandshakeErr>;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async move { retry_loop!(self.rx.recv_choice()) })
-    }
 }
 
 #[Transmitter(Tx)]
@@ -495,5 +501,25 @@ where
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async move { retry_loop!(self.rx.recv()) })
+    }
+}
+
+#[Transmitter(Tx)]
+#[Receiver(Rx for match)]
+impl<H: Session, Address, Key, ConnectErr, HandshakeErr, Tx, Rx> ReceiveChoice
+    for Receiver<H, Address, Key, ConnectErr, HandshakeErr, Tx, Rx>
+where
+    Rx: Sync,
+    Address: Clone + Sync + Send,
+    Key: Clone + Sync + Send,
+    Rx::Error: Sync + Send,
+    ConnectErr: Send,
+    HandshakeErr: Send,
+{
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async move { retry_loop!(self.rx.recv_choice()) })
     }
 }
