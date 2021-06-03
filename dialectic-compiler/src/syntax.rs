@@ -42,9 +42,9 @@ pub enum Syntax {
     /// Syntax: `call T` or `call { ... }`.
     Call(Box<Spanned<Syntax>>),
     /// Syntax: `choose { 0 => ..., ... }`.
-    Choose(Vec<Spanned<Syntax>>),
+    Choose(Option<Type>, Vec<Spanned<Syntax>>),
     /// Syntax: `offer { 0 => ..., ... }`.
-    Offer(Vec<Spanned<Syntax>>),
+    Offer(Option<Type>, Vec<Spanned<Syntax>>),
     /// Syntax: `split { -> ..., <- ... }`.
     Split {
         /// The transmit-only half.
@@ -172,19 +172,19 @@ fn to_cfg<'a>(
             let rx_only = to_cfg(rx_only, cfg, env).0;
             Ir::Split { tx_only, rx_only }
         }
-        Choose(choices) => {
+        Choose(carrier_type, choices) => {
             let choice_nodes = choices
                 .iter()
                 .map(|choice| to_cfg(choice, cfg, env).0)
                 .collect();
-            Ir::Choose(choice_nodes)
+            Ir::Choose(carrier_type.clone(), choice_nodes)
         }
-        Offer(choices) => {
+        Offer(carrier_type, choices) => {
             let choice_nodes = choices
                 .iter()
                 .map(|choice| to_cfg(choice, cfg, env).0)
                 .collect();
-            Ir::Offer(choice_nodes)
+            Ir::Offer(carrier_type.clone(), choice_nodes)
         }
         Continue(label) => {
             return convert_jump_to_cfg(label, CompileError::ContinueOutsideLoop, Ir::Continue)
@@ -306,13 +306,13 @@ impl Spanned<Syntax> {
                 let rx = rx_only.to_token_stream_with(add_optional);
                 quote_spanned! {sp=> split { -> #tx, <- #rx, } }
             }
-            Choose(choices) => {
+            Choose(carrier_type, choices) => {
                 let arms = choice_arms_to_tokens(&mut add_optional, choices);
-                quote_spanned! {sp=> choose { #arms } }
+                quote_spanned! {sp=> choose #carrier_type { #arms } }
             }
-            Offer(choices) => {
+            Offer(carrier_type, choices) => {
                 let arms = choice_arms_to_tokens(&mut add_optional, choices);
-                quote_spanned! {sp=> offer { #arms } }
+                quote_spanned! {sp=> offer #carrier_type { #arms } }
             }
             Loop(None, body) => {
                 let body_tokens = body.to_token_stream_with(add_optional);
@@ -354,7 +354,7 @@ impl Spanned<Syntax> {
                         // rather than required.
                         let ends_with_block = matches!(
                             &stmt.inner,
-                            Block(_) | Split { .. } | Offer(_) | Choose(_) | Loop(_, _),
+                            Block(_) | Split { .. } | Offer(..) | Choose(..) | Loop(_, _),
                         );
 
                         if !(is_call_of_block || ends_with_block) || add_optional() {
@@ -438,8 +438,14 @@ mod tests {
                     "type" => Type(parse_quote!(())),
                     other => unreachable!("{}", other),
                 },
-                "choose" => Choose(Arbitrary::arbitrary(g)),
-                "offer" => Offer(Arbitrary::arbitrary(g)),
+                "choose" => Choose(
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
+                    Arbitrary::arbitrary(g),
+                ),
+                "offer" => Offer(
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
+                    Arbitrary::arbitrary(g),
+                ),
                 "split" => Split {
                     tx_only: Arbitrary::arbitrary(g),
                     rx_only: Arbitrary::arbitrary(g),
@@ -475,8 +481,8 @@ mod tests {
                         })
                     })
                     .collect(),
-                Choose(choices) => choices.shrink().map(Choose).collect(),
-                Offer(choices) => choices.shrink().map(Offer).collect(),
+                Choose(_, choices) => choices.shrink().map(|cs| Choose(None, cs)).collect(),
+                Offer(_, choices) => choices.shrink().map(|cs| Offer(None, cs)).collect(),
                 Loop(label, body) => body
                     .shrink()
                     .map(|body_shrunk| Loop(label.clone(), body_shrunk))

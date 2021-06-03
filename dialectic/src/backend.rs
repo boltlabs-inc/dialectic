@@ -4,7 +4,13 @@
 //! receiving channel `Rx`. In order to use a `Chan` to run a session, these underlying channels
 //! must implement the traits [`Transmitter`] and [`Receiver`], as well as [`Transmit<T>`](Transmit)
 //! and [`Receive<T>`](Receive) for at least the types `T` used in those capacities in any given
-//! session.
+//! session. If you want to use [`Choice<N>`] to carry your branching messages, you will also need
+//! [`TransmitChoice`] and [`ReceiveChoice`]. These two pairs of traits are what need to be
+//! implemented for a transport backend to function with Dialectic; if a custom backend for an
+//! existing protocol is being implemented, [`TransmitChoice`] and [`ReceiveChoice`] do not
+//! necessarily need to be implemented and can be left out as necessary/desired. Branching with
+//! `offer` and `choose` can still be achieved with any type that implements the Vesta `Match`
+//! trait, as long as that type can be transmitted or received by the backend in question.
 //!
 //! Functions which are generic over their backend will in turn need to specify the bounds
 //! [`Transmit<T>`](Transmit) and [`Receive<T>`](Receive) for all `T`s they send and receive,
@@ -14,15 +20,21 @@
 
 #[doc(no_inline)]
 pub use call_by::{By, Convention, Mut, Ref, Val};
-use std::{future::Future, pin::Pin};
+use std::{
+    convert::{TryFrom, TryInto},
+    future::Future,
+    pin::Pin,
+};
+pub use vesta::{Case, Match};
 
 mod choice;
 pub use choice::*;
 
 /// A backend transport used for transmitting (i.e. the `Tx` parameter of [`Chan`](crate::Chan))
 /// must implement [`Transmitter`], which specifies what type of errors it might return, as well as
-/// giving a method to send [`Choice`]s across the channel. This is a super-trait of [`Transmit`],
-/// which is what's actually needed to receive particular values over a [`Chan`](crate::Chan).
+/// giving a method to send [`Choice`]s across the channel. This is a super-trait of [`Transmit`]
+/// and [`TransmitChoice`], which are what's actually needed to receive particular values over a
+/// [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Transmit<T>`](Transmit) bounds, the
 /// [`Transmitter`](macro@crate::Transmitter) attribute macro can help you specify them more
@@ -30,12 +42,6 @@ pub use choice::*;
 pub trait Transmitter {
     /// The type of possible errors when sending.
     type Error;
-
-    /// Send any `Choice<N>` using the [`Convention`] specified by the trait implementation.
-    fn send_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-        choice: Choice<LENGTH>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// A marker trait indicating that some type `T` is transmittable as the associated type
@@ -112,22 +118,120 @@ where
         'a: 'async_lifetime;
 }
 
+/// A trait describing how we can transmit a [`Choice<N>`](Choice) for any `N: usize`. If your
+/// backend should be able to transmit any [`Choice<N>`](Choice), this is the trait to implement;
+/// you'll get a blanket impl from it for `TransmitCase<Choice<N>>`. Implementing this trait will
+/// not allow your backend to [`Transmit`] a `Choice<N>`, but there is generally no reason to do so.
+pub trait TransmitChoice: Transmitter {
+    /// Send a [`Choice<N>`](Choice) over the backend, for some `N`.
+    fn send_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+        choice: Choice<LENGTH>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>;
+}
+
+/// If a transport is [`TransmitCase<T, C>`](TransmitCase), we can use it to
+/// [`send_case`](TransmitCase::send_case) a message of type `T` by [`Val`], [`Ref`], or [`Mut`],
+/// depending on the calling convention specified by `C`. [`TransmitCase`] is highly similar to
+/// [`Transmit`], with a major difference: [`TransmitCase`] may be used to send only *part* of an
+/// `enum` datatype, as part of a [`Chan::choose`](crate::Chan::choose) call. This is because the
+/// discriminant is actually the constant `N: usize` parameter to the [`TransmitCase::send_case`]
+/// method. This matching/construction/deconstruction is done through the
+/// [`vesta`](https://docs.rs/vesta) crate and its `Match` and `Case` traits; implementation of
+/// these traits does not need to be done by hand as Vesta provides a derive macro for them.
+/// Similarly, [`TransmitCase`] never needs to be implemented by hand; blanket implementations are
+/// provided to allow branching transmissions of `Choice<N>` for all `N` (when a backend supports
+/// `TransmitChoice`) and `T: Match` (when a backend supports [`Transmit<T>`](Transmit).)
+pub trait TransmitCase<T: ?Sized, C: Convention, const N: usize>:
+    Transmitter + sealed::TransmitCase<T, C>
+where
+    T: Transmittable + Match,
+{
+    /// Send a "case" of a [`Match`]-able type.
+    fn send_case<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <<T as Case<N>>::Case as By<'a, C>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        T: Case<N>,
+        <T as Case<N>>::Case: By<'a, C>,
+        'a: 'async_lifetime;
+}
+
+/// This is a wrapper type which disambiguates, at the type level, "custom" choice types, and makes
+/// sure Rust sees them as a different type from `Choice<N>`. `CustomChoice` is an implementation
+/// detail which is generated by the `Session!` macro when outputting [`Choose`](crate::Choose) and
+/// [`Offer`](crate::Offer) types. If you see it in an error message, it means you wrote a `choose`
+/// or `offer` statement with a custom carrier type, which is held as the type parameter to
+/// `CustomChoice<T>`.
+#[derive(Debug)]
+pub struct CustomChoice<T>(pub T);
+
+unsafe impl<T: Match> Match for CustomChoice<T> {
+    type Range = T::Range;
+
+    fn tag(&self) -> Option<usize> {
+        self.0.tag()
+    }
+}
+
+impl<T: Match + Case<N>, const N: usize> Case<N> for CustomChoice<T> {
+    type Case = T::Case;
+
+    unsafe fn case(this: Self) -> Self::Case {
+        T::case(this.0)
+    }
+
+    fn uncase(case: Self::Case) -> Self {
+        CustomChoice(T::uncase(case))
+    }
+}
+
+impl<Tx: Transmitter + TransmitChoice, const LENGTH: usize, const N: usize>
+    TransmitCase<Choice<LENGTH>, Val, N> for Tx
+{
+    fn send_case<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        _message: <<Choice<LENGTH> as Case<N>>::Case as By<'a, Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        Choice<LENGTH>: Case<N>,
+        <Choice<LENGTH> as Case<N>>::Case: By<'a, Val>,
+        'a: 'async_lifetime,
+    {
+        // FIXME(sleffy): no unwrap
+        self.send_choice::<LENGTH>(
+            TryFrom::<u8>::try_from(N.try_into().unwrap()).expect("N < LENGTH by trait properties"),
+        )
+    }
+}
+
+impl<Tx: Transmitter + Transmit<T>, T: Match + Transmittable, const N: usize>
+    TransmitCase<CustomChoice<T>, Val, N> for Tx
+{
+    fn send_case<'a, 'async_lifetime>(
+        &'async_lifetime mut self,
+        message: <<CustomChoice<T> as Case<N>>::Case as By<'a, Val>>::Type,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'async_lifetime>>
+    where
+        CustomChoice<T>: Case<N>,
+        <CustomChoice<T> as Case<N>>::Case: By<'a, Val>,
+        'a: 'async_lifetime,
+    {
+        self.send(<CustomChoice<T> as Case<N>>::uncase(call_by::to_val(message)).0)
+    }
+}
+
 /// A backend transport used for receiving (i.e. the `Rx` parameter of [`Chan`](crate::Chan)) must
-/// implement [`Receiver`], which specifies what type of errors it might return, as well as giving a
-/// method to send [`Choice`]s across the channel. This is a super-trait of [`Receive`], which is
-/// what's actually needed to receive particular values over a [`Chan`](crate::Chan).
+/// implement [`Receiver`], which specifies what type of errors it might return. This is a
+/// super-trait of [`Receive`] and [`ReceiveChoice`], which are the traits that are actually needed
+/// to receive particular values over a [`Chan`](crate::Chan).
 ///
 /// If you're writing a function and need a lot of different [`Receive<T>`](Receive) bounds, the
 /// [`Receiver`](macro@crate::Receiver) attribute macro can help you specify them more succinctly.
 pub trait Receiver {
     /// The type of possible errors when receiving.
     type Error;
-
-    /// Receive any `Choice<N>`. It is impossible to construct a `Choice<0>`, so if `N = 0`, a
-    /// [`Receiver::Error`] must be returned.
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
 }
 
 /// If a transport is [`Receive<T>`](Receive), we can use it to [`recv`](Receive::recv) a message of
@@ -151,4 +255,79 @@ pub trait Receive<T>: Receiver {
     fn recv<'async_lifetime>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+/// A trait describing how we can receive a [`Choice<N>`](Choice) for any `N: usize`. If your
+/// backend should be able to receive any [`Choice<N>`](Choice), this is the trait to implement;
+/// you'll get a blanket impl from it for `ReceiveCase<Choice<N>>`. Implementing this trait will
+/// not allow your backend to [`Receive`] a `Choice<N>`, but there is generally no reason to do so.
+pub trait ReceiveChoice: Receiver {
+    /// Receive any `Choice<N>`. It is impossible to construct a `Choice<0>`, so if `N = 0`, a
+    /// [`Receiver::Error`] must be returned.
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+/// A trait describing how a receiver can receive some `T` which can be matched on and has one or
+/// more associated "cases". [`ReceiveCase`] is highly similar to
+/// [`Receive`], with a major difference: [`ReceiveCase`] may be used to send only *part* of an
+/// `enum` datatype, as part of a [`Chan::choose`](crate::Chan::choose) call. This is because the
+/// discriminant is actually the constant `N: usize` parameter to the [`ReceiveCase::recv_case`]
+/// method. This matching/construction/deconstruction is done through the
+/// [`vesta`](https://docs.rs/vesta) crate and its `Match` and `Case` traits; implementation of
+/// these traits does not need to be done by hand as Vesta provides a derive macro for them.
+/// Similarly, [`ReceiveCase`] never needs to be implemented by hand; blanket implementations are
+/// provided to allow branching transmissions of `Choice<N>` for all `N` (when a backend supports
+/// `ReceiveChoice`) and `T: Match` (when a backend supports [`Receive<T>`](Receive).)
+pub trait ReceiveCase<T>: Receiver
+where
+    T: Match,
+{
+    /// Receive a case of some type which implements [`Match`]. This may require type annotations
+    /// for disambiguation.
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>>;
+}
+
+impl<Rx: Receiver, const LENGTH: usize> ReceiveCase<Choice<LENGTH>> for Rx
+where
+    Rx: ReceiveChoice,
+{
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        self.recv_choice::<LENGTH>()
+    }
+}
+
+impl<Rx: Receiver, T: Match> ReceiveCase<CustomChoice<T>> for Rx
+where
+    Rx: Receive<T> + Send,
+{
+    fn recv_case<'async_lifetime>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<CustomChoice<T>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async move {
+            let t = self.recv().await?;
+            Ok(CustomChoice(t))
+        })
+    }
+}
+
+mod sealed {
+    use super::*;
+
+    pub trait TransmitCase<T: ?Sized, C> {}
+
+    impl<Tx: Transmitter + Transmit<T>, T: Transmittable> TransmitCase<CustomChoice<T>, Val> for Tx {}
+    impl<Tx: Transmitter + TransmitChoice, const N: usize> TransmitCase<Choice<N>, Val> for Tx {}
+
+    pub trait ReceiveCase<T: ?Sized> {}
+
+    impl<Rx: Receiver + Receive<T>, T> ReceiveCase<CustomChoice<T>> for Rx {}
+    impl<Rx: Receiver + ReceiveChoice, const N: usize> ReceiveCase<Choice<N>> for Rx {}
 }

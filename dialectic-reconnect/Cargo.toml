@@ -28,6 +28,7 @@ dialectic-tokio-serde = { version = "0.1", path = "../dialectic-tokio-serde" }
 dialectic-tokio-serde-json = { version = "0.1", path = "../dialectic-tokio-serde-json" }
 anyhow = "1"
 futures = { version = "0.3", features = ["std"], default-features = false }
+vesta = "0.1"
 
 [package.metadata.docs.rs]
 all-features = true

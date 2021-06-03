@@ -143,7 +143,9 @@ pub enum RecvError {
 
 impl backend::Transmitter for Sender {
     type Error = SendError<Box<dyn Any + Send>>;
+}
 
+impl backend::TransmitChoice for Sender {
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
         choice: Choice<LENGTH>,
@@ -198,7 +200,9 @@ where
 
 impl backend::Receiver for Receiver {
     type Error = RecvError;
+}
 
+impl backend::ReceiveChoice for Receiver {
     fn recv_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
@@ -225,7 +229,9 @@ impl<T: Send + Any> backend::Receive<T> for Receiver {
 
 impl backend::Transmitter for UnboundedSender {
     type Error = SendError<Box<dyn Any + Send>>;
+}
 
+impl backend::TransmitChoice for UnboundedSender {
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
         choice: Choice<LENGTH>,
@@ -280,7 +286,9 @@ where
 
 impl backend::Receiver for UnboundedReceiver {
     type Error = RecvError;
+}
 
+impl backend::ReceiveChoice for UnboundedReceiver {
     fn recv_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>

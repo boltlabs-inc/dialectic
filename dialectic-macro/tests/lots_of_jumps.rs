@@ -29,13 +29,16 @@ assert_type_eq_all!(
             Loop<
                 Recv<
                     bool,
-                    Offer<(
-                        Done,
-                        Continue<1>,
-                        Recv<i64, Continue<1>>,
-                        Continue<0>,
-                        Send<String, Send<bool, Continue<0>>>
-                    )>,
+                    Offer<
+                        Choice<5>,
+                        (
+                            Done,
+                            Continue<1>,
+                            Recv<i64, Continue<1>>,
+                            Continue<0>,
+                            Send<String, Send<bool, Continue<0>>>
+                        ),
+                    >,
                 >,
             >,
         >,

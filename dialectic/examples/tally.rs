@@ -31,7 +31,7 @@ pub type Client = Session! {
 };
 
 /// The implementation of the client.
-#[Transmitter(Tx for Operation, i64)]
+#[Transmitter(Tx for match, Operation, i64)]
 #[Receiver(Rx for i64)]
 async fn client<Tx, Rx>(
     mut input: BufReader<Stdin>,
@@ -47,7 +47,7 @@ where
         chan = if let Ok(operation) =
             prompt("Operation (+ or *): ", &mut input, &mut output, str::parse).await
         {
-            let chan = chan.choose::<0>().await?.send(operation).await?;
+            let chan = chan.choose::<0>(()).await?.send(operation).await?;
             output
                 .write_all("Enter numbers (press ENTER to tally):\n".as_bytes())
                 .await?;
@@ -57,13 +57,13 @@ where
                 .await?;
             let chan = chan.unwrap();
             if done {
-                break chan.choose::<1>().await?;
+                break chan.choose::<1>(()).await?;
             } else {
                 chan
             }
         } else {
             // End of input, so quit
-            break chan.choose::<1>().await?;
+            break chan.choose::<1>(()).await?;
         }
     }
     .close();
@@ -85,7 +85,7 @@ pub type ClientTally = Session! {
 };
 
 /// The implementation of the client's tally subroutine.
-#[Transmitter(Tx for Operation, i64)]
+#[Transmitter(Tx for match, Operation, i64)]
 #[Receiver(Rx for i64)]
 async fn client_tally<Tx, Rx>(
     operation: &Operation,
@@ -115,10 +115,10 @@ where
         .await;
         match user_input {
             // User wants to add another number to the tally
-            Ok(Some(n)) => chan = chan.choose::<0>().await?.send(n).await?,
+            Ok(Some(n)) => chan = chan.choose::<0>(()).await?.send(n).await?,
             // User wants to finish this tally
             Ok(None) | Err(_) => {
-                let (tally, chan) = chan.choose::<1>().await?.recv().await?;
+                let (tally, chan) = chan.choose::<1>(()).await?.recv().await?;
                 output
                     .write_all(format!("= {}\n", tally).as_bytes())
                     .await?;
@@ -136,7 +136,7 @@ type Server = <Client as Session>::Dual;
 
 /// The implementation of the server for each client connection.
 #[Transmitter(Tx for i64)]
-#[Receiver(Rx for Operation, i64)]
+#[Receiver(Rx for match, Operation, i64)]
 async fn server<Tx, Rx>(mut chan: Chan<Server, Tx, Rx>) -> Result<(), Box<dyn Error>>
 where
     Tx::Error: Error + Send,
@@ -161,7 +161,7 @@ type ServerTally = <ClientTally as Session>::Dual;
 
 /// The implementation of the server's tally subroutine.
 #[Transmitter(Tx for i64)]
-#[Receiver(Rx for Operation, i64)]
+#[Receiver(Rx for match, Operation, i64)]
 async fn server_tally<Tx, Rx>(
     op: Operation,
     mut chan: Chan<ServerTally, Tx, Rx>,

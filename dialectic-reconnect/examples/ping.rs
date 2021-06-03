@@ -69,12 +69,12 @@ async fn main() -> Result<(), Error> {
 
     // How to perform the initial handshake, receiving a session key from the server
     async fn init(chan: Chan<Handshake, Tx, Rx>) -> Result<usize, Error> {
-        Ok(chan.choose::<0>().await?.recv().await?.0)
+        Ok(chan.choose::<0>(()).await?.recv().await?.0)
     }
 
     // How to perform a retry handshake, submitting a session key to the server
     async fn retry(key: usize, chan: Chan<Handshake, Tx, Rx>) -> Result<(), Error> {
-        let chan = chan.choose::<1>().await?;
+        let chan = chan.choose::<1>(()).await?;
         chan.send(key).await?.close();
         Ok(())
     }
