@@ -11,36 +11,36 @@ use crate::tuple::{List, Tuple};
 /// At most 128 choices can be presented to a `Choose` type; to choose from more options, nest
 /// `Choose`s within each other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Choose<Carrier, Choices>(PhantomData<fn() -> (Choices, Carrier)>);
+pub struct Choose<Choices, Carrier>(PhantomData<fn() -> (Choices, Carrier)>);
 
-impl<Carrier, Choices> Default for Choose<Carrier, Choices> {
+impl<Choices, Carrier> Default for Choose<Choices, Carrier> {
     fn default() -> Self {
         Choose(PhantomData)
     }
 }
 
-impl<Choices: Any, Carrier: 'static> IsSession for Choose<Carrier, Choices> {}
+impl<Choices: Any, Carrier: 'static> IsSession for Choose<Choices, Carrier> {}
 
-impl<Choices, Carrier> HasDual for Choose<Carrier, Choices>
+impl<Choices, Carrier> HasDual for Choose<Choices, Carrier>
 where
     Choices: Any + Tuple,
     Choices::AsList: EachHasDual,
     <Choices::AsList as EachHasDual>::Duals: List + EachHasDual,
     Carrier: 'static,
 {
-    type DualSession = Offer<Carrier, <<Choices::AsList as EachHasDual>::Duals as List>::AsTuple>;
+    type DualSession = Offer<<<Choices::AsList as EachHasDual>::Duals as List>::AsTuple, Carrier>;
 }
 
-impl<Choices: 'static, Carrier: 'static> Actionable for Choose<Carrier, Choices> {
+impl<Choices: 'static, Carrier: 'static> Actionable for Choose<Choices, Carrier> {
     type NextAction = Self;
 }
 
-impl<N: Unary, Choices: Tuple + 'static, Carrier: 'static> Scoped<N> for Choose<Carrier, Choices> where
+impl<N: Unary, Choices: Tuple + 'static, Carrier: 'static> Scoped<N> for Choose<Choices, Carrier> where
     Choices::AsList: EachScoped<N>
 {
 }
 
-impl<N: Unary, P, Choices, Carrier> Subst<P, N> for Choose<Carrier, Choices>
+impl<N: Unary, P, Choices, Carrier> Subst<P, N> for Choose<Choices, Carrier>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachSubst<P, N>,
@@ -48,10 +48,10 @@ where
     Carrier: 'static,
 {
     type Substituted =
-        Choose<Carrier, <<Choices::AsList as EachSubst<P, N>>::Substituted as List>::AsTuple>;
+        Choose<<<Choices::AsList as EachSubst<P, N>>::Substituted as List>::AsTuple, Carrier>;
 }
 
-impl<N: Unary, P, Choices, Carrier> Then<P, N> for Choose<Carrier, Choices>
+impl<N: Unary, P, Choices, Carrier> Then<P, N> for Choose<Choices, Carrier>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachThen<P, N>,
@@ -59,10 +59,10 @@ where
     Carrier: 'static,
 {
     type Combined =
-        Choose<Carrier, <<Choices::AsList as EachThen<P, N>>::Combined as List>::AsTuple>;
+        Choose<<<Choices::AsList as EachThen<P, N>>::Combined as List>::AsTuple, Carrier>;
 }
 
-impl<N: Unary, Level: Unary, Choices, Carrier> Lift<N, Level> for Choose<Carrier, Choices>
+impl<N: Unary, Level: Unary, Choices, Carrier> Lift<N, Level> for Choose<Choices, Carrier>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachLift<N, Level>,
@@ -70,5 +70,5 @@ where
     Carrier: 'static,
 {
     type Lifted =
-        Choose<Carrier, <<Choices::AsList as EachLift<N, Level>>::Lifted as List>::AsTuple>;
+        Choose<<<Choices::AsList as EachLift<N, Level>>::Lifted as List>::AsTuple, Carrier>;
 }

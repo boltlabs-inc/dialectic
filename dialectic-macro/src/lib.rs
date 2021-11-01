@@ -86,12 +86,12 @@ and the [`offer!`] macro.
 #
 type_eq!(
     Session! { offer { 0 => {}, 1 => {} } },
-    Offer<Choice<2>, (Done, Done)>
+    Offer<(Done, Done), Choice<2>>
 );
 
 type_eq!(
     Session! { choose { 0 => {}, 1 => {} } },
-    Choose<Choice<2>, (Done, Done)>
+    Choose<(Done, Done), Choice<2>>
 );
 ```
 
@@ -172,7 +172,7 @@ type R = Session! {
     }
 };
 
-type_eq!(R, Loop<Choose<Choice<2>, (Send<i64, Call<Continue<0>, Recv<i64, Continue<0>>>>, Done)>>);
+type_eq!(R, Loop<Choose<(Send<i64, Call<Continue<0>, Recv<i64, Continue<0>>>>, Done), Choice<2>>>);
 ```
 
 ## The `split` keyword
@@ -221,7 +221,7 @@ type Protocol = Session! {
 
 type_eq!(
     Protocol,
-    Loop<Choose<Choice<2>, (Send<i64, Recv<bool, Send<i64, Recv<bool, Continue<0>>>>>, Done)>>,
+    Loop<Choose<(Send<i64, Recv<bool, Send<i64, Recv<bool, Continue<0>>>>>, Done), Choice<2>>>,
 );
 ```
 

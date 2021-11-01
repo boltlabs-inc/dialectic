@@ -23,7 +23,6 @@ type BigChoose = Session! {
 assert_type_eq_all!(
     BigChoose,
     Choose<
-        Choice<5>,
         (
             Send<(), Done>,
             Send<(), Done>,
@@ -31,5 +30,6 @@ assert_type_eq_all!(
             Call<Foo, Done>,
             Split<Send<String, Done>, Recv<String, Done>, Done>
         ),
+        Choice<5>,
     >
 );

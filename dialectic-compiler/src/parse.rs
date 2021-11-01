@@ -257,7 +257,7 @@ impl Parse for Spanned<Syntax> {
             }
 
             Ok(Spanned {
-                inner: Syntax::Choose(carrier_type, arm_asts),
+                inner: Syntax::Choose(arm_asts, carrier_type),
                 span: choose_span,
             })
         } else if lookahead.peek(kw::offer) {
@@ -294,7 +294,7 @@ impl Parse for Spanned<Syntax> {
             }
 
             Ok(Spanned {
-                inner: Syntax::Offer(carrier_type, arm_asts),
+                inner: Syntax::Offer(arm_asts, carrier_type),
                 span: offer_span,
             })
         } else if lookahead.peek(kw::split) {

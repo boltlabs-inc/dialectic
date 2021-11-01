@@ -42,9 +42,9 @@ pub enum Syntax {
     /// Syntax: `call T` or `call { ... }`.
     Call(Box<Spanned<Syntax>>),
     /// Syntax: `choose { 0 => ..., ... }`.
-    Choose(Option<Type>, Vec<Spanned<Syntax>>),
+    Choose(Vec<Spanned<Syntax>>, Option<Type>),
     /// Syntax: `offer { 0 => ..., ... }`.
-    Offer(Option<Type>, Vec<Spanned<Syntax>>),
+    Offer(Vec<Spanned<Syntax>>, Option<Type>),
     /// Syntax: `split { -> ..., <- ... }`.
     Split {
         /// The transmit-only half.
@@ -172,19 +172,19 @@ fn to_cfg<'a>(
             let rx_only = to_cfg(rx_only, cfg, env).0;
             Ir::Split { tx_only, rx_only }
         }
-        Choose(carrier_type, choices) => {
+        Choose(choices, carrier_type) => {
             let choice_nodes = choices
                 .iter()
                 .map(|choice| to_cfg(choice, cfg, env).0)
                 .collect();
-            Ir::Choose(carrier_type.clone(), choice_nodes)
+            Ir::Choose(choice_nodes, carrier_type.clone())
         }
-        Offer(carrier_type, choices) => {
+        Offer(choices, carrier_type) => {
             let choice_nodes = choices
                 .iter()
                 .map(|choice| to_cfg(choice, cfg, env).0)
                 .collect();
-            Ir::Offer(carrier_type.clone(), choice_nodes)
+            Ir::Offer(choice_nodes, carrier_type.clone())
         }
         Continue(label) => {
             return convert_jump_to_cfg(label, CompileError::ContinueOutsideLoop, Ir::Continue)
@@ -306,11 +306,11 @@ impl Spanned<Syntax> {
                 let rx = rx_only.to_token_stream_with(add_optional);
                 quote_spanned! {sp=> split { -> #tx, <- #rx, } }
             }
-            Choose(carrier_type, choices) => {
+            Choose(choices, carrier_type) => {
                 let arms = choice_arms_to_tokens(&mut add_optional, choices);
                 quote_spanned! {sp=> choose #carrier_type { #arms } }
             }
-            Offer(carrier_type, choices) => {
+            Offer(choices, carrier_type) => {
                 let arms = choice_arms_to_tokens(&mut add_optional, choices);
                 quote_spanned! {sp=> offer #carrier_type { #arms } }
             }
@@ -439,12 +439,12 @@ mod tests {
                     other => unreachable!("{}", other),
                 },
                 "choose" => Choose(
-                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
                     Arbitrary::arbitrary(g),
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
                 ),
                 "offer" => Offer(
-                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
                     Arbitrary::arbitrary(g),
+                    Some(parse_quote!(())).filter(|_| Arbitrary::arbitrary(g)),
                 ),
                 "split" => Split {
                     tx_only: Arbitrary::arbitrary(g),
@@ -481,8 +481,8 @@ mod tests {
                         })
                     })
                     .collect(),
-                Choose(_, choices) => choices.shrink().map(|cs| Choose(None, cs)).collect(),
-                Offer(_, choices) => choices.shrink().map(|cs| Offer(None, cs)).collect(),
+                Choose(choices, _) => choices.shrink().map(|cs| Choose(cs, None)).collect(),
+                Offer(choices, _) => choices.shrink().map(|cs| Offer(cs, None)).collect(),
                 Loop(label, body) => body
                     .shrink()
                     .map(|body_shrunk| Loop(label.clone(), body_shrunk))

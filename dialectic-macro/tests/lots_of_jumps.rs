@@ -30,7 +30,6 @@ assert_type_eq_all!(
                 Recv<
                     bool,
                     Offer<
-                        Choice<5>,
                         (
                             Done,
                             Continue<1>,
@@ -38,6 +37,7 @@ assert_type_eq_all!(
                             Continue<0>,
                             Send<String, Send<bool, Continue<0>>>
                         ),
+                        Choice<5>,
                     >,
                 >,
             >,

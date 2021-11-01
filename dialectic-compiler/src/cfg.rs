@@ -50,10 +50,10 @@ pub enum Ir {
     ///
     /// The `Choose` may also have an optional "carrier" type. If none, this is defaulted to be a
     /// `Choice<N>` corresponding to the `N` number of branches of the `Choose`.
-    Choose(Option<Type>, Vec<Option<Index>>),
+    Choose(Vec<Option<Index>>, Option<Type>),
     /// Like `Choose`, `Offer` nodes have a list of choices and an optional carrier type, and after
     /// scope resolution have no continuation.
-    Offer(Option<Type>, Vec<Option<Index>>),
+    Offer(Vec<Option<Index>>, Option<Type>),
     /// `Split` nodes have a transmit-only half and a receive-only half. The nodes' semantics are
     /// similar to `Call`.
     Split {
@@ -239,7 +239,7 @@ impl Cfg {
                     follow(None, *tx_only);
                     follow(None, *rx_only);
                 }
-                Ir::Choose(_, choices) | Ir::Offer(_, choices) => {
+                Ir::Choose(choices, _) | Ir::Offer(choices, _) => {
                     // Inline the current implicit continuation into the next pointer of the node,
                     // if it is `Some`
                     follow(implicit_cont, *next);
@@ -324,7 +324,7 @@ impl Cfg {
                         stack.extend(node.next);
                     }
                 }
-                Ir::Choose(_, choices) | Ir::Offer(_, choices) => {
+                Ir::Choose(choices, _) | Ir::Offer(choices, _) => {
                     stack.extend(choices.iter().filter_map(Option::as_ref));
 
                     assert!(node.next.is_none(), "at this point in the compiler, all continuations of \
@@ -482,23 +482,23 @@ impl Cfg {
                         cont: Rc::new(cont),
                     }
                 }
-                Ir::Choose(carrier_type, choices) => {
+                Ir::Choose(choices, carrier_type) => {
                     let targets = choices
                         .iter()
                         .map(|&choice| generate_inner(cfg, errors, loop_env, choice))
                         .collect();
                     debug_assert!(node.next.is_none(), "non-`Done` continuation for `Choose`");
 
-                    Target::Choose(carrier_type.clone(), targets)
+                    Target::Choose(targets, carrier_type.clone())
                 }
-                Ir::Offer(carrier_type, choices) => {
+                Ir::Offer(choices, carrier_type) => {
                     let targets = choices
                         .iter()
                         .map(|&choice| generate_inner(cfg, errors, loop_env, choice))
                         .collect();
                     debug_assert!(node.next.is_none(), "non-`Done` continuation for `Offer`");
 
-                    Target::Offer(carrier_type.clone(), targets)
+                    Target::Offer(targets, carrier_type.clone())
                 }
                 Ir::Loop(body) => {
                     loop_env.push(node_index);
