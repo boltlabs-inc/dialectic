@@ -4,15 +4,15 @@ use futures::Future;
 use pin_project::pin_project;
 use std::{
     any::TypeId,
-    convert::{TryFrom, TryInto},
     marker::{self, PhantomData},
     mem,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
 };
+use vesta::{Case, Exhaustive, Match};
 
-use crate::tuple::{HasLength, List, Tuple};
+use crate::tuple::{HasLength, Tuple};
 use crate::Unavailable;
 use crate::{backend::*, IncompleteHalf, SessionIncomplete};
 use crate::{prelude::*, types::*, unary::*};
@@ -291,18 +291,17 @@ where
     }
 }
 
-impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, Carrier> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Choose<Choices>>,
+    S: Session<Action = Choose<Choices, Carrier>>,
     Choices: Tuple,
     Choices::AsList: HasLength,
-    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Tx: Transmitter + marker::Send + 'static,
     Rx: marker::Send + 'static,
 {
     /// Actively choose to enter the `N`th protocol offered via [`offer!`](crate::offer) by the
-    /// other end of the connection, alerting the other party to this choice by sending the number
-    /// `N` over the channel.
+    /// other end of the connection, alerting the other party to this choice by sending
+    /// corresponding `N`th case of the "carrier type" ([`Choice`] by default) over the channel.
     ///
     /// The choice `N` is specified as a `const` generic `usize`.
     ///
@@ -338,7 +337,7 @@ where
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<0>().await?.send(42).await?;
+    /// c1.choose::<0>(()).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -358,7 +357,7 @@ where
     /// let (c1, c2) = OnlyTwoChoices::channel(|| mpsc::channel(1));
     ///
     /// // Try to choose something out of range (this doesn't typecheck)
-    /// c1.choose::<2>().await?;
+    /// c1.choose::<2>(()).await?;
     ///
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
@@ -367,38 +366,77 @@ where
     /// ```
     pub async fn choose<const N: usize>(
         mut self,
+        choice: <Carrier as Case<N>>::Case,
     ) -> Result<
         Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
         Tx::Error,
     >
     where
+        Carrier: Case<N>,
         Number<N>: ToUnary,
         Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
         <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+        Tx: TransmitCase<Carrier, Val, N>,
     {
-        let choice: Choice<LENGTH> = u8::try_from(N)
-            .expect("choices must fit into a byte")
-            .try_into()
-            .expect("type system prevents out of range choice in `choose`");
-        self.tx.as_mut().unwrap().send_choice(choice).await?;
+        self.tx.as_mut().unwrap().send_case(choice).await?;
         Ok(self.unchecked_cast())
     }
+
+    // /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by reference.
+    // /// Useful for custom carrier types.
+    // pub async fn choose_ref<const N: usize>(
+    //     mut self,
+    //     choice: &<Carrier as Case<N>>::Case,
+    // ) -> Result<
+    //     Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+    //     Tx::Error,
+    // >
+    // where
+    //     Carrier: Case<N>,
+    //     Number<N>: ToUnary,
+    //     Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+    //     <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+    //     Tx: TransmitCase<Carrier, Ref>,
+    // {
+    //     self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
+    //     Ok(self.unchecked_cast())
+    // }
+
+    // /// Identical to [`Chan::choose`], but allows you to send the carrier's case value by mutable
+    // /// reference. Useful for custom carrier types.
+    // pub async fn choose_mut<const N: usize>(
+    //     mut self,
+    //     choice: &mut <Carrier as Case<N>>::Case,
+    // ) -> Result<
+    //     Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+    //     Tx::Error,
+    // >
+    // where
+    //     Carrier: Case<N>,
+    //     Number<N>: ToUnary,
+    //     Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
+    //     <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+    //     Tx: TransmitCase<Carrier, Mut>,
+    // {
+    //     self.tx.as_mut().unwrap().send_case::<N>(choice).await?;
+    //     Ok(self.unchecked_cast())
+    // }
 }
 
-impl<Tx, Rx, S, Choices, const LENGTH: usize> Chan<S, Tx, Rx>
+impl<Tx, Rx, S, Choices, Carrier> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Offer<Choices>>,
+    S: Session<Action = Offer<Choices, Carrier>>,
     Choices: Tuple + 'static,
     Choices::AsList: HasLength + EachScoped + EachHasDual,
-    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,
     Tx: marker::Send + 'static,
-    Rx: Receiver + marker::Send + 'static,
+    Rx: Receiver + ReceiveCase<Carrier> + marker::Send + 'static,
+    Carrier: Match,
 {
     /// Offer the choice of one or more protocols to the other party, and wait for them to indicate
     /// which protocol they'd like to proceed with. Returns a [`Branches`] structure representing
-    /// all the possible channel types which could be returned, which must be eliminated using
-    /// [`case`](Branches::case).
+    /// all the possible channel types which could be returned, which must be eliminated through the
+    /// [`Match`] and [`Case<N>`] traits.
     ///
     ///💡 **Where possible, prefer the [`offer!`](crate::offer) macro**. This has the benefit of
     /// ensuring at compile time that no case is left unhandled; it's also more succinct.
@@ -413,6 +451,7 @@ where
     /// ```
     /// use dialectic::prelude::*;
     /// use dialectic_tokio_mpsc as mpsc;
+    /// use vesta::{Match, CaseExt, case};
     ///
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -427,18 +466,20 @@ where
     ///
     /// // Spawn a thread to offer a choice
     /// let t1 = tokio::spawn(async move {
-    ///     match c2.offer().await?.case::<0>() {
-    ///         Ok(c2) => { c2.recv().await?; },
-    ///         Err(rest) => match rest.case::<0>() {
-    ///             Ok(c2) => { c2.send("Hello!".to_string()).await?; },
-    ///             Err(rest) => rest.empty_case(),
+    ///     let branches = c2.offer().await?;
+    ///     case!(branches {
+    ///         0(c2, ()) => {
+    ///             c2.recv().await?;
     ///         }
-    ///     }
+    ///         1(c2, ()) => {
+    ///             c2.send("Hello!".to_string()).await?;
+    ///         }
+    ///     });
     ///     Ok::<_, mpsc::Error>(())
     /// });
     ///
     /// // Choose to send an integer
-    /// c1.choose::<0>().await?.send(42).await?;
+    /// c1.choose::<0>(()).await?.send(42).await?;
     ///
     /// // Wait for the offering thread to finish
     /// t1.await??;
@@ -474,16 +515,16 @@ where
     /// # });
     /// #
     /// # // Choose to send an integer
-    /// # c1.choose::<0>().await?.send(42).await?;
+    /// # c1.choose::<0>(()).await?.send(42).await?;
     /// #
     /// # // Wait for the offering thread to finish
     /// # t1.await??;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn offer(self) -> Result<Branches<Choices, Tx, Rx>, Rx::Error> {
+    pub async fn offer(self) -> Result<Branches<Choices, Carrier, Tx, Rx>, Rx::Error> {
         let (tx, mut rx, drop_tx, drop_rx) = self.unwrap_contents();
-        let variant = rx.as_mut().unwrap().recv_choice::<LENGTH>().await?.into();
+        let variant = rx.as_mut().unwrap().recv_case().await?.into();
         Ok(Branches {
             variant,
             tx,
@@ -886,14 +927,14 @@ where
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[must_use]
-pub struct Branches<Choices, Tx, Rx>
+pub struct Branches<Choices, Carrier, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
 {
-    variant: u8,
+    variant: Option<Carrier>,
     tx: Option<Tx>,
     rx: Option<Rx>,
     drop_tx: Arc<Mutex<Result<Tx, IncompleteHalf<Tx>>>>,
@@ -901,7 +942,7 @@ where
     protocols: PhantomData<fn() -> Choices>,
 }
 
-impl<Tx, Rx, Choices> Drop for Branches<Choices, Tx, Rx>
+impl<Tx, Rx, Choices, Carrier> Drop for Branches<Choices, Carrier, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
@@ -918,74 +959,72 @@ where
     }
 }
 
-impl<Tx, Rx, Choices, const LENGTH: usize> Branches<Choices, Tx, Rx>
+unsafe impl<Tx, Rx, Choices, Carrier, const LENGTH: usize> Match
+    for Branches<Choices, Carrier, Tx, Rx>
 where
     Choices: Tuple + 'static,
     Choices::AsList: EachScoped + EachHasDual + HasLength,
     <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,
+    Carrier: Match<Range = Exhaustive<LENGTH>>,
 {
-    /// Check if the selected protocol in this [`Branches`] was the `N`th protocol in its type. If
-    /// so, return the corresponding channel; otherwise, return all the other possibilities.
-    pub fn case<const N: usize>(
-        mut self,
-    ) -> Result<
-        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
-        Branches<<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Remainder as List>::AsTuple, Tx, Rx>,
-    >
-    where
-        Number<N>: ToUnary,
-        Choices::AsList: Select<<Number<N> as ToUnary>::AsUnary>,
-        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
-        <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Remainder: EachScoped + EachHasDual + HasLength + List,
-    {
-        let variant = self.variant;
-        let tx = self.tx.take();
-        let rx = self.rx.take();
-        let drop_tx = self.drop_tx.clone();
-        let drop_rx = self.drop_rx.clone();
-        let branch: u8 = N
-            .try_into()
-            .expect("branch discriminant exceeded u8::MAX in `case`");
-        if variant == branch {
-            Ok(Chan {
-                tx,
-                rx,
-                drop_tx,
-                drop_rx,
-                session: PhantomData,
-            })
-        } else {
-            Err(Branches {
-                // Subtract 1 from variant if we've eliminated a branch with a lower discriminant
-                variant: if variant > branch {
-                    variant - 1
-                } else {
-                    variant
-                },
-                tx,
-                rx,
-                drop_tx,
-                drop_rx,
-                protocols: PhantomData,
-            })
-        }
-    }
+    type Range = Exhaustive<LENGTH>;
 
-    /// Determine the [`Choice`] which was made by the other party, indicating which of these
-    /// [`Branches`] should be taken.
-    ///
-    /// Ordinarily, you should prefer the [`offer!`](crate::offer) macro in situations where you
-    /// need to know this value.
-    pub fn choice(&self) -> Choice<LENGTH> {
-        self.variant
-            .try_into()
-            .expect("internal variant for `Branches` exceeds number of choices")
+    fn tag(&self) -> Option<usize> {
+        self.variant.as_ref().unwrap().tag()
     }
 }
 
-impl<'a, Tx, Rx> Branches<(), Tx, Rx>
+impl<Tx, Rx, Choices, Carrier, const N: usize, const LENGTH: usize> Case<N>
+    for Branches<Choices, Carrier, Tx, Rx>
+where
+    Number<N>: ToUnary,
+    Choices: Tuple + 'static,
+    Choices::AsList: EachScoped + EachHasDual + HasLength + Select<<Number<N> as ToUnary>::AsUnary>,
+    <Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected: Session,
+    <Choices::AsList as HasLength>::Length: ToConstant<AsConstant = Number<LENGTH>>,
+    Tx: marker::Send + 'static,
+    Rx: marker::Send + 'static,
+    Carrier: Match<Range = Exhaustive<LENGTH>> + Case<N>,
+{
+    type Case = (
+        Chan<<Choices::AsList as Select<<Number<N> as ToUnary>::AsUnary>>::Selected, Tx, Rx>,
+        Carrier::Case,
+    );
+
+    unsafe fn case(mut this: Self) -> Self::Case {
+        // FIXME(sleffy): unwrap necessary?
+        let carrier_case = Case::<N>::case(this.variant.take().unwrap());
+        let tx = this.tx.take();
+        let rx = this.rx.take();
+        let drop_tx = this.drop_tx.clone();
+        let drop_rx = this.drop_rx.clone();
+        let chan = Chan {
+            tx,
+            rx,
+            drop_tx,
+            drop_rx,
+            session: PhantomData,
+        };
+
+        (chan, carrier_case)
+    }
+
+    fn uncase((chan, carrier_case): Self::Case) -> Self {
+        let (tx, rx, drop_tx, drop_rx) = chan.unwrap_contents();
+        Branches {
+            variant: Some(Carrier::uncase(carrier_case)),
+            tx,
+            rx,
+            drop_tx,
+            drop_rx,
+            protocols: PhantomData,
+        }
+    }
+}
+
+impl<'a, Tx, Rx, Carrier> Branches<(), Carrier, Tx, Rx>
 where
     Tx: marker::Send + 'static,
     Rx: marker::Send + 'static,

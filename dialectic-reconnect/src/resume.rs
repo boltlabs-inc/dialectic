@@ -441,7 +441,15 @@ where
     Tx::Error: Send + Sync,
 {
     type Error = ResumeError<Tx::Error>;
+}
 
+#[Transmitter(Tx for match)]
+#[Receiver(Rx)]
+impl<Key, Tx, Rx> TransmitChoice for Sender<Key, Tx, Rx>
+where
+    Key: Sync + Send + Eq + Hash,
+    Tx::Error: Send + Sync,
+{
     fn send_choice<'async_lifetime, const LENGTH: usize>(
         &'async_lifetime mut self,
         choice: Choice<LENGTH>,
@@ -501,13 +509,6 @@ where
     Rx::Error: Send + Sync,
 {
     type Error = ResumeError<Rx::Error>;
-
-    fn recv_choice<'async_lifetime, const LENGTH: usize>(
-        &'async_lifetime mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
-    {
-        Box::pin(async move { retry_loop!(self.recv_choice::<LENGTH>()) })
-    }
 }
 
 #[Transmitter(Tx)]
@@ -522,5 +523,20 @@ where
         &'async_lifetime mut self,
     ) -> Pin<Box<dyn Future<Output = Result<T, Self::Error>> + Send + 'async_lifetime>> {
         Box::pin(async move { retry_loop!(self.recv()) })
+    }
+}
+
+#[Transmitter(Tx)]
+#[Receiver(Rx for match)]
+impl<Key, Tx, Rx> ReceiveChoice for Receiver<Key, Tx, Rx>
+where
+    Key: Send + Sync + Eq + Hash,
+    Rx::Error: Send + Sync,
+{
+    fn recv_choice<'async_lifetime, const LENGTH: usize>(
+        &'async_lifetime mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Choice<LENGTH>, Self::Error>> + Send + 'async_lifetime>>
+    {
+        Box::pin(async move { retry_loop!(self.recv_choice::<LENGTH>()) })
     }
 }

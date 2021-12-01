@@ -50,9 +50,10 @@ pub use split::*;
 /// ```
 /// # use static_assertions::assert_type_eq_all;
 /// use dialectic::types::*;
+/// use dialectic::backend::Choice;
 ///
-/// type Client = Loop<Offer<(Split<Call<Send<String, Done>, Done>, Recv<usize, Done>, Done>, Recv<bool, Continue<0>>)>>;
-/// type Server = Loop<Choose<(Split<Send<usize, Done>, Call<Recv<String, Done>, Done>, Done>, Send<bool, Continue<0>>)>>;
+/// type Client = Loop<Offer<(Split<Call<Send<String, Done>, Done>, Recv<usize, Done>, Done>, Recv<bool, Continue<0>>), Choice<3>>>;
+/// type Server = Loop<Choose<(Split<Send<usize, Done>, Call<Recv<String, Done>, Done>, Done>, Send<bool, Continue<0>>), Choice<3>>>;
 ///
 /// assert_type_eq_all!(Client, <Server as HasDual>::DualSession);
 /// ```
@@ -315,15 +316,21 @@ mod tests {
     fn complex_session_zero_size() {
         type P = Loop<
             Loop<
-                Choose<(
-                    Send<usize, Continue<0>>,
-                    Recv<String, Continue<0>>,
-                    Offer<(
-                        Send<bool, Continue<0>>,
-                        Continue<1>,
-                        Split<Send<isize, Continue<0>>, Recv<isize, Continue<0>>, Done>,
-                    )>,
-                )>,
+                Choose<
+                    (
+                        Send<usize, Continue<0>>,
+                        Recv<String, Continue<0>>,
+                        Offer<
+                            (
+                                Send<bool, Continue<0>>,
+                                Continue<1>,
+                                Split<Send<isize, Continue<0>>, Recv<isize, Continue<0>>, Done>,
+                            ),
+                            Choice<3>,
+                        >,
+                    ),
+                    Choice<3>,
+                >,
             >,
         >;
         assert_eq!(std::mem::size_of::<P>(), 0);

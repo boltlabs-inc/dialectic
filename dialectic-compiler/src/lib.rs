@@ -393,7 +393,7 @@ mod tests {
         let continue1 = cfg.singleton(Ir::Continue(client));
         cfg[recv].next = Some(continue1);
         let choose_opts = vec![Some(send), Some(recv)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(choose_opts, None));
 
         cfg[client_tally].expr = Ir::Loop(Some(choose));
 
@@ -401,12 +401,12 @@ mod tests {
         let send = cfg.send("Operation");
         cfg[send].next = Some(client_tally);
         let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(choose_opts, None));
 
         cfg[client].expr = Ir::Loop(Some(choose));
 
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
-        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue<0>>, Recv<i64, Continue<1>>)>>>)>>");
+        assert_eq!(s, "Loop<Choose<(Done, Send<Operation, Loop<Choose<(Send<i64, Continue<0>>, Recv<i64, Continue<1>>), Choice<2>>>>), Choice<2>>>");
     }
 
     #[test]
@@ -421,14 +421,14 @@ mod tests {
         let continue0 = cfg.singleton(Ir::Continue(client));
         cfg[call].next = Some(continue0);
         let choose_opts = vec![Some(break0), Some(send)];
-        let choose = cfg.singleton(Ir::Choose(choose_opts));
+        let choose = cfg.singleton(Ir::Choose(choose_opts, None));
 
         cfg[client].expr = Ir::Loop(Some(choose));
 
         let s = format!("{}", cfg.generate_target(Some(client)).unwrap());
         assert_eq!(
             s,
-            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
+            "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>), Choice<2>>>"
         );
     }
 }

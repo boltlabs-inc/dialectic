@@ -15,6 +15,7 @@ proc-macro = true
 
 [dependencies]
 dialectic-compiler = { version = "0.1", path = "../dialectic-compiler" }
+vesta-syntax = { version = "0.1" }
 syn = { version = "1.0", features = ["full", "parsing"] }
 proc-macro2 = "1.0"
 quote = "1.0"
@@ -24,6 +25,7 @@ dialectic = { version = "0.4", path = "../dialectic" }
 dialectic-tokio-mpsc = { version = "0.1", path = "../dialectic-tokio-mpsc" }
 static_assertions = "1.1"
 tokio = "1.2"
+vesta = "0.1"
 
 [package.metadata.docs.rs]
 all-features = true

@@ -338,7 +338,7 @@ let t1 = tokio::spawn(async move {
 
 // Make a choice
 let t2 = tokio::spawn(async move {
-    let c2 = c2.choose::<1>().await?;            // select to `Send<String, Done>`
+    let c2 = c2.choose::<1>(()).await?;       // select to `Send<String, Done>`
     c2.send("Hi there!".to_string()).await?;  // enact the selected choice
     Ok::<_, mpsc::Error>(())
 });
@@ -475,11 +475,11 @@ tokio::spawn(async move {
 
 // Send some numbers to be summed
 for n in 0..=10 {
-    c1 = c1.choose::<0>().await?.send(n).await?;
+    c1 = c1.choose::<0>(()).await?.send(n).await?;
 }
 
 // Get the sum
-let (sum, c1) = c1.choose::<1>().await?.recv().await?;
+let (sum, c1) = c1.choose::<1>(()).await?.recv().await?;
 c1.close();
 assert_eq!(sum, 55);
 # Ok(())
@@ -600,12 +600,12 @@ async fn query_all(
     let mut answers = Vec::with_capacity(questions.len());
     for question in questions.into_iter() {
         let (answer, c) =
-            chan.choose::<1>().await?
+            chan.choose::<1>(()).await?
                 .call(|c| query(question, c)).await?;  // Call `query` as a subroutine
         chan = c.unwrap();
         answers.push(answer);
     }
-    chan.choose::<0>().await?.close();
+    chan.choose::<0>(()).await?.close();
     Ok(answers)
 }
 ```
@@ -807,6 +807,80 @@ macros, see their documentation. Additionally, the code in the
 [examples](https://github.com/boltlabs-inc/dialectic/tree/main/dialectic/examples)
 is written to be backend-agnostic, and uses these attributes. They may prove an additional resource
 if you get stuck.
+
+# Custom choice "carrier" types
+
+Under the hood, Dialectic implements sending/receiving choices from the `offer` and `choose`
+constructs using a special type called `Choice<N>`. Usually, this entails sending/receiving a
+single byte; however, if you're implementing an existing protocol, you may want to branch on
+something else and sending/receiving a single byte may not make any sense at all. This is where the
+Vesta crate and its `Match` derive trait and macro come in; the [`offer!`] macro is implemented
+under the hood using Vesta's `case!` macro, and accepts the same syntax for pattern matching. *This
+is most useful when you're writing your own backend and need **message-for-message parity with
+an existing protocol.***
+
+As a *very* contrived example, we could rewrite the `QuerySum` example from the branching example
+using `Option` to carry our decisions:
+
+```
+use dialectic::prelude::*;
+use dialectic_tokio_mpsc as mpsc;
+
+type QuerySum = Session! {
+    loop {
+        choose Option<i64> {
+            0 => {         // None
+                recv i64;
+                break;
+            }
+            1 => continue, // Some(i64), i64 is implicitly sent (and received on the other side)
+        }
+    }
+};
+
+# #[tokio::main]
+# async fn main() -> Result<(), Box<dyn std::error::Error>> {
+#
+let (mut c1, mut c2) = QuerySum::channel(|| mpsc::channel(1));
+
+// Sum all the numbers sent over the channel
+tokio::spawn(async move {
+    let mut sum = 0i64;
+    let c2 = loop {
+        c2 = offer!(in c2 {
+            0 => break c2,
+            1(n) => {
+                sum += n;
+                c2
+            },
+        })?;
+    };
+    c2.send(sum).await?.close();
+    Ok::<_, mpsc::Error>(())
+});
+
+// Send some numbers to be summed
+for n in 0..=10 {
+    c1 = c1.choose::<1>(n).await?;
+}
+
+// Get the sum
+let (sum, c1) = c1.choose::<0>(()).await?.recv().await?;
+c1.close();
+assert_eq!(sum, 55);
+# Ok(())
+# }
+```
+
+In general, if you are not looking for message-for-message parity with an existing protocol, there
+is no reason to use custom carrier types. They give no other extra functionality over the default
+`Choice<N>`, which is more ergonomic in terms of writing bounds and also shows all of the sent data
+as part of the session type when written out; none of it is implicit, like the `i64` value which is
+implicitly sometimes sent by the `choose` in the above example. To show just how identical they
+are, you can actually write out `Session! { choose Choice<1> { 0 => {}, } }` and it will work fine.
+*But*, if you are writing a protocol implementation which is generic over its backend types, you
+would have to write `Choice<1>` as an explicit bound on the transmitter type, rather than using the
+universally quantified `match` keyword in the `Transmitter` macro.
 
 # Wrapping up
 

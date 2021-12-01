@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "use crate::types::{{Send, Recv, Choose, Offer, Call, Split, Loop, Continue, Done}};"
     )?;
     writeln!(f, "use crate::Session;")?;
+    writeln!(f, "use crate::backend::Choice;")?;
     writeln!(f, "use static_assertions::assert_impl_all;")?;
     writeln!(f)?;
 
@@ -90,7 +91,7 @@ impl Display for Session {
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+                write!(f, "), Choice<{}>>", count)?;
             }
             Offer(cs) => {
                 let count = cs.len();
@@ -104,7 +105,7 @@ impl Display for Session {
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+                write!(f, "), Choice<{}>>", count)?;
             }
             Continue(n) => {
                 write!(f, "Continue<{}>", n)?;

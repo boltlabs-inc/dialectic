@@ -173,7 +173,10 @@ pub(crate) mod dialectic {
 /// all the bits and pieces you need to start writing programs with Dialectic.
 pub mod prelude {
     #[doc(no_inline)]
-    pub use crate::backend::{Choice, Receive, Receiver, Transmit, Transmitter};
+    pub use crate::backend::{
+        Choice, Receive, ReceiveCase, ReceiveChoice, Receiver, Transmit, TransmitCase,
+        TransmitChoice, Transmitter,
+    };
     #[doc(no_inline)]
     pub use crate::session::Session;
     #[doc(no_inline)]
@@ -182,4 +185,6 @@ pub mod prelude {
     pub use call_by::{Mut, Ref, Val};
     #[doc(no_inline)]
     pub use dialectic_macro::{offer, Receiver, Session, Transmitter};
+    #[doc(no_inline)]
+    pub use vesta::Match;
 }

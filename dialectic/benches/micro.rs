@@ -41,7 +41,7 @@ where
     chan.recv().await.unwrap().1
 }
 
-#[Transmitter(Tx)]
+#[Transmitter(Tx for match)]
 async fn choose<Tx, Rx>(
     chan: Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { choose { 0 => {} } } }, Tx, Rx>
@@ -49,10 +49,10 @@ where
     Rx: Send,
     Tx::Error: Debug,
 {
-    chan.choose::<0>().await.unwrap()
+    chan.choose::<0>(()).await.unwrap()
 }
 
-#[Receiver(Rx)]
+#[Receiver(Rx for match)]
 async fn offer<Tx, Rx>(
     chan: Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>,
 ) -> Chan<Session! { loop { offer { 0 => {} } } }, Tx, Rx>
@@ -143,8 +143,8 @@ fn bench_chan_loop_group<S, Tx, Rx, Fut, H, A>(
     });
 }
 
-#[Transmitter(Tx for ())]
-#[Receiver(Rx for ())]
+#[Transmitter(Tx for match, ())]
+#[Receiver(Rx for match, ())]
 fn bench_all_on<Tx, Rx, H, A>(
     c: &mut Criterion,
     rt_name: &str,
