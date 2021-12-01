@@ -293,7 +293,7 @@ where
 
 impl<Tx, Rx, S, Choices, Carrier> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Choose<Carrier, Choices>>,
+    S: Session<Action = Choose<Choices, Carrier>>,
     Choices: Tuple,
     Choices::AsList: HasLength,
     Tx: Transmitter + marker::Send + 'static,
@@ -425,7 +425,7 @@ where
 
 impl<Tx, Rx, S, Choices, Carrier> Chan<S, Tx, Rx>
 where
-    S: Session<Action = Offer<Carrier, Choices>>,
+    S: Session<Action = Offer<Choices, Carrier>>,
     Choices: Tuple + 'static,
     Choices::AsList: HasLength + EachScoped + EachHasDual,
     Z: LessThan<<Choices::AsList as HasLength>::Length>,

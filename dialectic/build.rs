@@ -81,7 +81,7 @@ impl Display for Session {
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Choose(cs) => {
                 let count = cs.len();
-                write!(f, "Choose<Choice<{}>, (", count)?;
+                write!(f, "Choose<(")?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {
@@ -91,11 +91,11 @@ impl Display for Session {
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+                write!(f, "), Choice<{}>>", count)?;
             }
             Offer(cs) => {
                 let count = cs.len();
-                write!(f, "Offer<Choice<{}>, (", count)?;
+                write!(f, "Offer<(")?;
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
                     if i + 1 < count {
@@ -105,7 +105,7 @@ impl Display for Session {
                 if count == 1 {
                     write!(f, ",")?;
                 }
-                write!(f, ")>")?;
+                write!(f, "), Choice<{}>>", count)?;
             }
             Continue(n) => {
                 write!(f, "Continue<{}>", n)?;

@@ -10,7 +10,6 @@ fn tally_client_expr_call_ast() {
         None,
         Box::new(
             Syntax::Choose(
-                None,
                 vec![
                     Syntax::Break(None).into(),
                     Syntax::Block(vec![
@@ -19,6 +18,7 @@ fn tally_client_expr_call_ast() {
                     ])
                     .into(),
                 ],
+                None,
             )
             .into(),
         ),
@@ -28,7 +28,7 @@ fn tally_client_expr_call_ast() {
     let s = format!("{}", syntax::compile(&client_ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<Choice<2>, (Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>), Choice<2>>>"
     );
 }
 
@@ -48,7 +48,7 @@ fn tally_client_expr_call_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<Choice<2>, (Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>), Choice<2>>>"
     );
 }
 
@@ -68,7 +68,7 @@ fn tally_client_invocation_call_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<Choice<2>, (Done, Send<Operation, Call<ClientTally, Continue<0>>>)>>"
+        "Loop<Choose<(Done, Send<Operation, Call<ClientTally, Continue<0>>>), Choice<2>>>"
     );
 }
 
@@ -88,7 +88,7 @@ fn tally_client_invocation_direct_subst_parse_string() {
     let s = format!("{}", syntax::compile(&ast).unwrap());
     assert_eq!(
         s,
-        "Loop<Choose<Choice<2>, (Done, Send<Operation, <ClientTally as Then<Continue<0>>>::Combined>)>>"
+        "Loop<Choose<(Done, Send<Operation, <ClientTally as Then<Continue<0>>>::Combined>), Choice<2>>>"
     );
 }
 
@@ -123,18 +123,18 @@ fn tally_client_direct_subst_nested_loop_break() {
 
     let rhs: Type = syn::parse_str(
         "::dialectic::types::Loop<
-                ::dialectic::types::Choose<::dialectic::backend::Choice<2usize>, (
+                ::dialectic::types::Choose<(
                     ::dialectic::types::Done,
                     ::dialectic::types::Send<
                         Operation,
                         ::dialectic::types::Loop<
-                            ::dialectic::types::Choose<::dialectic::backend::Choice<2usize>, (
+                            ::dialectic::types::Choose<(
                                 ::dialectic::types::Send<i64, ::dialectic::types::Continue<0usize>>,
                                 ::dialectic::types::Recv<i64, ::dialectic::types::Continue<1usize>>,
-                            )>
+                            ), ::dialectic::backend::Choice<2usize>>
                         >
                     >,
-                )>
+                ), ::dialectic::backend::Choice<2usize>>
             >",
     )
     .unwrap();

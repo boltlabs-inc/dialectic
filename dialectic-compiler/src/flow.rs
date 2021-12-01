@@ -287,7 +287,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
             // passability of an `Offer` or `Choose` typically does not matter because as control
             // flow analysis must be run after scope resolution, they should not have an implicit
             // continuation.
-            Ir::Offer(_, choices) | Ir::Choose(_, choices) => Dnf(choices
+            Ir::Offer(choices, _) | Ir::Choose(choices, _) => Dnf(choices
                 .iter()
                 .filter_map(Option::as_ref)
                 .map(|&c| vec![Constraint::Passable(c)])
@@ -325,7 +325,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
                 Dnf::only_if(conj)
             }
             // `Choose`/`Offer` are haltable only if any of their choices are haltable.
-            Ir::Choose(_, choices) | Ir::Offer(_, choices) => Dnf(choices
+            Ir::Choose(choices, _) | Ir::Offer(choices, _) => Dnf(choices
                 .iter()
                 // If any of the choices are `Done`, we want to emit an empty `Vec` instead,
                 // denoting that this constraint is trivially satisfiable.
@@ -371,7 +371,7 @@ fn preconditions(cfg: &Cfg, constraint: Constraint) -> Dnf {
                 Dnf::only_if(conj)
             }
             // `Choose` and `Offer` break only if any arm breaks.
-            Ir::Choose(_, choices) | Ir::Offer(_, choices) => Dnf(choices
+            Ir::Choose(choices, _) | Ir::Offer(choices, _) => Dnf(choices
                 .iter()
                 .filter_map(Option::as_ref)
                 .chain(node.next.as_ref())

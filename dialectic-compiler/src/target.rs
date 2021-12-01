@@ -25,9 +25,9 @@ pub enum Target {
     /// Session type: `Send<T, P>`.
     Send(Type, Rc<Spanned<Target>>),
     /// Session type: `Choose<(P, ...), Carrier>`.
-    Choose(Option<Type>, Vec<Spanned<Target>>),
+    Choose(Vec<Spanned<Target>>, Option<Type>),
     /// Session type: `Offer<(P, ...), Carrier>`.
-    Offer(Option<Type>, Vec<Spanned<Target>>),
+    Offer(Vec<Spanned<Target>>, Option<Type>),
     /// Session type: `Loop<...>`.
     Loop(Rc<Spanned<Target>>),
     /// Session type: `Continue<N>`.
@@ -64,15 +64,10 @@ impl fmt::Display for Target {
             } => write!(f, "Split<{}, {}, {}>", s, p, q)?,
             Call(s, p) => write!(f, "Call<{}, {}>", s, p)?,
             Then(s, p) => write!(f, "<{} as Then<{}>>::Combined", s, p)?,
-            Choose(carrier_type, cs) => {
+            Choose(cs, carrier_type) => {
                 let count = cs.len();
 
-                match carrier_type {
-                    Some(carrier) => {
-                        write!(f, "Choose<CustomChoice<{}>, (", carrier.to_token_stream())?
-                    }
-                    None => write!(f, "Choose<Choice<{}>, (", count)?,
-                }
+                write!(f, "Choose<(")?;
 
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
@@ -85,17 +80,19 @@ impl fmt::Display for Target {
                     write!(f, ",")?;
                 }
 
-                write!(f, ")>")?;
+                write!(f, "), ")?;
+
+                match carrier_type {
+                    Some(carrier) => write!(f, "CustomChoice<{}>", carrier.to_token_stream())?,
+                    None => write!(f, "Choice<{}>", count)?,
+                }
+
+                write!(f, ">")?;
             }
-            Offer(carrier_type, cs) => {
+            Offer(cs, carrier_type) => {
                 let count = cs.len();
 
-                match carrier_type {
-                    Some(carrier) => {
-                        write!(f, "Offer<CustomChoice<{}>, (", carrier.to_token_stream())?
-                    }
-                    None => write!(f, "Offer<Choice<{}>, (", count)?,
-                }
+                write!(f, "Offer<(")?;
 
                 for (i, c) in cs.iter().enumerate() {
                     write!(f, "{}", c)?;
@@ -108,7 +105,14 @@ impl fmt::Display for Target {
                     write!(f, ",")?;
                 }
 
-                write!(f, ")>")?;
+                write!(f, "), ")?;
+
+                match carrier_type {
+                    Some(carrier) => write!(f, "CustomChoice<{}>", carrier.to_token_stream())?,
+                    None => write!(f, "Choice<{}>", count)?,
+                }
+
+                write!(f, ">")?;
             }
             Continue(n) => {
                 write!(f, "Continue<{}>", n)?;
@@ -172,7 +176,7 @@ impl Spanned<Target> {
                 quote_spanned!(span=> <#s as #dialectic_crate::types::Then<#p>>::Combined)
                     .to_tokens(tokens);
             }
-            Choose(carrier_type, cs) => {
+            Choose(cs, carrier_type) => {
                 let carrier: syn::Type = match carrier_type {
                     Some(ty) => parse_quote!(#dialectic_crate::backend::CustomChoice<#ty>),
                     None => {
@@ -183,10 +187,10 @@ impl Spanned<Target> {
                 let cs = cs
                     .iter()
                     .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
-                quote_spanned!(span=> #dialectic_crate::types::Choose<#carrier, (#(#cs,)*)>)
+                quote_spanned!(span=> #dialectic_crate::types::Choose<(#(#cs,)*), #carrier>)
                     .to_tokens(tokens)
             }
-            Offer(carrier_type, cs) => {
+            Offer(cs, carrier_type) => {
                 let carrier: syn::Type = match carrier_type {
                     Some(ty) => parse_quote!(#dialectic_crate::backend::CustomChoice<#ty>),
                     None => {
@@ -197,7 +201,7 @@ impl Spanned<Target> {
                 let cs = cs
                     .iter()
                     .map(|c| c.to_token_stream_with_crate_name(dialectic_crate));
-                quote_spanned!(span=> #dialectic_crate::types::Offer<#carrier, (#(#cs,)*)>)
+                quote_spanned!(span=> #dialectic_crate::types::Offer<(#(#cs,)*), #carrier>)
                     .to_tokens(tokens)
             }
             Continue(n) => {
