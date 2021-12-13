@@ -16,7 +16,7 @@ categories = ["asynchronous", "concurrency"]
 dialectic = { version = "0.4", path = "../dialectic" }
 call-by = "^0.2.3"
 tokio = { version = "^1.5", features = ["sync", "time"] }
-dashmap = "4"
+dashmap = "5"
 rand = "0.8"
 derivative = "2"
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
