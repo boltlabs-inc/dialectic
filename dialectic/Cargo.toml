@@ -32,7 +32,7 @@ serde = "1"
 futures = "0.3"
 colored = "2"
 structopt = "0.3"
-criterion = { version = "0.3", features = ["async_tokio"] }
+criterion = { version = "0.4", features = ["async_tokio"] }
 dialectic-null = { version = "0.1", path = "../dialectic-null" }
 dialectic-tokio-mpsc = { version = "0.1", path = "../dialectic-tokio-mpsc" }
 dialectic-tokio-serde = { version = "0.1", path = "../dialectic-tokio-serde" }
